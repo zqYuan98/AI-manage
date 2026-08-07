@@ -136,6 +136,90 @@ class TaskWorkflowServiceTest {
     }
 
     @Test
+    void sanitizesClientControlledEvidenceAuditFieldsOnSubmission() {
+        LabTask task = activeTask(LocalDate.of(2026, 8, 10));
+        TaskSubmitCommand command = completionCommand(LocalDate.of(2026, 8, 9));
+        LabTaskEvidence clientEvidence = command.getEvidenceList().get(0);
+        Date clientAuditTime = dateAtStartOfDay(LocalDate.of(2026, 8, 8));
+        clientEvidence.setAuditStatus(LabConstants.EVIDENCE_AUDIT_VERIFIED);
+        clientEvidence.setAuditorId(77L);
+        clientEvidence.setAuditTime(clientAuditTime);
+        clientEvidence.setAuditComment("client preapproval");
+
+        assertTrue(service.submitResult(task, command).isEmpty());
+
+        LabTaskEvidence attached = task.getEvidenceList().get(0);
+        assertEquals(LabConstants.EVIDENCE_AUDIT_PENDING, attached.getAuditStatus());
+        assertEquals(null, attached.getAuditorId());
+        assertEquals(null, attached.getAuditTime());
+        assertEquals(null, attached.getAuditComment());
+        assertEquals(LabConstants.EVIDENCE_AUDIT_VERIFIED, clientEvidence.getAuditStatus());
+        assertEquals(Long.valueOf(77L), clientEvidence.getAuditorId());
+        assertEquals(clientAuditTime, clientEvidence.getAuditTime());
+    }
+
+    @Test
+    void reviewPassVerifiesAttachedEvidenceUsingReviewerMetadata() {
+        LabTask task = pendingOnTimeTask();
+        TaskSubmitCommand review = reviewCommand(99L, false);
+        Date reviewTime = dateAtStartOfDay(LocalDate.of(2026, 8, 12));
+        review.setReviewTime(reviewTime);
+        review.setEvidenceAuditComment("evidence verified");
+
+        assertTrue(service.reviewPass(task, review).isEmpty());
+
+        LabTaskEvidence evidence = task.getEvidenceList().get(0);
+        assertEquals(LabConstants.WORKFLOW_CONFIRMED, task.getWorkflowStatus());
+        assertEquals(LabConstants.EVIDENCE_AUDIT_VERIFIED, evidence.getAuditStatus());
+        assertEquals(Long.valueOf(99L), evidence.getAuditorId());
+        assertEquals(reviewTime, evidence.getAuditTime());
+        assertEquals("evidence verified", evidence.getAuditComment());
+    }
+
+    @Test
+    void invalidEvidenceCannotYieldConfirmedTask() {
+        LabTask task = pendingOnTimeTask();
+        LabTaskEvidence invalid = new LabTaskEvidence();
+        invalid.setEvidenceTitle(" ");
+        invalid.setEvidenceUrl("https://example.invalid/evidence/invalid");
+        task.getEvidenceList().add(invalid);
+
+        assertEquals(Collections.singletonList("evidenceList"), fields(service.reviewPass(task, reviewCommand(99L, false))));
+        assertEquals(LabConstants.WORKFLOW_PENDING_REVIEW, task.getWorkflowStatus());
+    }
+
+    @Test
+    void revalidatesCoordinationWhenAnActiveTaskIsSubmitted() {
+        LabTask task = activeTask(LocalDate.of(2026, 8, 10));
+        task.setCoordinationRequired(LabConstants.YES);
+        task.setCoordinationOwnerId(null);
+        task.setCoordinationDesc(" ");
+
+        assertEquals(Arrays.asList("coordinationOwnerId", "coordinationDesc"), fields(service.submitResult(task, completionCommand(LocalDate.of(2026, 8, 9)))));
+        assertEquals(LabConstants.WORKFLOW_ACTIVE, task.getWorkflowStatus());
+    }
+
+    @Test
+    void attributesOnlyNonzeroPerformanceWeightForNonKeyMonthTasks() {
+        LabTask task = validDraft();
+        task.setTaskType(LabConstants.TASK_TYPE_DAILY);
+        task.setPerfWeight(new BigDecimal("1"));
+        task.setGoalWeight(BigDecimal.ZERO);
+
+        assertEquals(Collections.singletonList("perfWeight"), fields(service.activatePlan(task)));
+    }
+
+    @Test
+    void attributesOnlyNonzeroGoalWeightForNonKeyMonthTasks() {
+        LabTask task = validDraft();
+        task.setTaskType(LabConstants.TASK_TYPE_DAILY);
+        task.setPerfWeight(BigDecimal.ZERO);
+        task.setGoalWeight(new BigDecimal("1"));
+
+        assertEquals(Collections.singletonList("goalWeight"), fields(service.activatePlan(task)));
+    }
+
+    @Test
     void rejectsSelfReviewAndRequiresExplicitExceededConfirmation() {
         LabTask task = pendingExceededTask();
         TaskSubmitCommand selfReview = reviewCommand(task.getOwnerId(), false);
@@ -243,6 +327,7 @@ class TaskWorkflowServiceTest {
         TaskSubmitCommand command = new TaskSubmitCommand();
         command.setReviewerId(reviewerId);
         command.setReviewerComment("核验通过");
+        command.setReviewTime(dateAtStartOfDay(LocalDate.of(2026, 8, 12)));
         command.setExceededConfirmed(exceededConfirmed);
         return command;
     }

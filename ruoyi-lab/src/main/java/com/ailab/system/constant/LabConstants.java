@@ -13,6 +13,9 @@ public final class LabConstants {
     public static final String RESULT_DELAYED = "DELAYED";
     public static final String RESULT_UNDONE = "UNDONE";
 
+    public static final String EVIDENCE_AUDIT_PENDING = "PENDING";
+    public static final String EVIDENCE_AUDIT_VERIFIED = "VERIFIED";
+
     public static final String TASK_LEVEL_MONTH = "month";
     public static final String TASK_LEVEL_WEEK = "week";
     public static final String TASK_TYPE_KEY = "key";

@@ -16,12 +16,14 @@ public class TaskSubmitCommand {
     private Long actionUserId;
     private Long reviewerId;
     private String reviewerComment;
+    private Date reviewTime;
+    private String evidenceAuditComment;
     private boolean exceededConfirmed;
 
     public String getRequestedResultStatus() { return requestedResultStatus; }
     public void setRequestedResultStatus(String requestedResultStatus) { this.requestedResultStatus = requestedResultStatus; }
-    public Date getActualFinishTime() { return actualFinishTime; }
-    public void setActualFinishTime(Date actualFinishTime) { this.actualFinishTime = actualFinishTime; }
+    public Date getActualFinishTime() { return copyDate(actualFinishTime); }
+    public void setActualFinishTime(Date actualFinishTime) { this.actualFinishTime = copyDate(actualFinishTime); }
     public String getResultDesc() { return resultDesc; }
     public void setResultDesc(String resultDesc) { this.resultDesc = resultDesc; }
     public String getFailReason() { return failReason; }
@@ -36,6 +38,14 @@ public class TaskSubmitCommand {
     public void setReviewerId(Long reviewerId) { this.reviewerId = reviewerId; }
     public String getReviewerComment() { return reviewerComment; }
     public void setReviewerComment(String reviewerComment) { this.reviewerComment = reviewerComment; }
+    public Date getReviewTime() { return copyDate(reviewTime); }
+    public void setReviewTime(Date reviewTime) { this.reviewTime = copyDate(reviewTime); }
+    public String getEvidenceAuditComment() { return evidenceAuditComment; }
+    public void setEvidenceAuditComment(String evidenceAuditComment) { this.evidenceAuditComment = evidenceAuditComment; }
     public boolean isExceededConfirmed() { return exceededConfirmed; }
     public void setExceededConfirmed(boolean exceededConfirmed) { this.exceededConfirmed = exceededConfirmed; }
+
+    private Date copyDate(Date value) {
+        return value == null ? null : new Date(value.getTime());
+    }
 }

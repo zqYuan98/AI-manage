@@ -56,6 +56,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         }
         List<FieldValidationError> errors = LabConstants.RESULT_UNDONE.equals(requested)
                 ? validateUndone(command) : validateCompletion(command);
+        validateCoordination(task, errors);
         if (!errors.isEmpty()) {
             return errors;
         }
@@ -91,6 +92,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         if (!errors.isEmpty()) {
             return errors;
         }
+        verifyEvidence(task.getEvidenceList(), command);
         task.setWorkflowStatus(LabConstants.WORKFLOW_CONFIRMED);
         return errors;
     }
@@ -142,14 +144,13 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         validatePeriod(task, errors);
         validateWeight(errors, "perfWeight", task.getPerfWeight());
         validateWeight(errors, "goalWeight", task.getGoalWeight());
-        if (isNonKeyMonth(task) && (isNonZero(task.getPerfWeight()) || isNonZero(task.getGoalWeight()))) {
+        if (isNonKeyMonth(task) && isNonZero(task.getPerfWeight())) {
             error(errors, "perfWeight", "仅月度重点任务可以设置权重");
+        }
+        if (isNonKeyMonth(task) && isNonZero(task.getGoalWeight())) {
             error(errors, "goalWeight", "仅月度重点任务可以设置权重");
         }
-        if (LabConstants.YES.equals(task.getCoordinationRequired())) {
-            if (task.getCoordinationOwnerId() == null) { error(errors, "coordinationOwnerId", "协同负责人不能为空"); }
-            required(errors, "coordinationDesc", task.getCoordinationDesc(), "协同说明不能为空");
-        }
+        validateCoordination(task, errors);
         return errors;
     }
 
@@ -189,7 +190,8 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         List<FieldValidationError> errors = new ArrayList<FieldValidationError>();
         if (command.getReviewerId() == null) { error(errors, "reviewerId", "审核人不能为空"); }
         required(errors, "reviewerComment", command.getReviewerComment(), "审核意见不能为空");
-        if (isCompletion(task.getResultStatus()) && !hasValidEvidence(task.getEvidenceList())) {
+        if (command.getReviewTime() == null) { error(errors, "reviewTime", "审核时间不能为空"); }
+        if (isCompletion(task.getResultStatus()) && !hasOnlyValidEvidence(task.getEvidenceList())) {
             error(errors, "evidenceList", "完成结果需要可核验的佐证材料");
         }
         if (LabConstants.RESULT_EXCEEDED.equals(task.getResultStatus()) && !command.isExceededConfirmed()) {
@@ -211,13 +213,46 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         return value.toInstant().atZone(ZoneOffset.UTC).toLocalDate();
     }
 
+    private Date copyDate(Date value) {
+        return value == null ? null : new Date(value.getTime());
+    }
+
     private void appendEvidence(LabTask task, List<LabTaskEvidence> evidenceList) {
         if (evidenceList == null || evidenceList.isEmpty()) {
             return;
         }
         List<LabTaskEvidence> evidence = new ArrayList<LabTaskEvidence>(task.getEvidenceList());
-        evidence.addAll(evidenceList);
+        for (LabTaskEvidence item : evidenceList) {
+            evidence.add(copyPendingEvidence(item));
+        }
         task.setEvidenceList(evidence);
+    }
+
+    private LabTaskEvidence copyPendingEvidence(LabTaskEvidence source) {
+        LabTaskEvidence copy = new LabTaskEvidence();
+        if (source == null) {
+            return copy;
+        }
+        copy.setId(source.getId());
+        copy.setTaskId(source.getTaskId());
+        copy.setEvidenceType(source.getEvidenceType());
+        copy.setEvidenceTitle(source.getEvidenceTitle());
+        copy.setEvidenceUrl(source.getEvidenceUrl());
+        copy.setEvidenceJson(source.getEvidenceJson());
+        copy.setSubmitterId(source.getSubmitterId());
+        copy.setSubmitTime(copyDate(source.getSubmitTime()));
+        copy.setDelFlag(source.getDelFlag());
+        copy.setAuditStatus(LabConstants.EVIDENCE_AUDIT_PENDING);
+        return copy;
+    }
+
+    private void verifyEvidence(List<LabTaskEvidence> evidenceList, TaskSubmitCommand command) {
+        for (LabTaskEvidence evidence : evidenceList) {
+            evidence.setAuditStatus(LabConstants.EVIDENCE_AUDIT_VERIFIED);
+            evidence.setAuditorId(command.getReviewerId());
+            evidence.setAuditTime(copyDate(command.getReviewTime()));
+            evidence.setAuditComment(command.getEvidenceAuditComment());
+        }
     }
 
     private boolean hasValidEvidence(List<LabTaskEvidence> evidenceList) {
@@ -230,6 +265,26 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
             }
         }
         return false;
+    }
+
+    private boolean hasOnlyValidEvidence(List<LabTaskEvidence> evidenceList) {
+        if (evidenceList == null || evidenceList.isEmpty()) {
+            return false;
+        }
+        for (LabTaskEvidence evidence : evidenceList) {
+            if (evidence == null || isBlank(evidence.getEvidenceTitle()) || isBlank(evidence.getEvidenceUrl())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void validateCoordination(LabTask task, List<FieldValidationError> errors) {
+        if (!LabConstants.YES.equals(task.getCoordinationRequired())) {
+            return;
+        }
+        if (task.getCoordinationOwnerId() == null) { error(errors, "coordinationOwnerId", "协同负责人不能为空"); }
+        required(errors, "coordinationDesc", task.getCoordinationDesc(), "协同说明不能为空");
     }
 
     private boolean isCompletion(String resultStatus) {
