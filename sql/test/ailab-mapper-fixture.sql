@@ -3,6 +3,11 @@ DELETE FROM lab_task_block_event WHERE id BETWEEN 39001 AND 39099;
 DELETE FROM lab_task_quality_gate WHERE id BETWEEN 39001 AND 39099;
 DELETE FROM lab_task WHERE id BETWEEN 39001 AND 39099;
 DELETE FROM lab_goal WHERE id BETWEEN 39001 AND 39099;
+DELETE FROM lab_ipr WHERE id BETWEEN 39301 AND 39399;
+DELETE FROM lab_one2one WHERE id BETWEEN 39301 AND 39399;
+DELETE FROM lab_asset WHERE id BETWEEN 39301 AND 39399;
+DELETE FROM lab_member_skill WHERE id BETWEEN 39301 AND 39399;
+DELETE FROM lab_skill WHERE id BETWEEN 39301 AND 39399;
 DELETE FROM lab_member WHERE id IN (39201,39202,39203);
 DELETE FROM sys_user_role WHERE user_id IN (39101,39102,39103);
 DELETE FROM sys_user WHERE user_id IN (39101,39102,39103);
@@ -13,11 +18,24 @@ VALUES
 (39102,101,'it_algorithm_lead','IT Algorithm Lead','00','it-lead@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu8','0','0','it',NOW(),'Active MySQL IT account'),
 (39103,101,'it_algorithm_member','IT Algorithm Member','00','it-member@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu9','0','0','it',NOW(),'Active MySQL IT account');
 INSERT INTO sys_user_role(user_id,role_id) VALUES (39101,30001),(39102,30002),(39103,30003);
-INSERT INTO lab_member(id,user_id,member_no,member_name,biz_line,role_type,leader_id,join_date,member_status,del_flag,create_by,create_time,remark)
+INSERT INTO lab_member(id,user_id,member_no,position,biz_line,role_type,leader_id,primary_responsibilities,backup_responsibilities,join_date,member_status,version,del_flag,create_by,create_time,remark)
 VALUES
-(39201,39101,'IT-MGR-01','IT Lab Manager','manage','MANAGER',NULL,'2026-01-01','ACTIVE','0','it',NOW(),'MySQL IT member'),
-(39202,39102,'IT-ALG-LEAD','IT Algorithm Lead','algorithm','LINE_LEAD',39201,'2026-01-01','ACTIVE','0','it',NOW(),'MySQL IT member'),
-(39203,39103,'IT-ALG-MEMBER','IT Algorithm Member','algorithm','MEMBER',39202,'2026-01-01','ACTIVE','0','it',NOW(),'MySQL IT member');
+(39201,39101,'IT-MGR-01','Laboratory Manager','manage','MANAGER',NULL,'IT portfolio','IT governance','2026-01-01','ACTIVE',0,'0','it',NOW(),'MySQL IT member'),
+(39202,39102,'IT-ALG-LEAD','Algorithm Lead','algorithm','LINE_LEAD',39201,'IT algorithm delivery','IT evaluation backup','2026-01-01','ACTIVE',0,'0','it',NOW(),'MySQL IT member'),
+(39203,39103,'IT-ALG-MEMBER','Algorithm Engineer','algorithm','MEMBER',39202,'IT evaluation','IT data backup','2026-01-01','ACTIVE',0,'0','it',NOW(),'MySQL IT member');
+
+INSERT INTO lab_skill(id,skill_code,skill_name,skill_category,skill_desc,status,version,del_flag,create_by,create_time)
+VALUES(39301,'IT-JAVA','IT Java','platform','IT skill','ACTIVE',0,'0','it',NOW()),
+      (39302,'IT-EVAL','IT Evaluation','algorithm','IT skill','ACTIVE',0,'0','it',NOW());
+INSERT INTO lab_member_skill(id,member_id,skill_id,skill_level,last_verified_date,evidence_url,version,del_flag,create_by,create_time)
+VALUES(39301,39203,39301,3,'2026-07-01','https://example.invalid/it/skill',0,'0','it',NOW());
+INSERT INTO lab_asset(id,asset_no,asset_name,asset_version,asset_type,asset_stage,primary_owner_id,backup_owner_id,critical_flag,status,version,del_flag,create_by,create_time)
+VALUES(39301,'IT-ASSET-1','IT critical model','v1','algorithm','DEPLOYED',39203,NULL,'1','ACTIVE',0,'0','it',NOW()),
+      (39302,'IT-ASSET-2','IT backed model','v1','algorithm','DEPLOYED',39203,39202,'1','ACTIVE',0,'0','it',NOW());
+INSERT INTO lab_one2one(id,member_id,leader_id,meeting_date,topic,facts_evidence,difficulties,next_action,manager_comment,status,version,del_flag,create_by,create_time)
+VALUES(39301,39203,39202,'2026-08-01','IT growth','IT facts','IT difficulty','IT next','IT manager comment','OPEN',0,'0','it',NOW());
+INSERT INTO lab_ipr(id,ipr_no,ipr_name,ipr_type,ipr_stage,owner_id,planned_submit_date,actual_submit_date,acceptance_no,certificate_no,status,version,del_flag,create_by,create_time)
+VALUES(39301,'IT-IPR-1','IT patent','PATENT','ACCEPTED',39203,'2026-07-31','2026-07-20','IT-ACCEPT-1',NULL,'ACTIVE',0,'0','it',NOW());
 
 INSERT INTO lab_goal(id,parent_id,goal_level,year,period,goal_no,title,owner_id,weight,progress_mode,progress_rate,status,version,del_flag,create_by,create_time)
 VALUES

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabMemberMapper">
+    <resultMap id="MemberResult" type="com.ailab.system.domain.LabMember">
+        <id property="id" column="id"/><result property="userId" column="user_id"/><result property="memberNo" column="member_no"/>
+        <result property="position" column="position"/><result property="bizLine" column="biz_line"/><result property="roleType" column="role_type"/>
+        <result property="leaderId" column="leader_id"/><result property="primaryResponsibilities" column="primary_responsibilities"/>
+        <result property="backupResponsibilities" column="backup_responsibilities"/><result property="joinDate" column="join_date"/>
+        <result property="memberStatus" column="member_status"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="userName" column="user_name"/><result property="nickName" column="nick_name"/><result property="leaderName" column="leader_name"/>
+        <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="SkillResult" type="com.ailab.system.domain.LabSkill">
+        <id property="id" column="id"/><result property="skillCode" column="skill_code"/><result property="skillName" column="skill_name"/>
+        <result property="skillCategory" column="skill_category"/><result property="skillDesc" column="skill_desc"/><result property="status" column="status"/>
+        <result property="version" column="version"/><result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="MemberSkillResult" type="com.ailab.system.domain.LabMemberSkill">
+        <id property="id" column="id"/><result property="memberId" column="member_id"/><result property="skillId" column="skill_id"/>
+        <result property="level" column="skill_level"/><result property="lastVerifiedDate" column="last_verified_date"/><result property="evidenceUrl" column="evidence_url"/>
+        <result property="version" column="version"/><result property="delFlag" column="del_flag"/><result property="skillCode" column="skill_code"/>
+        <result property="skillName" column="skill_name"/><result property="skillCategory" column="skill_category"/><result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="RecentTaskResult" type="com.ailab.system.domain.LabTask">
+        <id property="id" column="id"/><result property="title" column="title"/><result property="period" column="period"/>
+        <result property="taskLevel" column="task_level"/><result property="workflowStatus" column="workflow_status"/>
+        <result property="resultStatus" column="result_status"/><result property="planDate" column="plan_date"/>
+        <result property="ownerId" column="owner_id"/><result property="bizLine" column="biz_line"/>
+    </resultMap>
+
+    <sql id="memberColumns">m.id,m.user_id,m.member_no,m.position,m.biz_line,m.role_type,m.leader_id,m.primary_responsibilities,m.backup_responsibilities,m.join_date,m.member_status,m.version,m.del_flag,m.create_by,m.create_time,m.update_by,m.update_time,m.remark,u.user_name,u.nick_name,lu.nick_name leader_name</sql>
+    <sql id="skillColumns">s.id,s.skill_code,s.skill_name,s.skill_category,s.skill_desc,s.status,s.version,s.del_flag,s.create_by,s.create_time,s.update_by,s.update_time,s.remark</sql>
+
+    <select id="selectMemberList" parameterType="com.ailab.system.domain.LabMember" resultMap="MemberResult">
+        select <include refid="memberColumns"/> from lab_member m
+        join sys_user u on u.user_id=m.user_id and u.del_flag='0'
+        left join lab_member leader on leader.id=m.leader_id and leader.del_flag='0'
+        left join sys_user lu on lu.user_id=leader.user_id and lu.del_flag='0'
+        where m.del_flag='0'
+        <if test="id != null">and m.id=#{id}</if><if test="bizLine != null and bizLine != ''">and m.biz_line=#{bizLine}</if>
+        <if test="memberStatus != null and memberStatus != ''">and m.member_status=#{memberStatus}</if>
+        <if test="position != null and position != ''">and m.position=#{position}</if>
+        <if test="nickName != null and nickName != ''">and (u.nick_name like concat('%',#{nickName},'%') or u.user_name like concat('%',#{nickName},'%'))</if>
+        order by m.member_status,m.biz_line,u.nick_name,m.id
+    </select>
+    <select id="selectAvailableSystemUsers" resultMap="MemberResult">
+        select null id,u.user_id,null member_no,null position,null biz_line,null role_type,null leader_id,null primary_responsibilities,null backup_responsibilities,
+               null join_date,null member_status,null version,'0' del_flag,null create_by,null create_time,null update_by,null update_time,null remark,
+               u.user_name,u.nick_name,null leader_name
+        from sys_user u left join lab_member m on m.user_id=u.user_id and m.del_flag='0'
+        where u.status='0' and u.del_flag='0' and m.id is null order by u.nick_name,u.user_id
+    </select>
+    <select id="lockActiveSystemUser" parameterType="long" resultMap="MemberResult">
+        select null id,u.user_id,null member_no,null position,null biz_line,null role_type,null leader_id,null primary_responsibilities,null backup_responsibilities,
+               null join_date,null member_status,null version,'0' del_flag,null create_by,null create_time,null update_by,null update_time,null remark,
+               u.user_name,u.nick_name,null leader_name from sys_user u
+        where u.user_id=#{userId} and u.status='0' and u.del_flag='0' for update
+    </select>
+    <select id="selectMemberById" parameterType="long" resultMap="MemberResult">
+        select <include refid="memberColumns"/> from lab_member m join sys_user u on u.user_id=m.user_id and u.del_flag='0'
+        left join lab_member leader on leader.id=m.leader_id and leader.del_flag='0' left join sys_user lu on lu.user_id=leader.user_id and lu.del_flag='0'
+        where m.id=#{id} and m.del_flag='0'
+    </select>
+    <select id="selectMemberForUpdate" parameterType="long" resultMap="MemberResult">
+        select m.*,null user_name,null nick_name,null leader_name from lab_member m where m.id=#{id} and m.del_flag='0' for update
+    </select>
+    <select id="selectMemberByUserId" parameterType="long" resultMap="MemberResult">
+        select <include refid="memberColumns"/> from lab_member m join sys_user u on u.user_id=m.user_id and u.del_flag='0'
+        left join lab_member leader on leader.id=m.leader_id and leader.del_flag='0' left join sys_user lu on lu.user_id=leader.user_id and lu.del_flag='0'
+        where m.user_id=#{userId} and m.del_flag='0'
+    </select>
+    <select id="lockMembersForUpdate" resultMap="MemberResult">
+        select m.*,null user_name,null nick_name,null leader_name from lab_member m
+        where m.del_flag='0' and m.id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        order by m.id for update
+    </select>
+    <insert id="insertMember" parameterType="com.ailab.system.domain.LabMember" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_member(user_id,member_no,position,biz_line,role_type,leader_id,primary_responsibilities,backup_responsibilities,join_date,member_status,version,del_flag,create_by,create_time,remark)
+        values(#{userId},#{memberNo},#{position},#{bizLine},#{roleType},#{leaderId},#{primaryResponsibilities},#{backupResponsibilities},#{joinDate},#{memberStatus},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="updateMember" parameterType="com.ailab.system.domain.LabMember">
+        update lab_member set member_no=#{memberNo},position=#{position},biz_line=#{bizLine},role_type=#{roleType},leader_id=#{leaderId},
+        primary_responsibilities=#{primaryResponsibilities},backup_responsibilities=#{backupResponsibilities},join_date=#{joinDate},remark=#{remark},
+        update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'
+    </update>
+    <update id="deactivateMember">update lab_member set member_status='INACTIVE',update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'</update>
+    <update id="reactivateMember">update lab_member set member_status='ACTIVE',update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'</update>
+
+    <select id="selectSkillList" parameterType="com.ailab.system.domain.LabSkill" resultMap="SkillResult">
+        select <include refid="skillColumns"/> from lab_skill s where s.del_flag='0'
+        <if test="id != null">and s.id=#{id}</if><if test="status != null and status != ''">and s.status=#{status}</if>
+        <if test="skillCategory != null and skillCategory != ''">and s.skill_category=#{skillCategory}</if>
+        <if test="skillName != null and skillName != ''">and s.skill_name like concat('%',#{skillName},'%')</if>
+        order by s.status,s.skill_category,s.skill_name,s.id
+    </select>
+    <select id="selectSkillById" parameterType="long" resultMap="SkillResult">select <include refid="skillColumns"/> from lab_skill s where s.id=#{id} and s.del_flag='0'</select>
+    <select id="selectSkillForUpdate" parameterType="long" resultMap="SkillResult">select <include refid="skillColumns"/> from lab_skill s where s.id=#{id} and s.del_flag='0' for update</select>
+    <select id="selectActiveSkillByName" resultMap="SkillResult">
+        select <include refid="skillColumns"/> from lab_skill s where s.skill_name=#{skillName} and s.status='ACTIVE' and s.del_flag='0'
+        <if test="excludeId != null">and s.id&lt;&gt;#{excludeId}</if> limit 1
+    </select>
+    <select id="lockSkillsForUpdate" resultMap="SkillResult">
+        select <include refid="skillColumns"/> from lab_skill s where s.del_flag='0' and s.id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach> order by s.id for update
+    </select>
+    <insert id="insertSkill" parameterType="com.ailab.system.domain.LabSkill" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_skill(skill_code,skill_name,skill_category,skill_desc,status,version,del_flag,create_by,create_time,remark)
+        values(#{skillCode},#{skillName},#{skillCategory},#{skillDesc},#{status},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="updateSkill" parameterType="com.ailab.system.domain.LabSkill">
+        update lab_skill set skill_code=#{skillCode},skill_name=#{skillName},skill_category=#{skillCategory},skill_desc=#{skillDesc},status=#{status},
+        remark=#{remark},update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'
+    </update>
+
+    <select id="selectMemberSkills" resultMap="MemberSkillResult">
+        select ms.id,ms.member_id,ms.skill_id,ms.skill_level,ms.last_verified_date,ms.evidence_url,ms.version,ms.del_flag,
+               ms.create_by,ms.create_time,ms.update_by,ms.update_time,ms.remark,s.skill_code,s.skill_name,s.skill_category
+        from lab_member_skill ms join lab_skill s on s.id=ms.skill_id and s.del_flag='0'
+        where ms.member_id=#{memberId} and ms.del_flag='0' <if test="activeSkillsOnly">and s.status='ACTIVE'</if>
+        order by s.skill_category,s.skill_name,s.id
+    </select>
+    <select id="selectMemberSkillsForUpdate" parameterType="long" resultMap="MemberSkillResult">
+        select ms.id,ms.member_id,ms.skill_id,ms.skill_level,ms.last_verified_date,ms.evidence_url,ms.version,ms.del_flag,
+               ms.create_by,ms.create_time,ms.update_by,ms.update_time,ms.remark,s.skill_code,s.skill_name,s.skill_category
+        from lab_member_skill ms join lab_skill s on s.id=ms.skill_id where ms.member_id=#{memberId} and ms.del_flag='0' order by ms.skill_id for update
+    </select>
+    <insert id="insertMemberSkill" parameterType="com.ailab.system.domain.LabMemberSkill" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_member_skill(member_id,skill_id,skill_level,last_verified_date,evidence_url,version,del_flag,create_by,create_time,remark)
+        values(#{memberId},#{skillId},#{level},#{lastVerifiedDate},#{evidenceUrl},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="updateMemberSkill" parameterType="com.ailab.system.domain.LabMemberSkill">
+        update lab_member_skill set skill_level=#{level},last_verified_date=#{lastVerifiedDate},evidence_url=#{evidenceUrl},remark=#{remark},
+        update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and member_id=#{memberId} and skill_id=#{skillId} and version=#{version} and del_flag='0'
+    </update>
+    <update id="deleteMemberSkill">update lab_member_skill set del_flag='2',update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'</update>
+    <select id="selectRecentTasks" resultMap="RecentTaskResult">
+        select id,title,period,task_level,workflow_status,result_status,plan_date,owner_id,biz_line from lab_task
+        where owner_id=#{memberId} and del_flag='0' order by coalesce(actual_finish_time,create_time) desc,id desc limit #{limit}
+    </select>
+</mapper>

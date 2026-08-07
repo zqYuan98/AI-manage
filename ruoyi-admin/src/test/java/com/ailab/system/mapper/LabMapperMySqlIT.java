@@ -8,12 +8,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ailab.system.domain.LabGoal;
+import com.ailab.system.domain.LabAsset;
+import com.ailab.system.domain.LabIpr;
+import com.ailab.system.domain.LabMember;
+import com.ailab.system.domain.LabMemberSkill;
 import com.ailab.system.domain.LabTask;
 import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.TaskSubmitCommand;
 import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.LabGoalService;
+import com.ailab.system.service.LabLedgerService;
+import com.ailab.system.service.LabMemberService;
 import com.ailab.system.service.LabTaskService;
 import com.ruoyi.RuoYiApplication;
 import com.ruoyi.common.core.domain.entity.SysRole;
@@ -59,8 +65,12 @@ class LabMapperMySqlIT {
     @Autowired private LabGoalMapper goalMapper;
     @Autowired private LabTaskMapper taskMapper;
     @Autowired private LabTaskEvidenceMapper evidenceMapper;
+    @Autowired private LabMemberMapper memberMapper;
+    @Autowired private LabLedgerMapper ledgerMapper;
     @Autowired private LabGoalService goalService;
     @Autowired private LabTaskService taskService;
+    @Autowired private LabMemberService memberService;
+    @Autowired private LabLedgerService ledgerService;
     @Autowired private LabAccessService accessService;
     @Autowired private ISysUserService userService;
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -145,6 +155,12 @@ class LabMapperMySqlIT {
         assertEquals(1, jdbcTemplate.queryForObject(
                 "select count(1) from sys_role_menu rm join sys_menu m on m.menu_id=rm.menu_id where rm.role_id=30003 and m.perms='lab:task:remove'",
                 Integer.class));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "select count(1) from sys_role_menu rm join sys_menu m on m.menu_id=rm.menu_id where rm.role_id in (30002,30003) and m.perms='lab:skill:config'",
+                Integer.class));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(1) from sys_role_menu rm join sys_menu m on m.menu_id=rm.menu_id where rm.role_id=30001 and m.perms='lab:one2one:edit'",
+                Integer.class));
 
         List<LabTask> managerRows = asUser(39101L, () -> taskService.listTasks(new LabTask(), 39101L));
         List<LabTask> leadRows = asUser(39102L, () -> taskService.listTasks(new LabTask(), 39102L));
@@ -226,6 +242,55 @@ class LabMapperMySqlIT {
         assertThrows(ServiceException.class, () -> accessService.context(30001L));
         assertEquals(1, jdbcTemplate.update("update sys_user set del_flag='2' where user_id=39103"));
         assertThrows(ServiceException.class, () -> accessService.context(39103L));
+    }
+
+    @Test
+    void teamLedgerMappingsKeepSystemIdentitySeparateAndEnforceMatrixHistoryAndRisk() {
+        LabMember joined = memberMapper.selectMemberById(39203L);
+        assertEquals(Long.valueOf(39103L), joined.getUserId());
+        assertEquals("it_algorithm_member", joined.getUserName());
+        assertEquals("IT Algorithm Member", joined.getNickName());
+        assertFalse(joined.getId().equals(joined.getUserId()));
+
+        LabMemberSkill updated = memberMapper.selectMemberSkills(39203L, false).get(0);
+        updated.setLevel(4);
+        LabMemberSkill added = new LabMemberSkill();
+        added.setMemberId(39203L); added.setSkillId(39302L); added.setLevel(5);
+        added.setEvidenceUrl("https://example.invalid/it/skill-2");
+        assertEquals(2, memberService.saveSkillMatrix(39203L, Arrays.asList(added, updated), 39103L));
+        assertEquals(Arrays.asList(4, 5), jdbcTemplate.queryForList(
+                "select skill_level from lab_member_skill where member_id=39203 and del_flag='0' order by skill_id", Integer.class));
+        assertThrows(org.springframework.dao.DuplicateKeyException.class, () -> jdbcTemplate.update(
+                "insert into lab_member_skill(member_id,skill_id,skill_level,version,del_flag,create_by,create_time) values(39203,39302,3,0,'0','it',now())"));
+
+        List<LabAsset> risks = ledgerService.listAssetRisks(new LabAsset(), 39103L);
+        assertTrue(risks.stream().anyMatch(asset -> Long.valueOf(39301L).equals(asset.getId())));
+        assertFalse(risks.stream().anyMatch(asset -> Long.valueOf(39302L).equals(asset.getId())));
+        assertEquals("IT Algorithm Member", ledgerMapper.selectAssetById(39301L).getPrimaryOwnerName());
+
+        assertNotNull(ledgerService.getOne2One(39301L, 39103L));
+        assertNotNull(ledgerService.getOne2One(39301L, 39101L));
+        assertThrows(ServiceException.class, () -> ledgerService.getOne2One(39301L, 39102L));
+
+        assertEquals(1, memberService.deactivateMember(39203L, 0, 39101L));
+        assertEquals("INACTIVE", memberMapper.selectMemberById(39203L).getMemberStatus());
+        assertEquals(2, jdbcTemplate.queryForObject("select count(1) from lab_member_skill where member_id=39203", Integer.class));
+        assertEquals(2, jdbcTemplate.queryForObject("select count(1) from lab_asset where primary_owner_id=39203", Integer.class));
+        assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_one2one where member_id=39203", Integer.class));
+        assertTrue(memberMapper.selectAvailableSystemUsers().stream()
+                .noneMatch(candidate -> Long.valueOf(39103L).equals(candidate.getUserId())),
+                "inactive member history must be reactivated instead of offered as a new profile");
+    }
+
+    @Test
+    void iprResultMapAndOptimisticLockAreComplete() {
+        LabIpr ipr = ledgerMapper.selectIprById(39301L);
+        assertEquals("IT Algorithm Member", ipr.getOwnerName());
+        assertEquals("algorithm", ipr.getOwnerBizLine());
+        assertEquals("IT-ACCEPT-1", ipr.getAcceptanceNo());
+        ipr.setIprName("IT patent updated"); ipr.setUpdateBy("it");
+        assertEquals(1, ledgerMapper.updateIpr(ipr));
+        assertEquals(0, ledgerMapper.updateIpr(ipr));
     }
 
     @Test

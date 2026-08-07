@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabLedgerMapper">
+    <resultMap id="AssetResult" type="com.ailab.system.domain.LabAsset">
+        <id property="id" column="id"/><result property="assetNo" column="asset_no"/><result property="assetName" column="asset_name"/>
+        <result property="assetVersion" column="asset_version"/><result property="assetType" column="asset_type"/><result property="assetStage" column="asset_stage"/>
+        <result property="primaryOwnerId" column="primary_owner_id"/><result property="backupOwnerId" column="backup_owner_id"/>
+        <result property="testSetUrl" column="test_set_url"/><result property="deployPackageUrl" column="deploy_package_url"/>
+        <result property="documentUrl" column="document_url"/><result property="resourceUrl" column="resource_url"/><result property="repositoryUrl" column="repository_url"/>
+        <result property="capacityDesc" column="capacity_desc"/><result property="reuseCount" column="reuse_count"/><result property="criticalFlag" column="critical_flag"/>
+        <result property="status" column="status"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="primaryOwnerName" column="primary_owner_name"/><result property="primaryOwnerBizLine" column="primary_owner_biz_line"/>
+        <result property="backupOwnerName" column="backup_owner_name"/><result property="backupOwnerStatus" column="backup_owner_status"/>
+        <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="One2OneResult" type="com.ailab.system.domain.LabOne2One">
+        <id property="id" column="id"/><result property="memberId" column="member_id"/><result property="leaderId" column="leader_id"/>
+        <result property="meetingDate" column="meeting_date"/><result property="topic" column="topic"/><result property="factsEvidence" column="facts_evidence"/>
+        <result property="difficulties" column="difficulties"/><result property="nextAction" column="next_action"/><result property="managerComment" column="manager_comment"/>
+        <result property="status" column="status"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="memberName" column="member_name"/><result property="leaderName" column="leader_name"/><result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="IprResult" type="com.ailab.system.domain.LabIpr">
+        <id property="id" column="id"/><result property="iprNo" column="ipr_no"/><result property="iprName" column="ipr_name"/>
+        <result property="iprType" column="ipr_type"/><result property="iprStage" column="ipr_stage"/><result property="ownerId" column="owner_id"/>
+        <result property="plannedSubmitDate" column="planned_submit_date"/><result property="actualSubmitDate" column="actual_submit_date"/>
+        <result property="acceptanceNo" column="acceptance_no"/><result property="certificateNo" column="certificate_no"/>
+        <result property="authorizedDate" column="authorized_date"/><result property="evidenceUrl" column="evidence_url"/><result property="status" column="status"/>
+        <result property="stageChangeReason" column="stage_change_reason"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="ownerName" column="owner_name"/><result property="ownerBizLine" column="owner_biz_line"/><result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+    </resultMap>
+    <sql id="assetColumns">a.id,a.asset_no,a.asset_name,a.asset_version,a.asset_type,a.asset_stage,a.primary_owner_id,a.backup_owner_id,a.test_set_url,a.deploy_package_url,a.document_url,a.resource_url,a.repository_url,a.capacity_desc,a.reuse_count,a.critical_flag,a.status,a.version,a.del_flag,a.create_by,a.create_time,a.update_by,a.update_time,a.remark,pu.nick_name primary_owner_name,pm.biz_line primary_owner_biz_line,bu.nick_name backup_owner_name,bm.member_status backup_owner_status</sql>
+    <sql id="one2oneColumns">o.id,o.member_id,o.leader_id,o.meeting_date,o.topic,o.facts_evidence,o.difficulties,o.next_action,o.manager_comment,o.status,o.version,o.del_flag,o.create_by,o.create_time,o.update_by,o.update_time,o.remark,mu.nick_name member_name,lu.nick_name leader_name</sql>
+    <sql id="iprColumns">i.id,i.ipr_no,i.ipr_name,i.ipr_type,i.ipr_stage,i.owner_id,i.planned_submit_date,i.actual_submit_date,i.acceptance_no,i.certificate_no,i.authorized_date,i.evidence_url,i.status,i.stage_change_reason,i.version,i.del_flag,i.create_by,i.create_time,i.update_by,i.update_time,i.remark,u.nick_name owner_name,m.biz_line owner_biz_line</sql>
+
+    <select id="selectAssetList" parameterType="com.ailab.system.domain.LabAsset" resultMap="AssetResult">
+        select <include refid="assetColumns"/> from lab_asset a
+        join lab_member pm on pm.id=a.primary_owner_id and pm.del_flag='0' join sys_user pu on pu.user_id=pm.user_id and pu.del_flag='0'
+        left join lab_member bm on bm.id=a.backup_owner_id and bm.del_flag='0' left join sys_user bu on bu.user_id=bm.user_id and bu.del_flag='0'
+        where a.del_flag='0' <if test="id != null">and a.id=#{id}</if><if test="assetType != null and assetType != ''">and a.asset_type=#{assetType}</if>
+        <if test="assetStage != null and assetStage != ''">and a.asset_stage=#{assetStage}</if><if test="status != null and status != ''">and a.status=#{status}</if>
+        <if test="primaryOwnerId != null">and a.primary_owner_id=#{primaryOwnerId}</if><if test="assetName != null and assetName != ''">and a.asset_name like concat('%',#{assetName},'%')</if>
+        order by a.status,a.asset_type,a.asset_name,a.id
+    </select>
+    <select id="selectAssetById" parameterType="long" resultMap="AssetResult">
+        select <include refid="assetColumns"/> from lab_asset a join lab_member pm on pm.id=a.primary_owner_id and pm.del_flag='0'
+        join sys_user pu on pu.user_id=pm.user_id and pu.del_flag='0' left join lab_member bm on bm.id=a.backup_owner_id and bm.del_flag='0'
+        left join sys_user bu on bu.user_id=bm.user_id and bu.del_flag='0' where a.id=#{id} and a.del_flag='0'
+    </select>
+    <select id="selectAssetForUpdate" parameterType="long" resultMap="AssetResult">
+        select a.*,null primary_owner_name,null primary_owner_biz_line,null backup_owner_name,null backup_owner_status from lab_asset a where a.id=#{id} and a.del_flag='0' for update
+    </select>
+    <select id="selectAssetsByMember" parameterType="long" resultMap="AssetResult">
+        select <include refid="assetColumns"/> from lab_asset a join lab_member pm on pm.id=a.primary_owner_id and pm.del_flag='0'
+        join sys_user pu on pu.user_id=pm.user_id and pu.del_flag='0' left join lab_member bm on bm.id=a.backup_owner_id and bm.del_flag='0'
+        left join sys_user bu on bu.user_id=bm.user_id and bu.del_flag='0' where a.del_flag='0' and (a.primary_owner_id=#{memberId} or a.backup_owner_id=#{memberId}) order by a.status,a.asset_name
+    </select>
+    <insert id="insertAsset" parameterType="com.ailab.system.domain.LabAsset" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_asset(asset_no,asset_name,asset_version,asset_type,asset_stage,primary_owner_id,backup_owner_id,test_set_url,deploy_package_url,document_url,resource_url,repository_url,capacity_desc,reuse_count,critical_flag,status,version,del_flag,create_by,create_time,remark)
+        values(#{assetNo},#{assetName},#{assetVersion},#{assetType},#{assetStage},#{primaryOwnerId},#{backupOwnerId},#{testSetUrl},#{deployPackageUrl},#{documentUrl},#{resourceUrl},#{repositoryUrl},#{capacityDesc},#{reuseCount},#{criticalFlag},#{status},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="updateAsset" parameterType="com.ailab.system.domain.LabAsset">
+        update lab_asset set asset_no=#{assetNo},asset_name=#{assetName},asset_version=#{assetVersion},asset_type=#{assetType},asset_stage=#{assetStage},
+        primary_owner_id=#{primaryOwnerId},backup_owner_id=#{backupOwnerId},test_set_url=#{testSetUrl},deploy_package_url=#{deployPackageUrl},document_url=#{documentUrl},
+        resource_url=#{resourceUrl},repository_url=#{repositoryUrl},capacity_desc=#{capacityDesc},reuse_count=#{reuseCount},critical_flag=#{criticalFlag},status=#{status},remark=#{remark},
+        update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'
+    </update>
+    <update id="deleteAsset">update lab_asset set status='INACTIVE',update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'</update>
+
+    <select id="selectOne2OneList" parameterType="com.ailab.system.domain.LabOne2One" resultMap="One2OneResult">
+        select <include refid="one2oneColumns"/> from lab_one2one o join lab_member mm on mm.id=o.member_id and mm.del_flag='0'
+        join sys_user mu on mu.user_id=mm.user_id and mu.del_flag='0' join lab_member lm on lm.id=o.leader_id and lm.del_flag='0'
+        join sys_user lu on lu.user_id=lm.user_id and lu.del_flag='0' where o.del_flag='0'
+        <if test="memberId != null">and o.member_id=#{memberId}</if><if test="leaderId != null">and o.leader_id=#{leaderId}</if>
+        <if test="status != null and status != ''">and o.status=#{status}</if> order by o.meeting_date desc,o.id desc
+    </select>
+    <select id="selectOne2OneByMember" parameterType="long" resultMap="One2OneResult">
+        select <include refid="one2oneColumns"/> from lab_one2one o join lab_member mm on mm.id=o.member_id and mm.del_flag='0'
+        join sys_user mu on mu.user_id=mm.user_id and mu.del_flag='0' join lab_member lm on lm.id=o.leader_id and lm.del_flag='0'
+        join sys_user lu on lu.user_id=lm.user_id and lu.del_flag='0' where o.del_flag='0' and o.member_id=#{memberId} order by o.meeting_date desc,o.id desc
+    </select>
+    <select id="selectOne2OneById" parameterType="long" resultMap="One2OneResult">
+        select <include refid="one2oneColumns"/> from lab_one2one o join lab_member mm on mm.id=o.member_id and mm.del_flag='0'
+        join sys_user mu on mu.user_id=mm.user_id and mu.del_flag='0' join lab_member lm on lm.id=o.leader_id and lm.del_flag='0'
+        join sys_user lu on lu.user_id=lm.user_id and lu.del_flag='0' where o.id=#{id} and o.del_flag='0'
+    </select>
+    <select id="selectOne2OneForUpdate" parameterType="long" resultMap="One2OneResult">
+        select o.*,null member_name,null leader_name from lab_one2one o where o.id=#{id} and o.del_flag='0' for update
+    </select>
+    <insert id="insertOne2One" parameterType="com.ailab.system.domain.LabOne2One" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_one2one(member_id,leader_id,meeting_date,topic,facts_evidence,difficulties,next_action,manager_comment,status,version,del_flag,create_by,create_time,remark)
+        values(#{memberId},#{leaderId},#{meetingDate},#{topic},#{factsEvidence},#{difficulties},#{nextAction},#{managerComment},#{status},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="updateOne2One" parameterType="com.ailab.system.domain.LabOne2One">
+        update lab_one2one set member_id=#{memberId},leader_id=#{leaderId},meeting_date=#{meetingDate},topic=#{topic},facts_evidence=#{factsEvidence},difficulties=#{difficulties},
+        next_action=#{nextAction},manager_comment=#{managerComment},status=#{status},remark=#{remark},update_by=#{updateBy},update_time=sysdate(),version=version+1
+        where id=#{id} and version=#{version} and del_flag='0'
+    </update>
+
+    <select id="selectIprList" parameterType="com.ailab.system.domain.LabIpr" resultMap="IprResult">
+        select <include refid="iprColumns"/> from lab_ipr i join lab_member m on m.id=i.owner_id and m.del_flag='0'
+        join sys_user u on u.user_id=m.user_id and u.del_flag='0' where i.del_flag='0'
+        <if test="id != null">and i.id=#{id}</if><if test="ownerId != null">and i.owner_id=#{ownerId}</if>
+        <if test="iprType != null and iprType != ''">and i.ipr_type=#{iprType}</if><if test="iprStage != null and iprStage != ''">and i.ipr_stage=#{iprStage}</if>
+        <if test="status != null and status != ''">and i.status=#{status}</if><if test="iprName != null and iprName != ''">and i.ipr_name like concat('%',#{iprName},'%')</if>
+        order by i.status,i.planned_submit_date,i.id
+    </select>
+    <select id="selectIprById" parameterType="long" resultMap="IprResult">
+        select <include refid="iprColumns"/> from lab_ipr i join lab_member m on m.id=i.owner_id and m.del_flag='0'
+        join sys_user u on u.user_id=m.user_id and u.del_flag='0' where i.id=#{id} and i.del_flag='0'
+    </select>
+    <select id="selectIprForUpdate" parameterType="long" resultMap="IprResult">
+        select i.*,null owner_name,null owner_biz_line from lab_ipr i where i.id=#{id} and i.del_flag='0' for update
+    </select>
+    <insert id="insertIpr" parameterType="com.ailab.system.domain.LabIpr" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_ipr(ipr_no,ipr_name,ipr_type,ipr_stage,owner_id,planned_submit_date,actual_submit_date,acceptance_no,certificate_no,authorized_date,evidence_url,status,stage_change_reason,version,del_flag,create_by,create_time,remark)
+        values(#{iprNo},#{iprName},#{iprType},#{iprStage},#{ownerId},#{plannedSubmitDate},#{actualSubmitDate},#{acceptanceNo},#{certificateNo},#{authorizedDate},#{evidenceUrl},#{status},#{stageChangeReason},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="updateIpr" parameterType="com.ailab.system.domain.LabIpr">
+        update lab_ipr set ipr_no=#{iprNo},ipr_name=#{iprName},ipr_type=#{iprType},ipr_stage=#{iprStage},owner_id=#{ownerId},planned_submit_date=#{plannedSubmitDate},
+        actual_submit_date=#{actualSubmitDate},acceptance_no=#{acceptanceNo},certificate_no=#{certificateNo},authorized_date=#{authorizedDate},evidence_url=#{evidenceUrl},status=#{status},
+        stage_change_reason=#{stageChangeReason},remark=#{remark},update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'
+    </update>
+    <update id="deleteIpr">update lab_ipr set status='INACTIVE',update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'</update>
+</mapper>
