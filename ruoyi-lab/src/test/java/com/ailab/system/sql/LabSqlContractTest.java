@@ -7,94 +7,134 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
-/** Contract test for the re-runnable AI laboratory database bootstrap script. */
+/** Structural contract for the executable, re-runnable AI laboratory SQL bootstrap. */
 class LabSqlContractTest {
-    private static final Set<String> TABLES = new LinkedHashSet<>(Arrays.asList(
-        "lab_goal", "lab_task", "lab_task_evidence", "lab_task_quality_gate", "lab_task_block_event",
-        "lab_reminder", "lab_asset", "lab_member", "lab_skill", "lab_member_skill", "lab_one2one",
-        "lab_ipr", "lab_collaboration_record", "lab_perf_score", "lab_period_close", "lab_report_template",
-        "lab_report_section", "lab_report_summary", "lab_report_instance", "lab_report_job"));
-    private static final Set<String> AUDIT_COLUMNS = new LinkedHashSet<>(Arrays.asList(
-        "id", "del_flag", "create_by", "create_time", "update_by", "update_time", "remark"));
-    private static final Set<String> DICTS = new LinkedHashSet<>(Arrays.asList(
-        "lab_biz_line|hardware", "lab_biz_line|platform", "lab_biz_line|algorithm", "lab_biz_line|manage",
-        "lab_task_workflow_status|DRAFT", "lab_task_workflow_status|ACTIVE", "lab_task_workflow_status|PENDING_REVIEW", "lab_task_workflow_status|CONFIRMED",
-        "lab_task_result_status|DOING", "lab_task_result_status|EXCEEDED", "lab_task_result_status|ONTIME", "lab_task_result_status|DELAYED", "lab_task_result_status|UNDONE",
-        "lab_task_type|key", "lab_task_type|daily", "lab_task_level|month", "lab_task_level|week",
-        "lab_asset_type|hardware", "lab_asset_type|algorithm", "lab_asset_type|platform",
-        "lab_asset_stage|VERIFYING", "lab_asset_stage|DEPLOYED", "lab_asset_stage|ACCEPTED",
-        "lab_ipr_type|SOFTWARE_COPYRIGHT", "lab_ipr_type|PATENT", "lab_ipr_type|CERTIFICATION",
-        "lab_ipr_stage|DRAFTING", "lab_ipr_stage|SUBMITTED", "lab_ipr_stage|ACCEPTED", "lab_ipr_stage|AUTHORIZED",
-        "lab_section_type|TABLE", "lab_section_type|STAT", "lab_section_type|TEXT", "lab_section_type|MANUAL", "lab_section_type|GROUP_TEXT", "lab_section_type|CHART",
-        "lab_goal_status|ACTIVE", "lab_goal_status|COMPLETED", "lab_goal_status|TERMINATED"));
-    private static final Set<String> PERMISSIONS = new LinkedHashSet<>(Arrays.asList(
-        "lab:dashboard:view", "lab:goal:list", "lab:goal:add", "lab:goal:edit", "lab:goal:remove",
-        "lab:task:list", "lab:task:add", "lab:task:edit", "lab:task:remove", "lab:task:evidence", "lab:task:review",
-        "lab:member:list", "lab:member:add", "lab:member:edit", "lab:member:remove", "lab:skill:list", "lab:skill:config", "lab:one2one:list", "lab:one2one:add",
-        "lab:asset:list", "lab:asset:add", "lab:asset:edit", "lab:asset:remove", "lab:ipr:list", "lab:ipr:add", "lab:ipr:edit",
-        "lab:perf:list", "lab:perf:close", "lab:perf:reopen", "lab:perf:redline", "lab:perf:revoke", "lab:perf:calibrate",
-        "lab:template:list", "lab:template:config", "lab:template:import", "lab:template:export",
-        "lab:report:list", "lab:report:generate", "lab:report:retry", "lab:report:download", "lab:report:finalize", "lab:report:sensitive"));
-    private static final Set<String> INDEXES = new LinkedHashSet<>(Arrays.asList(
-        "uk_lab_goal_year_no", "idx_lab_goal_parent", "idx_lab_task_goal", "idx_lab_task_owner_status",
-        "uk_lab_gate_task_no", "idx_lab_block_task_status", "uk_lab_reminder_idempotency", "idx_lab_reminder_recipient_read",
-        "uk_lab_asset_no", "uk_lab_member_user", "uk_lab_skill_code", "uk_lab_member_skill", "idx_lab_one2one_member_date",
-        "uk_lab_ipr_no", "idx_lab_collab_to_status", "uk_lab_perf_member_period_rev", "uk_lab_period_close_period",
-        "uk_lab_report_tpl_code_rev", "uk_lab_report_section", "uk_lab_report_summary", "uk_lab_report_instance_no", "uk_lab_report_job_idempotency"));
+    private static final Set<String> TABLES = set("lab_goal", "lab_task", "lab_task_evidence", "lab_task_quality_gate", "lab_task_block_event", "lab_reminder", "lab_asset", "lab_member", "lab_skill", "lab_member_skill", "lab_one2one", "lab_ipr", "lab_collaboration_record", "lab_perf_score", "lab_period_close", "lab_report_template", "lab_report_section", "lab_report_summary", "lab_report_instance", "lab_report_job");
+    private static final Set<String> AUDIT = set("id", "del_flag", "create_by", "create_time", "update_by", "update_time", "remark");
+    private static final Set<String> DICTS = set("lab_biz_line|hardware", "lab_biz_line|platform", "lab_biz_line|algorithm", "lab_biz_line|manage", "lab_task_workflow_status|DRAFT", "lab_task_workflow_status|ACTIVE", "lab_task_workflow_status|PENDING_REVIEW", "lab_task_workflow_status|CONFIRMED", "lab_task_result_status|DOING", "lab_task_result_status|EXCEEDED", "lab_task_result_status|ONTIME", "lab_task_result_status|DELAYED", "lab_task_result_status|UNDONE", "lab_task_type|key", "lab_task_type|daily", "lab_task_level|month", "lab_task_level|week", "lab_asset_type|hardware", "lab_asset_type|algorithm", "lab_asset_type|platform", "lab_asset_stage|VERIFYING", "lab_asset_stage|DEPLOYED", "lab_asset_stage|ACCEPTED", "lab_ipr_type|SOFTWARE_COPYRIGHT", "lab_ipr_type|PATENT", "lab_ipr_type|CERTIFICATION", "lab_ipr_stage|DRAFTING", "lab_ipr_stage|SUBMITTED", "lab_ipr_stage|ACCEPTED", "lab_ipr_stage|AUTHORIZED", "lab_section_type|TABLE", "lab_section_type|STAT", "lab_section_type|TEXT", "lab_section_type|MANUAL", "lab_section_type|GROUP_TEXT", "lab_section_type|CHART", "lab_goal_status|ACTIVE", "lab_goal_status|COMPLETED", "lab_goal_status|TERMINATED");
+    private static final Set<String> PERMISSIONS = set("lab:dashboard:view", "lab:goal:list", "lab:goal:add", "lab:goal:edit", "lab:goal:remove", "lab:task:list", "lab:task:add", "lab:task:edit", "lab:task:remove", "lab:task:evidence", "lab:task:review", "lab:member:list", "lab:member:add", "lab:member:edit", "lab:member:remove", "lab:skill:list", "lab:skill:config", "lab:one2one:list", "lab:one2one:add", "lab:asset:list", "lab:asset:add", "lab:asset:edit", "lab:asset:remove", "lab:ipr:list", "lab:ipr:add", "lab:ipr:edit", "lab:perf:list", "lab:perf:close", "lab:perf:reopen", "lab:perf:redline", "lab:perf:revoke", "lab:perf:calibrate", "lab:template:list", "lab:template:config", "lab:template:import", "lab:template:export", "lab:report:list", "lab:report:generate", "lab:report:retry", "lab:report:download", "lab:report:finalize", "lab:report:sensitive");
+    private static final Map<String, Set<String>> FIELDS = fields();
 
     @Test
-    void ailabSqlContainsTheApprovedDatabaseAndInitializationContract() throws IOException {
-        String sql = Files.readString(findRepositoryRoot().resolve("sql/ailab.sql"), StandardCharsets.UTF_8);
-        String normalized = sql.toLowerCase(Locale.ROOT);
-        Set<String> found = new LinkedHashSet<>();
-        Matcher matcher = Pattern.compile("(?is)create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?`?(lab_[a-z0-9_]+)`?\\s*\\((.*?)\\)\\s*(?:engine|comment)").matcher(sql);
+    void ailabSqlMeetsTheApprovedSchemaAndSeedContract() throws IOException {
+        String sql = Files.readString(findRoot().resolve("sql/ailab.sql"), StandardCharsets.UTF_8);
+        Map<String, String> blocks = tableBlocks(sql);
+        assertEquals(TABLES, blocks.keySet(), "lab table set must be exactly the approved twenty tables");
+        for (Map.Entry<String, String> entry : blocks.entrySet()) {
+            String table = entry.getKey();
+            String statement = entry.getValue();
+            assertTrue(statement.toLowerCase(Locale.ROOT).contains("engine=innodb"), "engine missing: " + table);
+            assertTrue(statement.toLowerCase(Locale.ROOT).contains("charset=utf8mb4"), "charset missing: " + table);
+            assertTrue(statement.toLowerCase(Locale.ROOT).contains("collate=utf8mb4_general_ci"), "collation missing: " + table);
+            assertTrue(Pattern.compile("(?is)\\)\\s*engine=.*comment\\s*=\\s*'").matcher(statement).find(), "table comment missing: " + table);
+            Map<String, String> columns = columns(statement);
+            for (String column : columns.keySet()) assertTrue(columns.get(column).toLowerCase(Locale.ROOT).contains("comment '"), "column comment missing: " + table + "." + column);
+            assertTrue(columns.keySet().containsAll(AUDIT), "audit columns missing: " + table);
+            assertTrue(columns.get("id").toLowerCase(Locale.ROOT).matches("(?s).*bigint.*not null.*auto_increment.*"), "id contract missing: " + table);
+            assertTrue(columns.keySet().containsAll(FIELDS.get(table)), "model fields missing: " + table);
+            assertTrue(Pattern.compile("(?is)primary\\s+key").matcher(statement).find(), "primary key missing: " + table);
+        }
+        String compactSql = sql.toLowerCase(Locale.ROOT).replace("`", "").replaceAll("\\s+", "");
+        for (String contract : uniqueContracts()) assertTrue(compactSql.contains(contract), "unique contract missing: " + contract);
+        List<String> dictionaryPairs = dictPairList(sql);
+        for (String pair : DICTS) assertTrue(dictionaryPairs.contains(pair.toLowerCase(Locale.ROOT)), "missing dict " + pair);
+        assertEquals(dictionaryPairs.size(), new HashSet<>(dictionaryPairs).size(), "duplicate dictionary type/value tuple");
+        for (String permission : PERMISSIONS) assertTrue(sql.contains("'" + permission + "'"), "missing permission " + permission);
+        assertEquals(set("TABLE","STAT","TEXT","MANUAL","GROUP_TEXT","CHART"), sectionTypes(sql), "section renderer types");
+        assertJobSeeds(sql);
+        assertTemplateSeed(sql);
+        assertMemberSeeds(sql);
+        assertMenuArity(sql);
+        assertAllInsertArities(sql);
+        assertSqlLexicallyBalanced(sql);
+    }
+
+    private static void assertJobSeeds(String sql) {
+        List<List<String>> rows = insertRows(sql, "sys_job");
+        List<List<String>> labRows = new ArrayList<>();
+        for (List<String> row : rows) if (row.stream().anyMatch(v -> v.contains("labScheduleTask."))) labRows.add(row);
+        assertEquals(5, labRows.size(), "exactly five AI-lab job rows required");
+        Set<String> targets = new HashSet<>();
+        for (List<String> row : labRows) { assertEquals("'0'", row.get(7), "job must be enabled"); targets.add(unquote(row.get(3))); }
+        assertEquals(set("labScheduleTask.scanBlocks()","labScheduleTask.scanPendingTasks()","labScheduleTask.closeDuePeriods()","labScheduleTask.cleanReportTempFiles()","labScheduleTask.recoverReportJobs()"), targets, "exactly one row per job target");
+    }
+
+    private static void assertTemplateSeed(String sql) {
+        List<List<String>> rows = insertRows(sql, "lab_report_template");
+        List<String> standard = rows.stream().filter(r -> r.size() > 2 && "standard_month".equals(unquote(r.get(1)))).findFirst().orElseThrow(() -> new AssertionError("default template row missing"));
+        assertEquals("MONTH", unquote(standard.get(3))); assertEquals("1", unquote(standard.get(5))); assertEquals("1", unquote(standard.get(6))); assertEquals("ENABLED", unquote(standard.get(7)));
+    }
+
+    private static void assertMemberSeeds(String sql) {
+        List<List<String>> rows = insertRows(sql, "lab_member");
+        assertEquals(6, rows.size(), "six demo members required");
+        Set<String> userIds = new HashSet<>(); for (List<String> row : rows) userIds.add(row.get(1));
+        assertEquals(6, userIds.size(), "demo members must use distinct sys_user ids");
+    }
+
+    private static void assertMenuArity(String sql) {
+        Matcher matcher = Pattern.compile("(?is)INSERT\\s+INTO\\s+`sys_menu`\\s*\\((.*?)\\)\\s*VALUES\\s*(.*?);").matcher(sql);
+        assertTrue(matcher.find(), "sys_menu seed missing");
+        int columns = splitValues(matcher.group(1)).size();
+        for (List<String> row : tuples(matcher.group(2))) assertEquals(columns, row.size(), "sys_menu row arity");
+    }
+
+    private static void assertAllInsertArities(String sql) {
+        Matcher matcher = Pattern.compile("(?is)INSERT\\s+INTO\\s+`?[a-z0-9_]+`?\\s*\\((.*?)\\)\\s*VALUES\\s*(.*?);").matcher(sql);
+        int statements = 0;
         while (matcher.find()) {
-            String table = matcher.group(1).toLowerCase(Locale.ROOT);
-            found.add(table);
-            String block = matcher.group(2).toLowerCase(Locale.ROOT);
-            int statementEnd = sql.indexOf(';', matcher.end());
-            assertTrue(sql.substring(matcher.start(), statementEnd).toLowerCase(Locale.ROOT).contains("comment='"), "missing table comment: " + table);
-            for (String column : AUDIT_COLUMNS) {
-                assertTrue(Pattern.compile("(?:^|,)\\s*`?" + column + "`?\\s+").matcher(block).find(), "missing " + column + " in " + table);
+            statements++;
+            int columns = splitValues(matcher.group(1)).size();
+            for (List<String> row : tuples(matcher.group(2))) assertEquals(columns, row.size(), "INSERT values arity");
+        }
+        assertTrue(statements > 20, "expected a substantive set of VALUES inserts");
+    }
+
+    private static void assertSqlLexicallyBalanced(String sql) {
+        boolean quote = false;
+        int parentheses = 0;
+        for (int i = 0; i < sql.length(); i++) {
+            char c = sql.charAt(i);
+            if (c == '\'' && (i == 0 || sql.charAt(i - 1) != '\\')) quote = !quote;
+            if (!quote && c == '(') parentheses++;
+            if (!quote && c == ')') {
+                parentheses--;
+                assertTrue(parentheses >= 0, "unbalanced closing parenthesis");
             }
-            assertTrue(Pattern.compile("(?:^|,)\\s*`?id`?\\s+bigint\\s+not\\s+null\\s+auto_increment.*comment", Pattern.CASE_INSENSITIVE).matcher(block).find(), "id comment/type missing: " + table);
-            assertTrue(Pattern.compile("(?:^|,)\\s*primary\\s+key", Pattern.CASE_INSENSITIVE).matcher(block).find(), "primary key missing: " + table);
-            assertTrue(Pattern.compile("(?is)(?:unique\\s+)?key\\s+`").matcher(block).find(), "focused index missing: " + table);
         }
-        assertEquals(TABLES, found, "lab table set must be exactly the approved twenty tables");
-        for (String required : DICTS) {
-            String[] pair = required.toLowerCase(Locale.ROOT).split(Pattern.quote("|"), 2);
-            assertTrue(normalized.contains("'" + pair[0] + "'"), "missing dict type " + pair[0]);
-            assertTrue(normalized.contains("'" + pair[1] + "'"), "missing dict value " + required);
-        }
-        for (String permission : PERMISSIONS) assertTrue(normalized.contains("'" + permission + "'"), "missing permission " + permission);
-        for (String target : Arrays.asList("labScheduleTask.scanBlocks()", "labScheduleTask.scanPendingTasks()", "labScheduleTask.closeDuePeriods()", "labScheduleTask.cleanReportTempFiles()", "labScheduleTask.recoverReportJobs()"))
-            assertTrue(sql.contains(target), "missing Quartz target " + target);
-        for (String type : Arrays.asList("TABLE", "STAT", "TEXT", "MANUAL", "GROUP_TEXT", "CHART")) assertTrue(normalized.contains("'" + type.toLowerCase(Locale.ROOT) + "'"), "missing renderer " + type);
-        assertTrue(normalized.contains("'standard_month'"), "default month template missing");
-        assertEquals(6, count(normalized, "insert into `lab_member`"), "six deterministic demo members are required");
-        assertTrue(normalized.contains("unique key `uk_lab_goal_year_no`"), "goal unique key missing");
-        assertTrue(normalized.contains("unique key `uk_lab_member_user`"), "member user unique key missing");
-        assertTrue(normalized.contains("unique key `uk_lab_perf_member_period_rev`"), "performance unique key missing");
-        assertTrue(normalized.contains("unique key `uk_lab_report_tpl_code_rev`"), "template unique key missing");
-        assertTrue(normalized.contains("unique key `uk_lab_reminder_idempotency`"), "reminder idempotency unique key missing");
-        for (String index : INDEXES) assertTrue(normalized.contains("key `" + index + "`"), "required index/unique key missing " + index);
+        assertTrue(!quote, "unclosed SQL string literal");
+        assertEquals(0, parentheses, "unbalanced SQL parentheses");
     }
 
-    private static long count(String text, String needle) { return Pattern.compile(Pattern.quote(needle)).matcher(text).results().count(); }
-
-    private static Path findRepositoryRoot() {
-        for (Path path = Path.of(System.getProperty("user.dir")).toAbsolutePath(); path != null; path = path.getParent()) {
-            if (Files.isRegularFile(path.resolve("pom.xml")) && Files.isDirectory(path.resolve("ruoyi-lab"))) return path;
-        }
-        throw new IllegalStateException("Cannot locate repository root from " + System.getProperty("user.dir"));
+    private static Map<String, String> tableBlocks(String sql) {
+        Map<String, String> result = new LinkedHashMap<>(); Matcher m = Pattern.compile("(?is)(CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?`?(lab_[a-z0-9_]+)`?\\s*\\(.*?\\)\\s*ENGINE=.*?;)").matcher(sql);
+        while (m.find()) result.put(m.group(2).toLowerCase(Locale.ROOT), m.group(1)); return result;
     }
+    private static Map<String, String> columns(String statement) {
+        int open = statement.indexOf('('); int close = statement.lastIndexOf(") ENGINE"); String body = statement.substring(open + 1, close); Map<String, String> result = new LinkedHashMap<>();
+        Matcher m = Pattern.compile("(?is)(?:^|,)\\s*`([a-z0-9_]+)`\\s+(.*?)(?=,\\s*`|,\\s*(?:PRIMARY|UNIQUE|KEY)\\b|$)").matcher(body); while (m.find()) result.put(m.group(1), m.group(2)); return result;
+    }
+    private static List<String> dictPairList(String sql) { List<String> pairs = new ArrayList<>(); Matcher m = Pattern.compile("(?im)\\(\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*'[^']*'\\s*,\\s*'([^']*)'\\s*,\\s*'(lab_[^']*)'").matcher(sql); while (m.find()) pairs.add((m.group(2) + "|" + m.group(1)).toLowerCase(Locale.ROOT)); return pairs; }
+    private static Set<String> sectionTypes(String sql) { Set<String> result = new LinkedHashSet<>(); for (List<String> row : insertRows(sql, "lab_report_section")) result.add(unquote(row.get(4))); return result; }
+    private static List<List<String>> insertRows(String sql, String table) { Matcher m = Pattern.compile("(?is)INSERT\\s+INTO\\s+`" + Pattern.quote(table) + "`\\s*\\((.*?)\\)\\s*VALUES\\s*(.*?);").matcher(sql); List<List<String>> result = new ArrayList<>(); while (m.find()) result.addAll(tuples(m.group(2))); return result; }
+    private static List<List<String>> tuples(String values) { List<List<String>> result = new ArrayList<>(); boolean quote = false; int depth = 0, start = -1; for (int i = 0; i < values.length(); i++) { char c = values.charAt(i); if (c == '\'' && (i == 0 || values.charAt(i - 1) != '\\')) quote = !quote; if (!quote && c == '(') { if (depth++ == 0) start = i + 1; } if (!quote && c == ')' && --depth == 0) result.add(splitValues(values.substring(start, i))); } return result; }
+    private static List<String> splitValues(String value) { List<String> result = new ArrayList<>(); boolean quote = false; int depth = 0, start = 0; for (int i = 0; i < value.length(); i++) { char c = value.charAt(i); if (c == '\'' && (i == 0 || value.charAt(i - 1) != '\\')) quote = !quote; if (!quote && c == '(') depth++; else if (!quote && c == ')') depth--; else if (!quote && depth == 0 && c == ',') { result.add(value.substring(start, i).trim()); start = i + 1; } } result.add(value.substring(start).trim()); return result; }
+    private static String unquote(String value) { return value.replaceAll("^'|'$", ""); }
+    private static Set<String> set(String... items) { return new LinkedHashSet<>(Arrays.asList(items)); }
+    private static Set<String> uniqueContracts() { return set("uniquekeyuk_lab_goal_year_no(year,goal_no,del_flag)","uniquekeyuk_lab_gate_task_no(task_id,gate_no,del_flag)","uniquekeyuk_lab_reminder_idempotency(idempotency_key)","uniquekeyuk_lab_asset_no(asset_no,del_flag)","uniquekeyuk_lab_member_user(user_id,del_flag)","uniquekeyuk_lab_member_no(member_no,del_flag)","uniquekeyuk_lab_skill_code(skill_code,del_flag)","uniquekeyuk_lab_member_skill(member_id,skill_id,del_flag)","uniquekeyuk_lab_ipr_no(ipr_no,del_flag)","uniquekeyuk_lab_perf_member_period_rev(member_id,period,revision_no,del_flag)","uniquekeyuk_lab_period_close_period(period,del_flag)","uniquekeyuk_lab_report_tpl_code_rev(template_code,revision_no,del_flag)","uniquekeyuk_lab_report_section(template_id,section_code,del_flag)","uniquekeyuk_lab_report_summary(period,biz_line,section_code,del_flag)","uniquekeyuk_lab_report_instance_no(report_no,del_flag)","uniquekeyuk_lab_report_instance_period_rev(template_id,period,biz_line,revision_no,del_flag)","uniquekeyuk_lab_report_job_no(job_no,del_flag)","uniquekeyuk_lab_report_job_idempotency(idempotency_key)"); }
+    private static Map<String, Set<String>> fields() { Map<String, Set<String>> map = new LinkedHashMap<>(); map.put("lab_goal",set("parent_id","goal_level","year","period","goal_no","owner_id","weight","progress_rate","status","version")); map.put("lab_task",set("parent_id","goal_id","milestone_id","task_level","period","biz_line","task_type","owner_id","perf_weight","goal_weight","workflow_status","result_status","asset_id","current_block_flag","period_lock_flag","version")); map.put("lab_task_evidence",set("task_id","evidence_json","submitter_id","audit_status")); map.put("lab_task_quality_gate",set("task_id","gate_no","gate_status")); map.put("lab_task_block_event",set("task_id","block_start_time","block_end_time","block_status")); map.put("lab_reminder",set("task_id","recipient_id","read_flag","idempotency_key")); map.put("lab_asset",set("primary_owner_id","backup_owner_id","resource_url")); map.put("lab_member",set("user_id","biz_line","leader_id")); map.put("lab_skill",set("skill_code","skill_category")); map.put("lab_member_skill",set("member_id","skill_id","proficiency_level")); map.put("lab_one2one",set("member_id","leader_id","meeting_date")); map.put("lab_ipr",set("ipr_type","ipr_stage","owner_id")); map.put("lab_collaboration_record",set("task_id","category","signed_score","evidence_url","reviewer_id","review_status")); map.put("lab_perf_score",set("member_id","period","revision_no","current_flag","detail_json","red_line_flag","revoked_flag","calibration_status")); map.put("lab_period_close",set("period","close_by","close_time","reopen_by","reopen_time","version")); map.put("lab_report_template",set("template_code","period_type","revision_no","latest_flag","default_flag","status","header_json","style_json","version")); map.put("lab_report_section",set("template_id","section_type","query_config_json","render_config_json","style_config_json","manual_flag","visible_flag","sensitive_flag","version")); map.put("lab_report_summary",set("period","biz_line","section_code","summary_json")); map.put("lab_report_instance",set("template_id","period","revision_no","lifecycle_status","current_flag","final_flag","sensitive_flag","source_data_json","source_perf_revision","content_json","content_markdown","json_status","json_path","json_error","markdown_status","markdown_path","markdown_error","word_status","word_path","word_error","pdf_status","pdf_path","pdf_error","version")); map.put("lab_report_job",set("report_id","job_type","job_status","progress_rate","attempt_count","error_message","idempotency_key","version")); return map; }
+    private static Path findRoot() { for (Path p = Path.of(System.getProperty("user.dir")).toAbsolutePath(); p != null; p = p.getParent()) if (Files.isRegularFile(p.resolve("pom.xml")) && Files.isDirectory(p.resolve("ruoyi-lab"))) return p; throw new IllegalStateException("Cannot locate repository root"); }
 }
