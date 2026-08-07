@@ -3,7 +3,7 @@ SET NAMES utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `lab_goal` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `parent_id` bigint DEFAULT 0 COMMENT 'parent goal', `goal_level` varchar(16) NOT NULL COMMENT 'YEAR or QUARTER', `year` int NOT NULL COMMENT 'goal year', `period` varchar(16) DEFAULT NULL COMMENT 'quarter period', `goal_no` varchar(64) NOT NULL COMMENT 'business number', `title` varchar(200) NOT NULL COMMENT 'goal title', `target_value` varchar(500) DEFAULT NULL COMMENT 'target value', `accept_criteria` varchar(1000) DEFAULT NULL COMMENT 'acceptance criteria', `owner_id` bigint NOT NULL COMMENT 'member owner', `weight` decimal(8,2) DEFAULT 0 COMMENT 'weight', `progress_mode` varchar(16) DEFAULT 'MANUAL' COMMENT 'progress mode', `progress_rate` decimal(5,2) DEFAULT 0 COMMENT 'progress percent', `progress_desc` varchar(1000) DEFAULT NULL COMMENT 'progress description', `status` varchar(16) DEFAULT 'ACTIVE' COMMENT 'status', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_goal_year_no` (`year`,`goal_no`,`del_flag`), KEY `idx_lab_goal_parent` (`parent_id`), KEY `idx_lab_goal_owner_status` (`owner_id`,`status`), KEY `idx_lab_goal_year_status` (`year`,`status`), KEY `idx_lab_goal_period` (`year`,`period`)
+ PRIMARY KEY (`id`), KEY `idx_lab_goal_parent` (`parent_id`), KEY `idx_lab_goal_owner_status` (`owner_id`,`status`), KEY `idx_lab_goal_year_status` (`year`,`status`), KEY `idx_lab_goal_period` (`year`,`period`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='laboratory goal';
 
 CREATE TABLE IF NOT EXISTS `lab_task` (
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS `lab_task_evidence` (
 
 CREATE TABLE IF NOT EXISTS `lab_task_quality_gate` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `task_id` bigint NOT NULL COMMENT 'task reference', `gate_no` varchar(32) NOT NULL COMMENT 'gate number', `gate_name` varchar(100) NOT NULL COMMENT 'gate name', `gate_status` varchar(16) DEFAULT 'PENDING' COMMENT 'gate status', `checker_id` bigint DEFAULT NULL COMMENT 'checker member', `check_time` datetime DEFAULT NULL COMMENT 'check time', `check_result` varchar(1000) DEFAULT NULL COMMENT 'check result', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_gate_task_no` (`task_id`,`gate_no`,`del_flag`), KEY `idx_lab_gate_task_status` (`task_id`,`gate_status`), KEY `idx_lab_gate_checker_status` (`checker_id`,`gate_status`)
+ PRIMARY KEY (`id`), KEY `idx_lab_gate_task_status` (`task_id`,`gate_status`), KEY `idx_lab_gate_checker_status` (`checker_id`,`gate_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='task quality gate';
 
 CREATE TABLE IF NOT EXISTS `lab_task_block_event` (
@@ -28,27 +28,27 @@ CREATE TABLE IF NOT EXISTS `lab_task_block_event` (
 
 CREATE TABLE IF NOT EXISTS `lab_reminder` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `task_id` bigint DEFAULT NULL COMMENT 'task reference', `recipient_id` bigint NOT NULL COMMENT 'recipient member', `reminder_type` varchar(32) NOT NULL COMMENT 'reminder type', `reminder_content` varchar(1000) NOT NULL COMMENT 'content', `read_flag` char(1) DEFAULT '0' COMMENT 'read flag', `read_time` datetime DEFAULT NULL COMMENT 'read time', `send_time` datetime DEFAULT NULL COMMENT 'send time', `idempotency_key` varchar(128) NOT NULL COMMENT 'idempotency key', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_reminder_idempotency` (`idempotency_key`), KEY `idx_lab_reminder_recipient_read` (`recipient_id`,`read_flag`), KEY `idx_lab_reminder_task` (`task_id`)
+ PRIMARY KEY (`id`), KEY `idx_lab_reminder_recipient_read` (`recipient_id`,`read_flag`), KEY `idx_lab_reminder_task` (`task_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='laboratory reminder';
 
 CREATE TABLE IF NOT EXISTS `lab_asset` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `asset_no` varchar(64) NOT NULL COMMENT 'asset number', `asset_name` varchar(200) NOT NULL COMMENT 'asset name', `asset_type` varchar(32) NOT NULL COMMENT 'asset type', `asset_stage` varchar(32) DEFAULT 'VERIFYING' COMMENT 'asset stage', `primary_owner_id` bigint NOT NULL COMMENT 'primary owner', `backup_owner_id` bigint DEFAULT NULL COMMENT 'backup owner', `resource_url` varchar(1000) DEFAULT NULL COMMENT 'resource URL', `repository_url` varchar(1000) DEFAULT NULL COMMENT 'repository URL', `capacity_desc` varchar(1000) DEFAULT NULL COMMENT 'capacity description', `status` varchar(16) DEFAULT 'ACTIVE' COMMENT 'asset status', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_asset_no` (`asset_no`,`del_flag`), KEY `idx_lab_asset_primary_status` (`primary_owner_id`,`status`), KEY `idx_lab_asset_backup` (`backup_owner_id`), KEY `idx_lab_asset_type_stage` (`asset_type`,`asset_stage`)
+ PRIMARY KEY (`id`), KEY `idx_lab_asset_primary_status` (`primary_owner_id`,`status`), KEY `idx_lab_asset_backup` (`backup_owner_id`), KEY `idx_lab_asset_type_stage` (`asset_type`,`asset_stage`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='laboratory asset';
 
 CREATE TABLE IF NOT EXISTS `lab_member` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `user_id` bigint NOT NULL COMMENT 'sys user reference', `member_no` varchar(64) NOT NULL COMMENT 'member number', `member_name` varchar(100) NOT NULL COMMENT 'member name', `biz_line` varchar(32) NOT NULL COMMENT 'business line', `role_type` varchar(32) NOT NULL COMMENT 'lab role', `leader_id` bigint DEFAULT NULL COMMENT 'line lead', `join_date` date DEFAULT NULL COMMENT 'join date', `member_status` varchar(16) DEFAULT 'ACTIVE' COMMENT 'member status', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_member_user` (`user_id`,`del_flag`), UNIQUE KEY `uk_lab_member_no` (`member_no`,`del_flag`), KEY `idx_lab_member_line_status` (`biz_line`,`member_status`), KEY `idx_lab_member_leader` (`leader_id`)
+ PRIMARY KEY (`id`), KEY `idx_lab_member_line_status` (`biz_line`,`member_status`), KEY `idx_lab_member_leader` (`leader_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='laboratory member';
 
 CREATE TABLE IF NOT EXISTS `lab_skill` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `skill_code` varchar(64) NOT NULL COMMENT 'skill code', `skill_name` varchar(100) NOT NULL COMMENT 'skill name', `skill_category` varchar(64) DEFAULT NULL COMMENT 'skill category', `skill_desc` varchar(1000) DEFAULT NULL COMMENT 'skill description', `status` varchar(16) DEFAULT 'ACTIVE' COMMENT 'status', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_skill_code` (`skill_code`,`del_flag`), KEY `idx_lab_skill_category` (`skill_category`)
+ PRIMARY KEY (`id`), KEY `idx_lab_skill_category` (`skill_category`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='skill dictionary';
 
 CREATE TABLE IF NOT EXISTS `lab_member_skill` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `member_id` bigint NOT NULL COMMENT 'member reference', `skill_id` bigint NOT NULL COMMENT 'skill reference', `proficiency_level` varchar(16) DEFAULT 'BASIC' COMMENT 'proficiency level', `proficiency_score` decimal(5,2) DEFAULT 0 COMMENT 'proficiency score', `certified_flag` char(1) DEFAULT '0' COMMENT 'certified flag', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_member_skill` (`member_id`,`skill_id`,`del_flag`), KEY `idx_lab_member_skill_member` (`member_id`), KEY `idx_lab_member_skill_skill` (`skill_id`)
+ PRIMARY KEY (`id`), KEY `idx_lab_member_skill_skill` (`skill_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='member skill matrix';
 
 CREATE TABLE IF NOT EXISTS `lab_one2one` (
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS `lab_one2one` (
 
 CREATE TABLE IF NOT EXISTS `lab_ipr` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `ipr_no` varchar(64) NOT NULL COMMENT 'IPR number', `ipr_name` varchar(300) NOT NULL COMMENT 'IPR name', `ipr_type` varchar(32) NOT NULL COMMENT 'IPR type', `ipr_stage` varchar(32) DEFAULT 'DRAFTING' COMMENT 'IPR stage', `owner_id` bigint NOT NULL COMMENT 'member owner', `application_no` varchar(128) DEFAULT NULL COMMENT 'application number', `submit_date` date DEFAULT NULL COMMENT 'submit date', `authorized_date` date DEFAULT NULL COMMENT 'authorized date', `evidence_url` varchar(1000) DEFAULT NULL COMMENT 'evidence URL', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_ipr_no` (`ipr_no`,`del_flag`), KEY `idx_lab_ipr_owner_stage` (`owner_id`,`ipr_stage`), KEY `idx_lab_ipr_type` (`ipr_type`)
+ PRIMARY KEY (`id`), KEY `idx_lab_ipr_owner_stage` (`owner_id`,`ipr_stage`), KEY `idx_lab_ipr_type` (`ipr_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='intellectual property right';
 
 CREATE TABLE IF NOT EXISTS `lab_collaboration_record` (
@@ -68,38 +68,55 @@ CREATE TABLE IF NOT EXISTS `lab_collaboration_record` (
 
 CREATE TABLE IF NOT EXISTS `lab_perf_score` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `member_id` bigint NOT NULL COMMENT 'member reference', `period` varchar(16) NOT NULL COMMENT 'assessment period', `revision_no` int NOT NULL DEFAULT 1 COMMENT 'revision number', `current_flag` char(1) DEFAULT '1' COMMENT 'current revision', `score` decimal(10,2) DEFAULT 0 COMMENT 'final score', `detail_json` json DEFAULT NULL COMMENT 'score detail JSON', `red_line_flag` char(1) DEFAULT '0' COMMENT 'red line flag', `red_line_reason` varchar(1000) DEFAULT NULL COMMENT 'red line reason', `revoked_flag` char(1) DEFAULT '0' COMMENT 'revoked flag', `revoke_reason` varchar(1000) DEFAULT NULL COMMENT 'revoke reason', `calibration_status` varchar(16) DEFAULT 'PENDING' COMMENT 'calibration status', `calibrator_id` bigint DEFAULT NULL COMMENT 'calibrator member', `calibration_note` varchar(1000) DEFAULT NULL COMMENT 'calibration note', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_perf_member_period_rev` (`member_id`,`period`,`revision_no`,`del_flag`), KEY `idx_lab_perf_member_period_current` (`member_id`,`period`,`current_flag`), KEY `idx_lab_perf_period_current` (`period`,`current_flag`)
+ PRIMARY KEY (`id`), KEY `idx_lab_perf_member_period_current` (`member_id`,`period`,`current_flag`), KEY `idx_lab_perf_period_current` (`period`,`current_flag`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='performance score revision';
 
 CREATE TABLE IF NOT EXISTS `lab_period_close` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `period` varchar(16) NOT NULL COMMENT 'closed period', `close_status` varchar(16) DEFAULT 'OPEN' COMMENT 'close status', `close_by` varchar(64) DEFAULT NULL COMMENT 'closer', `close_time` datetime DEFAULT NULL COMMENT 'close time', `close_reason` varchar(1000) DEFAULT NULL COMMENT 'close reason', `reopen_by` varchar(64) DEFAULT NULL COMMENT 'reopener', `reopen_time` datetime DEFAULT NULL COMMENT 'reopen time', `reopen_reason` varchar(1000) DEFAULT NULL COMMENT 'reopen reason', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_period_close_period` (`period`,`del_flag`), KEY `idx_lab_period_close_status` (`close_status`)
+ PRIMARY KEY (`id`), KEY `idx_lab_period_close_status` (`close_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='period close audit';
 
 CREATE TABLE IF NOT EXISTS `lab_report_template` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `template_code` varchar(64) NOT NULL COMMENT 'template code', `template_name` varchar(200) NOT NULL COMMENT 'template name', `period_type` varchar(16) NOT NULL COMMENT 'period type', `revision_no` int NOT NULL DEFAULT 1 COMMENT 'revision number', `latest_flag` char(1) DEFAULT '1' COMMENT 'latest flag', `default_flag` char(1) DEFAULT '0' COMMENT 'default flag', `status` varchar(16) DEFAULT 'ENABLED' COMMENT 'template status', `header_json` json DEFAULT NULL COMMENT 'header JSON', `style_json` json DEFAULT NULL COMMENT 'style JSON', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_report_tpl_code_rev` (`template_code`,`revision_no`,`del_flag`), KEY `idx_lab_report_tpl_default` (`period_type`,`default_flag`,`status`)
+ PRIMARY KEY (`id`), KEY `idx_lab_report_tpl_default` (`period_type`,`default_flag`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='report template revision';
 
 CREATE TABLE IF NOT EXISTS `lab_report_section` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `template_id` bigint NOT NULL COMMENT 'template reference', `section_code` varchar(64) NOT NULL COMMENT 'section code', `section_name` varchar(200) NOT NULL COMMENT 'section name', `section_type` varchar(32) NOT NULL COMMENT 'renderer type', `sort_no` int NOT NULL COMMENT 'display order', `data_source` varchar(128) DEFAULT NULL COMMENT 'built-in data source', `query_config_json` json DEFAULT NULL COMMENT 'query configuration', `render_config_json` json DEFAULT NULL COMMENT 'renderer configuration', `style_config_json` json DEFAULT NULL COMMENT 'style configuration', `manual_flag` char(1) DEFAULT '0' COMMENT 'manual input flag', `visible_flag` char(1) DEFAULT '1' COMMENT 'visible flag', `sensitive_flag` char(1) DEFAULT '0' COMMENT 'sensitive flag', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_report_section` (`template_id`,`section_code`,`del_flag`), KEY `idx_lab_report_section_tpl_sort` (`template_id`,`sort_no`), KEY `idx_lab_report_section_type` (`section_type`)
+ PRIMARY KEY (`id`), KEY `idx_lab_report_section_tpl_sort` (`template_id`,`sort_no`), KEY `idx_lab_report_section_type` (`section_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='report template section';
 
 CREATE TABLE IF NOT EXISTS `lab_report_summary` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `period` varchar(16) NOT NULL COMMENT 'report period', `biz_line` varchar(32) NOT NULL COMMENT 'business line', `section_code` varchar(64) NOT NULL COMMENT 'section code', `summary_json` json DEFAULT NULL COMMENT 'summary JSON', `summary_text` text COMMENT 'summary text', `source_revision` int DEFAULT 1 COMMENT 'source revision', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_report_summary` (`period`,`biz_line`,`section_code`,`del_flag`), KEY `idx_lab_report_summary_period` (`period`,`biz_line`)
+ PRIMARY KEY (`id`), KEY `idx_lab_report_summary_period` (`period`,`biz_line`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='report precomputed summary';
 
 CREATE TABLE IF NOT EXISTS `lab_report_instance` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `report_no` varchar(64) NOT NULL COMMENT 'report number', `template_id` bigint NOT NULL COMMENT 'template reference', `period` varchar(16) NOT NULL COMMENT 'report period', `biz_line` varchar(32) DEFAULT 'ALL' COMMENT 'business line', `revision_no` int NOT NULL DEFAULT 1 COMMENT 'report revision number', `lifecycle_status` varchar(32) DEFAULT 'DRAFT' COMMENT 'lifecycle status', `current_flag` char(1) DEFAULT '1' COMMENT 'current flag', `final_flag` char(1) DEFAULT '0' COMMENT 'final flag', `sensitive_flag` char(1) DEFAULT '0' COMMENT 'sensitive flag', `source_data_json` json DEFAULT NULL COMMENT 'source data JSON', `source_perf_revision` int DEFAULT 1 COMMENT 'source performance revision', `content_json` json DEFAULT NULL COMMENT 'content JSON', `content_markdown` longtext COMMENT 'markdown content', `json_status` varchar(16) DEFAULT 'PENDING' COMMENT 'JSON artifact status', `json_path` varchar(1000) DEFAULT NULL COMMENT 'JSON artifact path', `json_error` varchar(2000) DEFAULT NULL COMMENT 'JSON artifact error', `markdown_status` varchar(16) DEFAULT 'PENDING' COMMENT 'Markdown artifact status', `markdown_path` varchar(1000) DEFAULT NULL COMMENT 'Markdown artifact path', `markdown_error` varchar(2000) DEFAULT NULL COMMENT 'Markdown artifact error', `word_status` varchar(16) DEFAULT 'PENDING' COMMENT 'Word artifact status', `word_path` varchar(1000) DEFAULT NULL COMMENT 'Word artifact path', `word_error` varchar(2000) DEFAULT NULL COMMENT 'Word artifact error', `pdf_status` varchar(16) DEFAULT 'PENDING' COMMENT 'PDF artifact status', `pdf_path` varchar(1000) DEFAULT NULL COMMENT 'PDF artifact path', `pdf_error` varchar(2000) DEFAULT NULL COMMENT 'PDF artifact error', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_report_instance_no` (`report_no`,`del_flag`), UNIQUE KEY `uk_lab_report_instance_period_rev` (`template_id`,`period`,`biz_line`,`revision_no`,`del_flag`), KEY `idx_lab_report_instance_tpl_period_lifecycle` (`template_id`,`period`,`lifecycle_status`), KEY `idx_lab_report_instance_period` (`period`,`biz_line`,`lifecycle_status`), KEY `idx_lab_report_instance_final` (`final_flag`,`current_flag`)
+ PRIMARY KEY (`id`), KEY `idx_lab_report_instance_tpl_period_lifecycle` (`template_id`,`period`,`lifecycle_status`), KEY `idx_lab_report_instance_period` (`period`,`biz_line`,`lifecycle_status`), KEY `idx_lab_report_instance_final` (`final_flag`,`current_flag`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='generated report instance';
 
 CREATE TABLE IF NOT EXISTS `lab_report_job` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `job_no` varchar(64) NOT NULL COMMENT 'job number', `report_id` bigint DEFAULT NULL COMMENT 'report reference', `job_type` varchar(32) NOT NULL COMMENT 'job type', `job_status` varchar(32) DEFAULT 'PENDING' COMMENT 'job status', `progress_rate` decimal(5,2) DEFAULT 0 COMMENT 'progress percent', `attempt_count` int DEFAULT 0 COMMENT 'attempt count', `error_message` varchar(2000) DEFAULT NULL COMMENT 'error message', `started_time` datetime DEFAULT NULL COMMENT 'started time', `finished_time` datetime DEFAULT NULL COMMENT 'finished time', `idempotency_key` varchar(128) NOT NULL COMMENT 'idempotency key', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_report_job_no` (`job_no`,`del_flag`), UNIQUE KEY `uk_lab_report_job_idempotency` (`idempotency_key`), KEY `idx_lab_report_job_instance_status` (`report_id`,`job_status`), KEY `idx_lab_report_job_type_status` (`job_type`,`job_status`)
+ PRIMARY KEY (`id`), KEY `idx_lab_report_job_instance_status` (`report_id`,`job_status`), KEY `idx_lab_report_job_type_status` (`job_type`,`job_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='report generation job';
+
+-- Active rows remain unique; deleted duplicates use NULL generated flags and may coexist.
+ALTER TABLE `lab_goal` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_goal_year_no` (`year`,`goal_no`,`active_unique_flag`);
+ALTER TABLE `lab_task_quality_gate` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_gate_task_no` (`task_id`,`gate_no`,`active_unique_flag`);
+ALTER TABLE `lab_reminder` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_reminder_idempotency` (`idempotency_key`,`active_unique_flag`);
+ALTER TABLE `lab_asset` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_asset_no` (`asset_no`,`active_unique_flag`);
+ALTER TABLE `lab_member` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_member_user` (`user_id`,`active_unique_flag`), ADD UNIQUE KEY `uk_lab_member_no` (`member_no`,`active_unique_flag`);
+ALTER TABLE `lab_skill` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_skill_code` (`skill_code`,`active_unique_flag`);
+ALTER TABLE `lab_member_skill` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_member_skill` (`member_id`,`skill_id`,`active_unique_flag`);
+ALTER TABLE `lab_ipr` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_ipr_no` (`ipr_no`,`active_unique_flag`);
+ALTER TABLE `lab_perf_score` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_perf_member_period_rev` (`member_id`,`period`,`revision_no`,`active_unique_flag`);
+ALTER TABLE `lab_period_close` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_period_close_period` (`period`,`active_unique_flag`);
+ALTER TABLE `lab_report_template` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_report_tpl_code_rev` (`template_code`,`revision_no`,`active_unique_flag`);
+ALTER TABLE `lab_report_section` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_report_section` (`template_id`,`section_code`,`active_unique_flag`);
+ALTER TABLE `lab_report_summary` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_report_summary` (`period`,`biz_line`,`section_code`,`active_unique_flag`);
+ALTER TABLE `lab_report_instance` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_report_instance_no` (`report_no`,`active_unique_flag`), ADD UNIQUE KEY `uk_lab_report_instance_period_rev` (`template_id`,`period`,`biz_line`,`revision_no`,`active_unique_flag`);
+ALTER TABLE `lab_report_job` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker', ADD UNIQUE KEY `uk_lab_report_job_no` (`job_no`,`active_unique_flag`), ADD UNIQUE KEY `uk_lab_report_job_idempotency` (`idempotency_key`,`active_unique_flag`);
 
 -- Dictionary initialization deliberately replaces only AI-lab dictionary types.
 DELETE FROM `sys_dict_data` WHERE `dict_type` LIKE 'lab_%';
@@ -120,8 +137,8 @@ INSERT INTO `sys_dict_data` (`dict_code`,`dict_sort`,`dict_label`,`dict_value`,`
 (30210,1,'Draft','DRAFT','lab_report_status','N','0','admin',NOW()),(30211,2,'Generated','GENERATED','lab_report_status','N','0','admin',NOW()),(30212,3,'Final','FINAL','lab_report_status','N','0','admin',NOW()),(30220,1,'Pending','PENDING','lab_report_job_status','N','0','admin',NOW()),(30221,2,'Running','RUNNING','lab_report_job_status','N','0','admin',NOW()),(30222,3,'Success','SUCCESS','lab_report_job_status','N','0','admin',NOW()),(30223,4,'Failed','FAILED','lab_report_job_status','N','0','admin',NOW()),(30230,1,'Pending','PENDING','lab_artifact_status','N','0','admin',NOW()),(30231,2,'Ready','READY','lab_artifact_status','N','0','admin',NOW()),(30232,3,'Failed','FAILED','lab_artifact_status','N','0','admin',NOW()),(30240,1,'Pending','PENDING','lab_review_status','N','0','admin',NOW()),(30241,2,'Approved','APPROVED','lab_review_status','N','0','admin',NOW()),(30242,3,'Rejected','REJECTED','lab_review_status','N','0','admin',NOW());
 
 -- Menu and permission tree; the 300xx range does not overlap the RuoYi baseline seed.
-DELETE FROM `sys_role_menu` WHERE `menu_id` BETWEEN 31000 AND 31199;
-DELETE FROM `sys_menu` WHERE `menu_id` BETWEEN 31000 AND 31199;
+DELETE FROM `sys_role_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31009,31010,31011,31020,31021,31022,31030,31031,31032,31033,31034,31040,31041,31042,31050,31060,31070,31071,31072,31080,31081,31090,31091,31092,31093,31094,31100,31101,31102,31110,31111,31112,31113,31114);
+DELETE FROM `sys_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31009,31010,31011,31020,31021,31022,31030,31031,31032,31033,31034,31040,31041,31042,31050,31060,31070,31071,31072,31080,31081,31090,31091,31092,31093,31094,31100,31101,31102,31110,31111,31112,31113,31114);
 INSERT INTO `sys_menu` (`menu_id`,`menu_name`,`parent_id`,`order_num`,`path`,`component`,`query`,`route_name`,`is_frame`,`is_cache`,`menu_type`,`visible`,`status`,`perms`,`icon`,`create_by`,`create_time`,`remark`) VALUES
 (31000,'AI Lab',0,10,'lab',NULL,'','',1,0,'M','0','0','','dashboard','admin',NOW(),'AI lab root'),
 (31001,'Dashboard',31000,1,'dashboard','lab/dashboard/index','','',1,0,'C','0','0','lab:dashboard:view','dashboard','admin',NOW(),''),(31002,'Goals',31000,2,'goal','lab/goal/index','','',1,0,'C','0','0','lab:goal:list','target','admin',NOW(),''),(31003,'Tasks',31000,3,'task','lab/task/index','','',1,0,'C','0','0','lab:task:list','list','admin',NOW(),''),(31004,'Members',31000,4,'member','lab/member/index','','',1,0,'C','0','0','lab:member:list','user','admin',NOW(),''),(31005,'Skills',31000,5,'skill','lab/skill/index','','',1,0,'C','0','0','lab:skill:list','star','admin',NOW(),''),(31006,'One-to-one',31000,6,'one2one','lab/one2one/index','','',1,0,'C','0','0','lab:one2one:list','chat-dot-round','admin',NOW(),''),(31007,'Assets',31000,7,'asset','lab/asset/index','','',1,0,'C','0','0','lab:asset:list','cpu','admin',NOW(),''),(31008,'IPR',31000,8,'ipr','lab/ipr/index','','',1,0,'C','0','0','lab:ipr:list','documentation','admin',NOW(),''),(31009,'Performance',31000,9,'perf','lab/perf/index','','',1,0,'C','0','0','lab:perf:list','trend-charts','admin',NOW(),''),(31010,'Templates',31000,10,'template','lab/template/index','','',1,0,'C','0','0','lab:template:list','form','admin',NOW(),''),(31011,'Reports',31000,11,'report','lab/report/index','','',1,0,'C','0','0','lab:report:list','document','admin',NOW(),''),
@@ -135,38 +152,43 @@ INSERT INTO `sys_menu` (`menu_id`,`menu_name`,`parent_id`,`order_num`,`path`,`co
 DELETE FROM `sys_role_menu` WHERE `role_id` IN (30001,30002,30003);
 DELETE FROM `sys_role` WHERE `role_id` IN (30001,30002,30003);
 INSERT INTO `sys_role` (`role_id`,`role_name`,`role_key`,`role_sort`,`data_scope`,`menu_check_strictly`,`dept_check_strictly`,`status`,`del_flag`,`create_by`,`create_time`,`remark`) VALUES (30001,'AI Lab Manager','lab_manager',1,1,1,1,'0','0','admin',NOW(),'Lab full administration'),(30002,'AI Lab Line Lead','lab_lead',2,2,1,1,'0','0','admin',NOW(),'Lab line lead'),(30003,'AI Lab Member','lab_member',3,2,1,1,'0','0','admin',NOW(),'Lab member');
-INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 30001,`menu_id` FROM `sys_menu` WHERE `menu_id` BETWEEN 31000 AND 31199;
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 30001,`menu_id` FROM `sys_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31009,31010,31011,31020,31021,31022,31030,31031,31032,31033,31034,31040,31041,31042,31050,31060,31070,31071,31072,31080,31081,31090,31091,31092,31093,31094,31100,31101,31102,31110,31111,31112,31113,31114);
 INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 30002,`menu_id` FROM `sys_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31009,31010,31011,31020,31021,31030,31031,31033,31034,31050,31060,31070,31071,31080,31081,31090,31092,31094,31100,31110,31111,31112,31113);
 INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 30003,`menu_id` FROM `sys_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31011,31030,31031,31033,31060,31112);
 
 -- The RuoYi baseline BCrypt hash is used for demo accounts; never use demo accounts in production.
-DELETE FROM `sys_user_role` WHERE `user_id` BETWEEN 30001 AND 30006;
-DELETE FROM `sys_user` WHERE `user_id` BETWEEN 30001 AND 30006;
+DELETE FROM `sys_user_role` WHERE `user_id` IN (30001,30002,30003,30004,30005,30006);
+DELETE FROM `sys_user` WHERE `user_id` IN (30001,30002,30003,30004,30005,30006);
 INSERT INTO `sys_user` (`user_id`,`dept_id`,`user_name`,`nick_name`,`user_type`,`email`,`phonenumber`,`sex`,`avatar`,`password`,`status`,`del_flag`,`create_by`,`create_time`,`remark`) VALUES
-(30001,100,'lab_manager','Lab Manager','00','lab.manager@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2','0','0','admin',NOW(),'Demo account; baseline BCrypt hash'),(30002,101,'lab_algorithm','Algorithm Lead','00','algorithm@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2','0','0','admin',NOW(),'Demo account; baseline BCrypt hash'),(30003,101,'lab_platform','Platform Lead','00','platform@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2','0','0','admin',NOW(),'Demo account; baseline BCrypt hash'),(30004,101,'lab_hardware','Hardware Lead','00','hardware@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2','0','0','admin',NOW(),'Demo account; baseline BCrypt hash'),(30005,101,'lab_developer','Platform Engineer','00','developer@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2','0','0','admin',NOW(),'Demo account; baseline BCrypt hash'),(30006,101,'lab_researcher','Algorithm Engineer','00','researcher@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2','0','0','admin',NOW(),'Demo account; baseline BCrypt hash');
+(30001,100,'lab_manager','Lab Manager','00','lab.manager@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu0','1','0','admin',NOW(),'Disabled demo account - administrator must reset password and explicitly enable'),
+(30002,101,'lab_algorithm','Algorithm Lead','00','algorithm@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu1','1','0','admin',NOW(),'Disabled demo account - administrator must reset password and explicitly enable'),
+(30003,101,'lab_platform','Platform Lead','00','platform@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu3','1','0','admin',NOW(),'Disabled demo account - administrator must reset password and explicitly enable'),
+(30004,101,'lab_hardware','Hardware Lead','00','hardware@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu4','1','0','admin',NOW(),'Disabled demo account - administrator must reset password and explicitly enable'),
+(30005,101,'lab_developer','Platform Engineer','00','developer@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu5','1','0','admin',NOW(),'Disabled demo account - administrator must reset password and explicitly enable'),
+(30006,101,'lab_researcher','Algorithm Engineer','00','researcher@example.test','','0','','$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu6','1','0','admin',NOW(),'Disabled demo account - administrator must reset password and explicitly enable');
 INSERT INTO `sys_user_role` (`user_id`,`role_id`) VALUES (30001,30001),(30002,30002),(30003,30002),(30004,30002),(30005,30003),(30006,30003);
 
 -- Deterministic demo business data.  Child rows are removed before their parents.
-DELETE FROM `lab_report_job` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_report_instance` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_report_summary` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_report_section` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_report_template` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_period_close` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_perf_score` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_collaboration_record` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_ipr` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_one2one` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_member_skill` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_skill` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_reminder` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_task_block_event` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_task_quality_gate` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_task_evidence` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_task` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_goal` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_asset` WHERE `id` BETWEEN 30001 AND 30099;
-DELETE FROM `lab_member` WHERE `id` BETWEEN 30001 AND 30099;
+DELETE FROM `lab_report_job` WHERE `id` IN (30001);
+DELETE FROM `lab_report_instance` WHERE `id` IN (30001);
+DELETE FROM `lab_report_summary` WHERE `id` IN (30001,30002);
+DELETE FROM `lab_report_section` WHERE `id` IN (30001,30002,30003,30004,30005,30006);
+DELETE FROM `lab_report_template` WHERE `id` IN (30001);
+DELETE FROM `lab_period_close` WHERE `id` IN (30001);
+DELETE FROM `lab_perf_score` WHERE `id` IN (30001,30002,30003);
+DELETE FROM `lab_collaboration_record` WHERE `id` IN (30001);
+DELETE FROM `lab_ipr` WHERE `id` IN (30001,30002);
+DELETE FROM `lab_one2one` WHERE `id` IN (30001);
+DELETE FROM `lab_member_skill` WHERE `id` IN (30001,30002,30003,30004,30005);
+DELETE FROM `lab_skill` WHERE `id` IN (30001,30002,30003);
+DELETE FROM `lab_reminder` WHERE `id` IN (30001,30002);
+DELETE FROM `lab_task_block_event` WHERE `id` IN (30001,30002);
+DELETE FROM `lab_task_quality_gate` WHERE `id` IN (30001,30002);
+DELETE FROM `lab_task_evidence` WHERE `id` IN (30001,30002);
+DELETE FROM `lab_task` WHERE `id` IN (30001,30002,30003,30004,30005);
+DELETE FROM `lab_goal` WHERE `id` IN (30001,30002,30003,30004);
+DELETE FROM `lab_asset` WHERE `id` IN (30001,30002,30003);
+DELETE FROM `lab_member` WHERE `id` IN (30001,30002,30003,30004,30005,30006);
 
 INSERT INTO `lab_member` (`id`,`user_id`,`member_no`,`member_name`,`biz_line`,`role_type`,`leader_id`,`join_date`,`member_status`,`create_by`,`create_time`,`remark`) VALUES (30001,30001,'MGR-001','Laboratory Manager','manage','MANAGER',NULL,'2024-01-01','ACTIVE','admin',NOW(),'Demo manager');
 INSERT INTO `lab_member` (`id`,`user_id`,`member_no`,`member_name`,`biz_line`,`role_type`,`leader_id`,`join_date`,`member_status`,`create_by`,`create_time`,`remark`) VALUES (30002,30002,'ALG-001','Algorithm Lead','algorithm','LINE_LEAD',30001,'2024-01-01','ACTIVE','admin',NOW(),'Demo algorithm lead');
