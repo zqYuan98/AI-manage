@@ -13,9 +13,9 @@ public interface TaskWorkflowService {
 
     void withdraw(LabTask task);
 
-    List<FieldValidationError> reviewPass(LabTask task, TaskSubmitCommand command);
+    List<FieldValidationError> reviewPass(LabTask task, TaskSubmitCommand command, Long actorId);
 
-    void reviewReturn(LabTask task, TaskSubmitCommand command);
+    void reviewReturn(LabTask task, TaskSubmitCommand command, Long actorId);
 
     void managerReopen(LabTask task, Long managerId, String reason);
 }

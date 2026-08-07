@@ -24,6 +24,30 @@ public class LabTaskEvidence extends BaseEntity {
     private String auditComment;
     private String delFlag;
 
+    public LabTaskEvidence() {
+    }
+
+    public LabTaskEvidence(LabTaskEvidence source) {
+        this.id = source.id;
+        this.taskId = source.taskId;
+        this.evidenceType = source.evidenceType;
+        this.evidenceTitle = source.evidenceTitle;
+        this.evidenceUrl = source.evidenceUrl;
+        this.evidenceJson = source.evidenceJson;
+        this.submitterId = source.submitterId;
+        this.submitTime = copyDate(source.submitTime);
+        this.auditStatus = source.auditStatus;
+        this.auditorId = source.auditorId;
+        this.auditTime = copyDate(source.auditTime);
+        this.auditComment = source.auditComment;
+        this.delFlag = source.delFlag;
+        setCreateBy(source.getCreateBy());
+        setCreateTime(copyDate(source.getCreateTime()));
+        setUpdateBy(source.getUpdateBy());
+        setUpdateTime(copyDate(source.getUpdateTime()));
+        setRemark(source.getRemark());
+    }
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public Long getTaskId() { return taskId; }
@@ -38,16 +62,18 @@ public class LabTaskEvidence extends BaseEntity {
     public void setEvidenceJson(String evidenceJson) { this.evidenceJson = evidenceJson; }
     public Long getSubmitterId() { return submitterId; }
     public void setSubmitterId(Long submitterId) { this.submitterId = submitterId; }
-    public Date getSubmitTime() { return submitTime; }
-    public void setSubmitTime(Date submitTime) { this.submitTime = submitTime; }
+    public Date getSubmitTime() { return copyDate(submitTime); }
+    public void setSubmitTime(Date submitTime) { this.submitTime = copyDate(submitTime); }
     public String getAuditStatus() { return auditStatus; }
     public void setAuditStatus(String auditStatus) { this.auditStatus = auditStatus; }
     public Long getAuditorId() { return auditorId; }
     public void setAuditorId(Long auditorId) { this.auditorId = auditorId; }
-    public Date getAuditTime() { return auditTime; }
-    public void setAuditTime(Date auditTime) { this.auditTime = auditTime; }
+    public Date getAuditTime() { return copyDate(auditTime); }
+    public void setAuditTime(Date auditTime) { this.auditTime = copyDate(auditTime); }
     public String getAuditComment() { return auditComment; }
     public void setAuditComment(String auditComment) { this.auditComment = auditComment; }
     public String getDelFlag() { return delFlag; }
     public void setDelFlag(String delFlag) { this.delFlag = delFlag; }
+
+    private Date copyDate(Date value) { return value == null ? null : new Date(value.getTime()); }
 }

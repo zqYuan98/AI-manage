@@ -37,6 +37,9 @@ public class LabTask extends BaseEntity {
     private Long assetId;
     private String coordinationRequired;
     private Long coordinationOwnerId;
+    private Long coordinationDeptId;
+    private String coordinationContent;
+    private String coordinationSupport;
     private String coordinationDesc;
     private String blockFlag;
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -68,10 +71,10 @@ public class LabTask extends BaseEntity {
     public void setOwnerId(Long ownerId) { this.ownerId = ownerId; }
     public Long getDeptId() { return deptId; }
     public void setDeptId(Long deptId) { this.deptId = deptId; }
-    public Date getPlanDate() { return planDate; }
-    public void setPlanDate(Date planDate) { this.planDate = planDate; }
-    public Date getActualFinishTime() { return actualFinishTime; }
-    public void setActualFinishTime(Date actualFinishTime) { this.actualFinishTime = actualFinishTime; }
+    public Date getPlanDate() { return copyDate(planDate); }
+    public void setPlanDate(Date planDate) { this.planDate = copyDate(planDate); }
+    public Date getActualFinishTime() { return copyDate(actualFinishTime); }
+    public void setActualFinishTime(Date actualFinishTime) { this.actualFinishTime = copyDate(actualFinishTime); }
     public String getDeliverable() { return deliverable; }
     public void setDeliverable(String deliverable) { this.deliverable = deliverable; }
     public BigDecimal getPerfWeight() { return perfWeight; }
@@ -94,18 +97,36 @@ public class LabTask extends BaseEntity {
     public void setCoordinationRequired(String coordinationRequired) { this.coordinationRequired = coordinationRequired; }
     public Long getCoordinationOwnerId() { return coordinationOwnerId; }
     public void setCoordinationOwnerId(Long coordinationOwnerId) { this.coordinationOwnerId = coordinationOwnerId; }
+    public Long getCoordinationDeptId() { return coordinationDeptId; }
+    public void setCoordinationDeptId(Long coordinationDeptId) { this.coordinationDeptId = coordinationDeptId; }
+    public String getCoordinationContent() { return coordinationContent; }
+    public void setCoordinationContent(String coordinationContent) { this.coordinationContent = coordinationContent; }
+    public String getCoordinationSupport() { return coordinationSupport; }
+    public void setCoordinationSupport(String coordinationSupport) { this.coordinationSupport = coordinationSupport; }
     public String getCoordinationDesc() { return coordinationDesc; }
     public void setCoordinationDesc(String coordinationDesc) { this.coordinationDesc = coordinationDesc; }
     public String getBlockFlag() { return blockFlag; }
     public void setBlockFlag(String blockFlag) { this.blockFlag = blockFlag; }
-    public Date getBlockStartTime() { return blockStartTime; }
-    public void setBlockStartTime(Date blockStartTime) { this.blockStartTime = blockStartTime; }
+    public Date getBlockStartTime() { return copyDate(blockStartTime); }
+    public void setBlockStartTime(Date blockStartTime) { this.blockStartTime = copyDate(blockStartTime); }
     public String getPeriodLockFlag() { return periodLockFlag; }
     public void setPeriodLockFlag(String periodLockFlag) { this.periodLockFlag = periodLockFlag; }
     public Integer getVersion() { return version; }
     public void setVersion(Integer version) { this.version = version; }
     public String getDelFlag() { return delFlag; }
     public void setDelFlag(String delFlag) { this.delFlag = delFlag; }
-    public List<LabTaskEvidence> getEvidenceList() { return evidenceList; }
-    public void setEvidenceList(List<LabTaskEvidence> evidenceList) { this.evidenceList = evidenceList == null ? new ArrayList<LabTaskEvidence>() : new ArrayList<LabTaskEvidence>(evidenceList); }
+    public List<LabTaskEvidence> getEvidenceList() { return copyEvidenceList(evidenceList); }
+    public void setEvidenceList(List<LabTaskEvidence> evidenceList) { this.evidenceList = copyEvidenceList(evidenceList); }
+
+    private Date copyDate(Date value) { return value == null ? null : new Date(value.getTime()); }
+
+    private List<LabTaskEvidence> copyEvidenceList(List<LabTaskEvidence> source) {
+        List<LabTaskEvidence> copy = new ArrayList<LabTaskEvidence>();
+        if (source != null) {
+            for (LabTaskEvidence evidence : source) {
+                copy.add(evidence == null ? null : new LabTaskEvidence(evidence));
+            }
+        }
+        return copy;
+    }
 }

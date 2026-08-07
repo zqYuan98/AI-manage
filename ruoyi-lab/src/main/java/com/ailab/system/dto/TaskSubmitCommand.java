@@ -13,11 +13,9 @@ public class TaskSubmitCommand {
     private String failReason;
     private String nextAction;
     private List<LabTaskEvidence> evidenceList = new ArrayList<LabTaskEvidence>();
-    private Long actionUserId;
-    private Long reviewerId;
     private String reviewerComment;
-    private Date reviewTime;
     private String evidenceAuditComment;
+    private List<Long> approvedEvidenceIds = new ArrayList<Long>();
     private boolean exceededConfirmed;
 
     public String getRequestedResultStatus() { return requestedResultStatus; }
@@ -30,22 +28,28 @@ public class TaskSubmitCommand {
     public void setFailReason(String failReason) { this.failReason = failReason; }
     public String getNextAction() { return nextAction; }
     public void setNextAction(String nextAction) { this.nextAction = nextAction; }
-    public List<LabTaskEvidence> getEvidenceList() { return evidenceList; }
-    public void setEvidenceList(List<LabTaskEvidence> evidenceList) { this.evidenceList = evidenceList == null ? new ArrayList<LabTaskEvidence>() : new ArrayList<LabTaskEvidence>(evidenceList); }
-    public Long getActionUserId() { return actionUserId; }
-    public void setActionUserId(Long actionUserId) { this.actionUserId = actionUserId; }
-    public Long getReviewerId() { return reviewerId; }
-    public void setReviewerId(Long reviewerId) { this.reviewerId = reviewerId; }
+    public List<LabTaskEvidence> getEvidenceList() { return copyEvidenceList(evidenceList); }
+    public void setEvidenceList(List<LabTaskEvidence> evidenceList) { this.evidenceList = copyEvidenceList(evidenceList); }
     public String getReviewerComment() { return reviewerComment; }
     public void setReviewerComment(String reviewerComment) { this.reviewerComment = reviewerComment; }
-    public Date getReviewTime() { return copyDate(reviewTime); }
-    public void setReviewTime(Date reviewTime) { this.reviewTime = copyDate(reviewTime); }
     public String getEvidenceAuditComment() { return evidenceAuditComment; }
     public void setEvidenceAuditComment(String evidenceAuditComment) { this.evidenceAuditComment = evidenceAuditComment; }
+    public List<Long> getApprovedEvidenceIds() { return new ArrayList<Long>(approvedEvidenceIds); }
+    public void setApprovedEvidenceIds(List<Long> approvedEvidenceIds) { this.approvedEvidenceIds = approvedEvidenceIds == null ? new ArrayList<Long>() : new ArrayList<Long>(approvedEvidenceIds); }
     public boolean isExceededConfirmed() { return exceededConfirmed; }
     public void setExceededConfirmed(boolean exceededConfirmed) { this.exceededConfirmed = exceededConfirmed; }
 
     private Date copyDate(Date value) {
         return value == null ? null : new Date(value.getTime());
+    }
+
+    private List<LabTaskEvidence> copyEvidenceList(List<LabTaskEvidence> source) {
+        List<LabTaskEvidence> copy = new ArrayList<LabTaskEvidence>();
+        if (source != null) {
+            for (LabTaskEvidence evidence : source) {
+                copy.add(evidence == null ? null : new LabTaskEvidence(evidence));
+            }
+        }
+        return copy;
     }
 }
