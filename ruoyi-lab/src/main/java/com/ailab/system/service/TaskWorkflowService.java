@@ -9,7 +9,7 @@ import java.util.List;
 public interface TaskWorkflowService {
     List<FieldValidationError> activatePlan(LabTask task);
 
-    List<FieldValidationError> submitResult(LabTask task, TaskSubmitCommand command);
+    List<FieldValidationError> submitResult(LabTask task, TaskSubmitCommand command, Long actorId);
 
     void withdraw(LabTask task);
 

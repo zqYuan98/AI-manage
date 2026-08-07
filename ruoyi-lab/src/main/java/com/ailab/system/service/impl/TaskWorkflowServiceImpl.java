@@ -53,7 +53,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
     }
 
     @Override
-    public List<FieldValidationError> submitResult(LabTask task, TaskSubmitCommand command) {
+    public List<FieldValidationError> submitResult(LabTask task, TaskSubmitCommand command, Long actorId) {
         requireTask(task);
         requireWorkflow(task, LabConstants.WORKFLOW_ACTIVE);
         if (command == null) {
@@ -70,6 +70,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         }
         List<FieldValidationError> errors = LabConstants.RESULT_UNDONE.equals(requested)
                 ? validateUndone(command) : validateCompletion(command);
+        validateSubmissionContext(task, actorId, errors);
         validateCoordination(task, errors);
         if (!errors.isEmpty()) {
             return errors;
@@ -78,7 +79,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         task.setFailReason(command.getFailReason());
         task.setNextAction(command.getNextAction());
         task.setActualFinishTime(command.getActualFinishTime());
-        appendEvidence(task, command.getEvidenceList());
+        appendEvidence(task, command.getEvidenceList(), actorId);
         task.setResultStatus(LabConstants.RESULT_UNDONE.equals(requested)
                 ? LabConstants.RESULT_UNDONE : deriveCompletionStatus(task, requested));
         task.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW);
@@ -213,8 +214,9 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         if (isCompletion(task.getResultStatus())) {
             int errorsBeforeSelection = errors.size();
             validateEvidenceSelection(task, command, errors);
-            if (errors.size() == errorsBeforeSelection && !hasApprovedEvidence(task.getEvidenceList())
-                    && selectedPendingEvidence(task, command).isEmpty()) {
+            List<LabTaskEvidence> selected = selectedPendingEvidence(task, command);
+            if (errors.size() == errorsBeforeSelection && (hasPendingEvidence(task.getEvidenceList())
+                    || !hasApprovedEvidence(task.getEvidenceList())) && selected.isEmpty()) {
                 error(errors, "approvedEvidenceIds", "至少选择一条待审核证据");
             }
         }
@@ -237,36 +239,28 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         return value.toInstant().atZone(clock.getZone()).toLocalDate();
     }
 
-    private Date copyDate(Date value) {
-        return value == null ? null : new Date(value.getTime());
-    }
-
-    private void appendEvidence(LabTask task, List<LabTaskEvidence> evidenceList) {
+    private void appendEvidence(LabTask task, List<LabTaskEvidence> evidenceList, Long actorId) {
         List<LabTaskEvidence> evidence = new ArrayList<LabTaskEvidence>(task.getEvidenceList());
         if (evidenceList != null) {
             for (LabTaskEvidence item : evidenceList) {
                 if (isValidEvidence(item)) {
-                    evidence.add(copyPendingEvidence(item));
+                    evidence.add(copyPendingEvidence(task, item, actorId));
                 }
             }
         }
         task.setEvidenceList(evidence);
     }
 
-    private LabTaskEvidence copyPendingEvidence(LabTaskEvidence source) {
+    private LabTaskEvidence copyPendingEvidence(LabTask task, LabTaskEvidence source, Long actorId) {
         LabTaskEvidence copy = new LabTaskEvidence();
-        if (source == null) {
-            return copy;
-        }
-        copy.setId(source.getId());
-        copy.setTaskId(source.getTaskId());
         copy.setEvidenceType(source.getEvidenceType());
         copy.setEvidenceTitle(source.getEvidenceTitle());
         copy.setEvidenceUrl(source.getEvidenceUrl());
         copy.setEvidenceJson(source.getEvidenceJson());
-        copy.setSubmitterId(source.getSubmitterId());
-        copy.setSubmitTime(copyDate(source.getSubmitTime()));
-        copy.setDelFlag(source.getDelFlag());
+        copy.setTaskId(task.getId());
+        copy.setSubmitterId(actorId);
+        copy.setSubmitTime(Date.from(clock.instant()));
+        copy.setDelFlag(LabConstants.NO);
         copy.setAuditStatus(LabConstants.EVIDENCE_AUDIT_PENDING);
         return copy;
     }
@@ -293,7 +287,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
             return false;
         }
         for (LabTaskEvidence evidence : evidenceList) {
-            if (evidence != null && !isBlank(evidence.getEvidenceTitle()) && !isBlank(evidence.getEvidenceUrl())) {
+            if (isValidEvidence(evidence)) {
                 return true;
             }
         }
@@ -313,7 +307,29 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
     }
 
     private boolean isValidEvidence(LabTaskEvidence evidence) {
-        return evidence != null && !isBlank(evidence.getEvidenceTitle()) && !isBlank(evidence.getEvidenceUrl());
+        return evidence != null && !isBlank(evidence.getEvidenceType())
+                && !isBlank(evidence.getEvidenceTitle()) && !isBlank(evidence.getEvidenceUrl());
+    }
+
+    private boolean hasPendingEvidence(List<LabTaskEvidence> evidenceList) {
+        if (evidenceList == null) {
+            return false;
+        }
+        for (LabTaskEvidence evidence : evidenceList) {
+            if (isValidEvidence(evidence) && LabConstants.EVIDENCE_AUDIT_PENDING.equals(evidence.getAuditStatus())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void validateSubmissionContext(LabTask task, Long actorId, List<FieldValidationError> errors) {
+        if (actorId == null) {
+            error(errors, "actorId", "提交人不能为空");
+        }
+        if (task.getId() == null) {
+            error(errors, "taskId", "任务标识不能为空");
+        }
     }
 
     private void validateEvidenceSelection(LabTask task, TaskSubmitCommand command, List<FieldValidationError> errors) {
