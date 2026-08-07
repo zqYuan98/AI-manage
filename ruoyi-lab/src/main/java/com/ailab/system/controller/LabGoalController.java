@@ -47,7 +47,9 @@ public class LabGoalController extends BaseController {
     @GetMapping("/{id}/progress")
     public AjaxResult progress(@PathVariable Long id, @RequestParam String level) {
         Long actorId = SecurityUtils.getUserId();
-        return success("YEAR".equals(level) ? goalService.calculateAnnualProgress(id, actorId) : goalService.calculateMilestoneProgress(id, actorId));
+        if ("YEAR".equals(level)) return success(goalService.calculateAnnualProgress(id, actorId));
+        if ("QUARTER".equals(level)) return success(goalService.calculateMilestoneProgress(id, actorId));
+        throw new com.ruoyi.common.exception.ServiceException("Goal progress level must be YEAR or QUARTER");
     }
 
     @PreAuthorize("@ss.hasPermi('lab:goal:add')")

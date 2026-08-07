@@ -16,6 +16,8 @@ import com.ailab.system.mapper.LabGoalMapper;
 import com.ailab.system.mapper.LabTaskMapper;
 import com.ailab.system.service.impl.LabGoalServiceImpl;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
+import com.ruoyi.common.core.domain.entity.SysUser;
+import com.ruoyi.common.core.domain.model.LoginUser;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.annotation.DataScope;
 import java.math.BigDecimal;
@@ -29,7 +31,9 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 class LabGoalServiceTest {
     private MemoryGoalMapper goals;
@@ -350,6 +354,70 @@ class LabGoalServiceTest {
         assertEquals(Integer.valueOf(3), goals.find(1L).getVersion());
     }
 
+    @Test
+    void goalDeleteUsesLockingCurrentReadsForChildrenAndConnectedTasks() {
+        LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 99L, "100");
+        goals.put(annual);
+        goals.lockedChildrenOverrides.put(1L,
+                java.util.Arrays.asList(goal(2L, 1L, "QUARTER", 2026, "2026Q1", 10L, "100")));
+
+        ServiceException childError = assertThrows(ServiceException.class,
+                () -> service.deleteGoal(1L, 0, 99L));
+        assertEquals("Delete child milestones before deleting the goal", childError.getMessage());
+
+        goals.lockedChildrenOverrides.clear();
+        tasks.lockedGoalTaskOverrides.put(1L,
+                java.util.Arrays.asList(month(11L, 2L, "2026-01", "0", "0",
+                        LabConstants.WORKFLOW_DRAFT, LabConstants.RESULT_DOING)));
+        ServiceException taskError = assertThrows(ServiceException.class,
+                () -> service.deleteGoal(1L, 0, 99L));
+        assertEquals("Delete connected tasks before deleting the goal", taskError.getMessage());
+        assertEquals("0", goals.find(1L).getDelFlag());
+    }
+
+    @Test
+    void goalCreateAndUpdateRequireTheLockedCurrentOwnerToBeActive() {
+        tasks.inactiveOwnerIds.add(42L);
+        LabGoal invalidCreate = goal(null, 0L, "YEAR", 2026, null, 42L, "100");
+
+        ServiceException createError = assertThrows(ServiceException.class,
+                () -> service.createGoal(invalidCreate, 99L));
+        assertEquals("Goal owner is not an active lab member", createError.getMessage());
+
+        LabGoal stored = goal(1L, 0L, "YEAR", 2026, null, 10L, "100");
+        goals.put(stored);
+        tasks.inactiveOwnerIds.add(10L);
+        LabGoal edit = goal(1L, 0L, "YEAR", 2026, null, 10L, "100");
+        edit.setTitle("must not persist");
+
+        ServiceException updateError = assertThrows(ServiceException.class,
+                () -> service.updateGoal(edit, 99L));
+        assertEquals("Goal owner is not an active lab member", updateError.getMessage());
+        assertEquals("goal", goals.find(1L).getTitle());
+    }
+
+    @Test
+    void progressRejectsWrongGoalLevelsAndUnknownControllerLevel() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null, 99L, "100"));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q1", 10L, "100"));
+
+        ServiceException milestoneError = assertThrows(ServiceException.class,
+                () -> service.calculateMilestoneProgress(1L, 99L));
+        assertEquals("Milestone progress requires a QUARTER goal", milestoneError.getMessage());
+        assertThrows(ServiceException.class, () -> service.calculateAnnualProgress(2L, 99L));
+
+        SysUser user = new SysUser(); user.setUserId(99L); user.setDeptId(101L);
+        LoginUser login = new LoginUser(99L, 101L, user, java.util.Collections.singleton("lab:goal:list"));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(login, null));
+        try {
+            ServiceException levelError = assertThrows(ServiceException.class,
+                    () -> new LabGoalController(service).progress(1L, "MONTH"));
+            assertEquals("Goal progress level must be YEAR or QUARTER", levelError.getMessage());
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
     private static LabGoal goal(Long id, Long parentId, String level, int year, String period,
                                 Long ownerId, String weight) {
         LabGoal goal = new LabGoal();
@@ -373,6 +441,7 @@ class LabGoalServiceTest {
     static final class MemoryGoalMapper implements LabGoalMapper {
         private final Map<Long, LabGoal> data = new LinkedHashMap<Long, LabGoal>();
         private final Map<Long, LabGoal> lockedOverrides = new LinkedHashMap<Long, LabGoal>();
+        private final Map<Long, List<LabGoal>> lockedChildrenOverrides = new LinkedHashMap<Long, List<LabGoal>>();
         private final List<Long> lockedGoalIds = new ArrayList<Long>();
         private long sequence = 100L;
         private LabGoal lastQuery;
@@ -386,7 +455,7 @@ class LabGoalServiceTest {
             for (LabGoal value : data.values()) if (parentId.equals(value.getParentId()) && !"2".equals(value.getDelFlag())) result.add(value);
             return result;
         }
-        @Override public List<LabGoal> selectChildrenByParentIdForUpdate(Long parentId) { return selectChildrenByParentId(parentId); }
+        @Override public List<LabGoal> selectChildrenByParentIdForUpdate(Long parentId) { List<LabGoal> current = lockedChildrenOverrides.get(parentId); return current == null ? selectChildrenByParentId(parentId) : current; }
         @Override public int insertGoal(LabGoal goal) { if (goal.getId() == null) goal.setId(++sequence); data.put(goal.getId(), goal); return 1; }
         @Override public int updateGoal(LabGoal goal) {
             LabGoal stored = data.get(goal.getId());
@@ -401,6 +470,8 @@ class LabGoalServiceTest {
 
     static class MemoryTaskMapper implements LabTaskMapper {
         final Map<Long, LabTask> data = new LinkedHashMap<Long, LabTask>();
+        final Map<Long, List<LabTask>> lockedGoalTaskOverrides = new LinkedHashMap<Long, List<LabTask>>();
+        final List<Long> inactiveOwnerIds = new ArrayList<Long>();
         void put(LabTask task) { data.put(task.getId(), task); }
         LabTask find(Long id) { return data.get(id); }
         @Override public Long selectMemberIdByUserId(Long userId) { return userId; }
@@ -420,7 +491,8 @@ class LabGoalServiceTest {
         @Override public int countTasksByMilestoneId(Long milestoneId) { int count = 0; for (LabTask task : data.values()) if (milestoneId.equals(task.getMilestoneId()) && !"2".equals(task.getDelFlag())) count++; return count; }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriod(Long ownerId, String period) { return new ArrayList<LabTask>(); }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriodForUpdate(Long ownerId, String period) { return selectKeyMonthTasksByOwnerPeriod(ownerId, period); }
-        @Override public String lockMemberForUpdate(Long memberId) { return "algorithm"; }
+        @Override public List<LabTask> selectTasksByGoalOrMilestoneForUpdate(Long goalId) { List<LabTask> current = lockedGoalTaskOverrides.get(goalId); return current == null ? new ArrayList<LabTask>() : current; }
+        @Override public String lockMemberForUpdate(Long memberId) { return inactiveOwnerIds.contains(memberId) ? null : "algorithm"; }
         @Override public int insertTask(LabTask task) { return 1; }
         @Override public int updateTask(LabTask task) { return 1; }
         @Override public int deleteTask(Long id, Integer version, String updateBy) { return 1; }

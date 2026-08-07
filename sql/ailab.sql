@@ -28,6 +28,56 @@ CREATE TABLE IF NOT EXISTS `lab_task_block_event` (
  PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_block_task_episode` (`task_id`,`episode_no`), KEY `idx_lab_block_task_open` (`task_id`,`block_status`,`block_start_time`), KEY `idx_lab_block_start` (`block_start_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='task blocking episode';
 
+-- Upgrade the immediately preceding task-review schema without relying on
+-- ALTER TABLE ... IF NOT EXISTS syntax (not consistently available in MySQL 8 minors).
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
+ 'ALTER TABLE `lab_task_quality_gate` ADD COLUMN `evidence_id` bigint NULL COMMENT ''approved evidence used to pass gate'' AFTER `gate_status`',
+ 'SELECT 1') FROM information_schema.columns
+ WHERE table_schema = DATABASE() AND table_name = 'lab_task_quality_gate' AND column_name = 'evidence_id');
+PREPARE ailab_ddl FROM @ailab_ddl;
+EXECUTE ailab_ddl;
+DEALLOCATE PREPARE ailab_ddl;
+
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
+ 'ALTER TABLE `lab_task_quality_gate` ADD INDEX `idx_lab_gate_evidence` (`evidence_id`)',
+ 'SELECT 1') FROM information_schema.statistics
+ WHERE table_schema = DATABASE() AND table_name = 'lab_task_quality_gate' AND index_name = 'idx_lab_gate_evidence');
+PREPARE ailab_ddl FROM @ailab_ddl;
+EXECUTE ailab_ddl;
+DEALLOCATE PREPARE ailab_ddl;
+
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
+ 'ALTER TABLE `lab_task_block_event` ADD COLUMN `episode_no` int NULL COMMENT ''monotonic task blocking episode number'' AFTER `task_id`',
+ 'SELECT 1') FROM information_schema.columns
+ WHERE table_schema = DATABASE() AND table_name = 'lab_task_block_event' AND column_name = 'episode_no');
+PREPARE ailab_ddl FROM @ailab_ddl;
+EXECUTE ailab_ddl;
+DEALLOCATE PREPARE ailab_ddl;
+
+UPDATE `lab_task_block_event` target
+JOIN (
+ SELECT `id`, ROW_NUMBER() OVER(PARTITION BY `task_id` ORDER BY `block_start_time`,`id`) AS computed_episode_no
+ FROM `lab_task_block_event`
+) ranked ON ranked.id = target.id
+SET target.episode_no = ranked.computed_episode_no
+WHERE target.episode_no IS NULL;
+
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 1,
+ 'ALTER TABLE `lab_task_block_event` MODIFY COLUMN `episode_no` int NOT NULL COMMENT ''monotonic task blocking episode number''',
+ 'SELECT 1') FROM information_schema.columns
+ WHERE table_schema = DATABASE() AND table_name = 'lab_task_block_event' AND column_name = 'episode_no' AND is_nullable = 'YES');
+PREPARE ailab_ddl FROM @ailab_ddl;
+EXECUTE ailab_ddl;
+DEALLOCATE PREPARE ailab_ddl;
+
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
+ 'ALTER TABLE `lab_task_block_event` ADD UNIQUE INDEX `uk_lab_block_task_episode` (`task_id`,`episode_no`)',
+ 'SELECT 1') FROM information_schema.statistics
+ WHERE table_schema = DATABASE() AND table_name = 'lab_task_block_event' AND index_name = 'uk_lab_block_task_episode');
+PREPARE ailab_ddl FROM @ailab_ddl;
+EXECUTE ailab_ddl;
+DEALLOCATE PREPARE ailab_ddl;
+
 CREATE TABLE IF NOT EXISTS `lab_reminder` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `task_id` bigint DEFAULT NULL COMMENT 'task reference', `recipient_id` bigint NOT NULL COMMENT 'recipient member', `reminder_type` varchar(32) NOT NULL COMMENT 'reminder type', `reminder_content` varchar(1000) NOT NULL COMMENT 'content', `read_flag` char(1) DEFAULT '0' COMMENT 'read flag', `read_time` datetime DEFAULT NULL COMMENT 'read time', `send_time` datetime DEFAULT NULL COMMENT 'send time', `idempotency_key` varchar(128) NOT NULL COMMENT 'idempotency key', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
  `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker',
@@ -154,8 +204,8 @@ DELETE FROM `sys_role` WHERE `role_id` IN (30001,30002,30003);
 INSERT INTO `sys_role` (`role_id`,`role_name`,`role_key`,`role_sort`,`data_scope`,`menu_check_strictly`,`dept_check_strictly`,`status`,`del_flag`,`create_by`,`create_time`,`remark`) VALUES (30001,'AI Lab Manager','lab_manager',1,1,1,1,'0','0','admin',NOW(),'Lab full administration'),(30002,'AI Lab Line Lead','lab_lead',2,2,1,1,'0','0','admin',NOW(),'Lab line lead'),(30003,'AI Lab Member','lab_member',3,5,1,1,'0','0','admin',NOW(),'Lab member');
 INSERT INTO `sys_role_dept` (`role_id`,`dept_id`) VALUES (30002,101);
 INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 30001,`menu_id` FROM `sys_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31009,31010,31011,31020,31021,31022,31023,31030,31031,31032,31033,31034,31040,31041,31042,31050,31060,31070,31071,31072,31080,31081,31090,31091,31092,31093,31094,31100,31101,31102,31110,31111,31112,31113,31114);
-INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 30002,`menu_id` FROM `sys_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31009,31010,31011,31020,31021,31030,31031,31033,31034,31050,31060,31070,31071,31080,31081,31090,31092,31094,31100,31110,31111,31112,31113);
-INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 30003,`menu_id` FROM `sys_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31011,31030,31031,31033,31060,31112);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 30002,`menu_id` FROM `sys_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31009,31010,31011,31020,31021,31030,31031,31032,31033,31034,31050,31060,31070,31071,31080,31081,31090,31092,31094,31100,31110,31111,31112,31113);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 30003,`menu_id` FROM `sys_menu` WHERE `menu_id` IN (31000,31001,31002,31003,31004,31005,31006,31007,31008,31011,31030,31031,31032,31033,31060,31112);
 
 -- The RuoYi baseline BCrypt hash is used for demo accounts; never use demo accounts in production.
 DELETE FROM `sys_user_role` WHERE `user_id` IN (30001,30002,30003,30004,30005,30006);

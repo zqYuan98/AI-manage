@@ -74,6 +74,7 @@ public class LabGoalServiceImpl implements LabGoalService {
     @Transactional
     public int createGoal(LabGoal goal, Long actorId) {
         LabGoal lockedParent = lockNewGoalParent(goal);
+        lockGoalOwner(goal == null ? null : goal.getOwnerId());
         validateGoal(goal, lockedParent);
         if (lockedParent != null && !"DRAFT".equals(lockedParent.getStatus())) {
             throw new ServiceException("Quarter membership is frozen after annual goal activation");
@@ -102,6 +103,7 @@ public class LabGoalServiceImpl implements LabGoalService {
         if (stored == null || !stored.getVersion().equals(goal.getVersion())) throw optimisticConflict();
         accessService.requireGoalWrite(stored, actorId);
         accessService.requireGoalWrite(goal, actorId);
+        lockGoalOwner(goal.getOwnerId());
         requireStableStructure(stored, goal, lockStructureDependents(stored, goal), lockedParents);
         requireStableWeight(stored, goal, lockedParents);
         validateGoal(goal, lockedParents.get(goal.getParentId()));
@@ -126,11 +128,11 @@ public class LabGoalServiceImpl implements LabGoalService {
         if (parent != null && !"DRAFT".equals(parent.getStatus())) {
             throw new ServiceException("Quarter membership is frozen after annual goal activation");
         }
-        if (!goalMapper.selectChildrenByParentId(id).isEmpty()) {
+        if (!goalMapper.selectChildrenByParentIdForUpdate(id).isEmpty()) {
             throw new ServiceException("Delete child milestones before deleting the goal");
         }
-        if ("QUARTER".equals(stored.getGoalLevel()) && taskMapper.countTasksByMilestoneId(id) > 0) {
-            throw new ServiceException("Delete milestone tasks before deleting the goal");
+        if (!taskMapper.selectTasksByGoalOrMilestoneForUpdate(id).isEmpty()) {
+            throw new ServiceException("Delete connected tasks before deleting the goal");
         }
         if (goalMapper.deleteGoal(id, version, actor(actorId)) != 1) throw optimisticConflict();
         return 1;
@@ -161,7 +163,10 @@ public class LabGoalServiceImpl implements LabGoalService {
     @Override
     public BigDecimal calculateMilestoneProgress(Long milestoneId, Long actorId) {
         accessService.requireGoalRead(actorId);
-        loadGoal(milestoneId);
+        LabGoal milestone = loadGoal(milestoneId);
+        if (!"QUARTER".equals(milestone.getGoalLevel())) {
+            throw new ServiceException("Milestone progress requires a QUARTER goal");
+        }
         return calculateMilestoneProgressInternal(milestoneId);
     }
 
@@ -306,6 +311,12 @@ public class LabGoalServiceImpl implements LabGoalService {
         Map<Long, LabGoal> locked = new LinkedHashMap<Long, LabGoal>();
         for (Long parentId : ids) locked.put(parentId, goalMapper.selectGoalForUpdate(parentId));
         return locked;
+    }
+
+    private void lockGoalOwner(Long ownerId) {
+        if (ownerId == null || taskMapper.lockMemberForUpdate(ownerId) == null) {
+            throw new ServiceException("Goal owner is not an active lab member");
+        }
     }
 
     private BigDecimal completionCoefficient(String result) {

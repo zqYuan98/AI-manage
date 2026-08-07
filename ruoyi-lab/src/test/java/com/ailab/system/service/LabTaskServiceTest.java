@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ailab.system.constant.LabConstants;
+import com.ailab.system.controller.LabTaskController;
 import com.ailab.system.domain.LabGoal;
 import com.ailab.system.domain.LabTask;
 import com.ailab.system.domain.LabTaskBlockEvent;
@@ -40,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 class LabTaskServiceTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-08-08T04:00:00Z"), ZoneId.of("Asia/Shanghai"));
@@ -114,6 +116,35 @@ class LabTaskServiceTest {
 
         assertEquals(LabConstants.WORKFLOW_ACTIVE, tasks.find(2L).getWorkflowStatus());
         assertThrows(ServiceException.class, () -> service.activateTask(1L, 0, 8L));
+    }
+
+    @Test
+    void weeklyActivationUsesTheLockedCurrentParentStateAndRelationship() {
+        LabTask month = activeTask(1L, 8L); tasks.put(month);
+        LabTask week = task(2L, 1L, "week", "2026-W32", 8L, "0", "0"); tasks.put(week);
+        LabTask currentParent = activeTask(1L, 8L);
+        currentParent.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW);
+        tasks.lockedOverrides.put(1L, currentParent);
+
+        ServiceException statusError = assertThrows(ServiceException.class,
+                () -> service.activateTask(2L, 0, 8L));
+        assertEquals("Weekly task requires an active, unlocked month task", statusError.getMessage());
+        assertEquals(LabConstants.WORKFLOW_DRAFT, tasks.find(2L).getWorkflowStatus());
+
+        currentParent.setWorkflowStatus(LabConstants.WORKFLOW_ACTIVE);
+        currentParent.setBizLine("platform");
+        ServiceException relationError = assertThrows(ServiceException.class,
+                () -> service.activateTask(2L, 0, 8L));
+        assertEquals("Weekly task links must match its current month task", relationError.getMessage());
+        assertTrue(tasks.lockedTaskIds.contains(1L), "parent must be read with FOR UPDATE semantics");
+    }
+
+    @Test
+    void taskDeleteControllerUsesTheRoleSeededRemovePermission() throws Exception {
+        PreAuthorize permission = LabTaskController.class
+                .getMethod("delete", Long.class, Integer.class)
+                .getAnnotation(PreAuthorize.class);
+        assertEquals("@ss.hasPermi('lab:task:remove')", permission.value());
     }
 
     @Test
@@ -505,6 +536,7 @@ class LabTaskServiceTest {
         assertTrue(goalXml.contains("id=\"selectchildrenbyparentidforupdate\"") && goalXml.contains("for update"));
         assertTrue(taskXml.contains("id=\"selectkeymonthtasksbymilestoneidforupdate\"") && taskXml.contains("for update"));
         assertTrue(taskXml.contains("id=\"selecttasksbymilestoneidforupdate\"") && taskXml.contains("for update"));
+        assertTrue(taskXml.contains("id=\"selecttasksbygoalormilestoneforupdate\"") && taskXml.contains("for update"));
         assertTrue(taskXml.contains("id=\"selectkeymonthtasksbyownerperiodforupdate\"") && taskXml.contains("for update"));
         assertTrue(taskXml.contains("id=\"lockmemberforupdate\"") && taskXml.contains("for update"));
         assertTrue(taskXml.contains("<select id=\"lockmemberforupdate\" parametertype=\"long\" resulttype=\"string\">select biz_line from lab_member"),
@@ -730,6 +762,7 @@ class LabTaskServiceTest {
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneId(Long id) { return new ArrayList<LabTask>(); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long id) { return selectKeyMonthTasksByMilestoneId(id); }
         @Override public List<LabTask> selectTasksByMilestoneIdForUpdate(Long id) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if (id.equals(task.getMilestoneId()) && !"2".equals(task.getDelFlag())) result.add(task); return result; }
+        @Override public List<LabTask> selectTasksByGoalOrMilestoneForUpdate(Long id) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if ((id.equals(task.getGoalId()) || id.equals(task.getMilestoneId())) && !"2".equals(task.getDelFlag())) result.add(task); return result; }
         @Override public int countTasksByMilestoneId(Long id) { int count = 0; for (LabTask task : data.values()) if (id.equals(task.getMilestoneId()) && !"2".equals(task.getDelFlag())) count++; return count; }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriod(Long ownerId, String period) { List<LabTask> r = new ArrayList<LabTask>(); for (LabTask t : data.values()) if (ownerId.equals(t.getOwnerId()) && period.equals(t.getPeriod()) && "month".equals(t.getTaskLevel()) && "key".equals(t.getTaskType()) && !"2".equals(t.getDelFlag())) r.add(t); return r; }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriodForUpdate(Long ownerId, String period) { return selectKeyMonthTasksByOwnerPeriod(ownerId, period); }

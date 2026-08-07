@@ -70,6 +70,8 @@ class LabSqlContractTest {
         assertMemberSeeds(sql);
         assertLabRoleScopes(sql);
         assertGoalActivationPermissionIsManagerOnly(sql);
+        assertLegacyUpgradeContract(sql);
+        assertTaskDeletePermissionForTaskWriters(sql);
         assertDemoTaskGoalLinks(sql);
         assertMenuArity(sql);
         assertAllInsertArities(sql);
@@ -135,6 +137,35 @@ class LabSqlContractTest {
         assertTrue(roleMenuIds(sql, 30001L).contains("31023"), "manager must receive goal activation permission");
         assertTrue(!roleMenuIds(sql, 30002L).contains("31023"), "lead must not receive goal activation permission");
         assertTrue(!roleMenuIds(sql, 30003L).contains("31023"), "member must not receive goal activation permission");
+    }
+
+    private static void assertTaskDeletePermissionForTaskWriters(String sql) {
+        assertTrue(roleMenuIds(sql, 30002L).contains("31032"), "lead must receive task delete permission");
+        assertTrue(roleMenuIds(sql, 30003L).contains("31032"), "member must receive task delete permission");
+    }
+
+    private static void assertLegacyUpgradeContract(String sql) throws IOException {
+        String compact = sql.toLowerCase(Locale.ROOT).replace("`", "").replaceAll("\\s+", " ");
+        assertTrue(compact.contains("information_schema.columns"), "legacy column checks must use INFORMATION_SCHEMA");
+        assertTrue(compact.contains("information_schema.statistics"), "legacy index checks must use INFORMATION_SCHEMA");
+        assertTrue(compact.contains("prepare ailab_ddl") && compact.contains("execute ailab_ddl")
+                && compact.contains("deallocate prepare ailab_ddl"), "conditional MySQL 8 DDL must use prepared dynamic SQL");
+        assertTrue(Pattern.compile("(?is)alter\\s+table\\s+`?lab_task_quality_gate`?\\s+add\\s+column\\s+`?evidence_id`?\\s+bigint\\s+(?:default\\s+)?null").matcher(sql).find(),
+                "legacy quality gate must add nullable evidence_id");
+        assertTrue(Pattern.compile("(?is)alter\\s+table\\s+`?lab_task_block_event`?\\s+add\\s+column\\s+`?episode_no`?\\s+int\\s+(?:default\\s+)?null").matcher(sql).find(),
+                "legacy block event must add nullable episode_no before backfill");
+        assertTrue(compact.contains("row_number() over(partition by task_id order by block_start_time,id)"),
+                "legacy block episodes require deterministic MySQL 8 row-number backfill");
+        assertTrue(Pattern.compile("(?is)alter\\s+table\\s+`?lab_task_block_event`?\\s+modify\\s+column\\s+`?episode_no`?\\s+int\\s+not\\s+null").matcher(sql).find(),
+                "episode_no must become NOT NULL after backfill");
+        assertTrue(Files.isRegularFile(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")),
+                "legacy MySQL fixture is required");
+        String legacy = new String(Files.readAllBytes(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")), StandardCharsets.UTF_8)
+                .toLowerCase(Locale.ROOT);
+        assertTrue(legacy.contains("create table `lab_task_quality_gate`") && !legacy.contains("`evidence_id`"),
+                "legacy quality gate fixture must predate evidence_id");
+        assertTrue(legacy.contains("create table `lab_task_block_event`") && !legacy.contains("`episode_no`"),
+                "legacy block fixture must predate episode_no");
     }
 
     private static Set<String> roleMenuIds(String sql, long roleId) {

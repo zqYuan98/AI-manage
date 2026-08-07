@@ -28,6 +28,7 @@ import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.Collections;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.function.Supplier;
@@ -102,6 +103,32 @@ class LabMapperMySqlIT {
     }
 
     @Test
+    void upgradesLegacyTaskAuditTablesAndCurrentBootstrapCanRunTwice() throws Exception {
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(1) from information_schema.columns where table_schema=database() and table_name='lab_task_quality_gate' and column_name='evidence_id' and is_nullable='YES'",
+                Integer.class));
+        assertEquals(Arrays.asList(1, 2), jdbcTemplate.queryForList(
+                "select episode_no from lab_task_block_event where task_id=39990 order by block_start_time,id",
+                Integer.class));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(1) from information_schema.statistics where table_schema=database() and table_name='lab_task_block_event' and index_name='uk_lab_block_task_episode'",
+                Integer.class));
+
+        Connection connection = org.springframework.jdbc.datasource.DataSourceUtils
+                .getConnection(jdbcTemplate.getDataSource());
+        try {
+            ScriptUtils.executeSqlScript(connection,
+                    new FileSystemResource(DatabaseInitializer.repositoryRoot().resolve("sql/ailab.sql")));
+        } finally {
+            org.springframework.jdbc.datasource.DataSourceUtils.releaseConnection(connection, jdbcTemplate.getDataSource());
+        }
+
+        assertEquals(Arrays.asList(1, 2), jdbcTemplate.queryForList(
+                "select episode_no from lab_task_block_event where task_id=39990 order by block_start_time,id",
+                Integer.class));
+    }
+
+    @Test
     void realSecurityContextRolesDriveDataScopeAndServiceObjectAuthorization() {
         assertThrows(ServiceException.class, () -> accessService.context(30001L), "disabled demo account must not resolve");
         LabAccessContext manager = accessService.context(39101L);
@@ -112,6 +139,12 @@ class LabMapperMySqlIT {
         assertEquals("lab_member", member.getRoleKey());
         assertEquals(Long.valueOf(39203L), member.getMemberId());
         assertFalse(member.getUserId().equals(member.getMemberId()), "IT must keep system-user and member identity spaces distinct");
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(1) from sys_role_menu rm join sys_menu m on m.menu_id=rm.menu_id where rm.role_id=30002 and m.perms='lab:task:remove'",
+                Integer.class));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(1) from sys_role_menu rm join sys_menu m on m.menu_id=rm.menu_id where rm.role_id=30003 and m.perms='lab:task:remove'",
+                Integer.class));
 
         List<LabTask> managerRows = asUser(39101L, () -> taskService.listTasks(new LabTask(), 39101L));
         List<LabTask> leadRows = asUser(39102L, () -> taskService.listTasks(new LabTask(), 39102L));
@@ -134,6 +167,11 @@ class LabMapperMySqlIT {
         attributed.setEvidenceUrl("https://example.invalid/it/member-proof");
         taskService.addEvidence(ownNew.getId(), attributed, 39103L);
         assertEquals(Long.valueOf(39203L), attributed.getSubmitterId());
+
+        LabTask removable = newTask(39203L, "member removes own draft task");
+        assertEquals(1, taskService.createTask(removable, 39103L));
+        assertEquals(1, taskService.deleteTask(removable.getId(), removable.getVersion(), 39103L));
+        assertNull(taskMapper.selectTaskById(removable.getId()));
 
         TaskSubmitCommand returned = new TaskSubmitCommand(); returned.setReviewerComment("return through real service");
         taskService.reviewReturn(39008L, 0, returned, 39102L);
@@ -232,6 +270,7 @@ class LabMapperMySqlIT {
             Path root = repositoryRoot();
             try (Connection connection = DriverManager.getConnection(url, username, password)) {
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ry_20240629.sql")));
+                ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-legacy-fixture.sql")));
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ailab.sql")));
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-mapper-fixture.sql")));
             } catch (Exception exception) {

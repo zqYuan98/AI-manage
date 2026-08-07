@@ -18,6 +18,7 @@ public interface LabTaskMapper {
     List<LabTask> selectKeyMonthTasksByMilestoneId(Long milestoneId);
     List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long milestoneId);
     List<LabTask> selectTasksByMilestoneIdForUpdate(Long milestoneId);
+    List<LabTask> selectTasksByGoalOrMilestoneForUpdate(Long goalId);
     int countTasksByMilestoneId(Long milestoneId);
     List<LabTask> selectKeyMonthTasksByOwnerPeriod(@Param("ownerId") Long ownerId, @Param("period") String period);
     List<LabTask> selectKeyMonthTasksByOwnerPeriodForUpdate(@Param("ownerId") Long ownerId, @Param("period") String period);

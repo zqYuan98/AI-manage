@@ -171,17 +171,31 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Override
     @Transactional
     public void activateTask(Long id, Integer version, Long actorId) {
-        LabTask task = loadVersioned(id, version);
+        LabTask snapshot = loadTask(id);
+        LabTask parent = taskMapper.selectTaskForUpdate(snapshot.getParentId());
+        LabTask task = taskMapper.selectTaskForUpdate(id);
+        if (task == null || version == null || !version.equals(task.getVersion())) throw optimisticConflict();
         requireUnlocked(task);
         accessService.requireTaskWrite(task, actorId);
         if (!LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel())) {
             throw new ServiceException("Monthly key tasks must be activated through owner-period plan activation");
         }
         requireOwner(task, member(actorId));
-        LabTask parent = taskMapper.selectTaskById(task.getParentId());
         if (parent == null || !LabConstants.WORKFLOW_ACTIVE.equals(parent.getWorkflowStatus())
                 || LabConstants.YES.equals(parent.getPeriodLockFlag())) {
             throw new ServiceException("Weekly task requires an active, unlocked month task");
+        }
+        accessService.requireTaskRead(parent, actorId);
+        if (!LabConstants.TASK_LEVEL_MONTH.equals(parent.getTaskLevel())
+                || !same(parent.getId(), task.getParentId()) || !same(parent.getGoalId(), task.getGoalId())
+                || !same(parent.getMilestoneId(), task.getMilestoneId())
+                || !same(parent.getBizLine(), task.getBizLine())) {
+            throw new ServiceException("Weekly task links must match its current month task");
+        }
+        LabPeriodUtils.PeriodRange month = LabPeriodUtils.parseMonth(parent.getPeriod());
+        LabPeriodUtils.PeriodRange week = LabPeriodUtils.parseWeek(task.getPeriod());
+        if (week.getStartDate().isBefore(month.getStartDate()) || week.getEndDate().isAfter(month.getEndDate())) {
+            throw new ServiceException("Weekly task links must match its current month task");
         }
         requireValid(workflowService.activatePlan(task));
         saveWorkflowTask(task, actorId);
