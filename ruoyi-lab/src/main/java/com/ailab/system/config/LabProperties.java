@@ -18,7 +18,7 @@ public class LabProperties
 
     private long conversionTimeoutSeconds = 120L;
 
-    private long maxUploadSize = 50L * 1024 * 1024;
+    private long maxUploadSizeBytes = 50L * 1024 * 1024;
 
     public String getOutputDirectory()
     {
@@ -60,13 +60,13 @@ public class LabProperties
         this.conversionTimeoutSeconds = conversionTimeoutSeconds;
     }
 
-    public long getMaxUploadSize()
+    public long getMaxUploadSizeBytes()
     {
-        return maxUploadSize;
+        return maxUploadSizeBytes;
     }
 
-    public void setMaxUploadSize(long maxUploadSize)
+    public void setMaxUploadSizeBytes(long maxUploadSizeBytes)
     {
-        this.maxUploadSize = maxUploadSize;
+        this.maxUploadSizeBytes = maxUploadSizeBytes;
     }
 }
