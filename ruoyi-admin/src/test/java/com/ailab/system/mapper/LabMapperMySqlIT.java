@@ -12,6 +12,7 @@ import com.ailab.system.domain.LabAsset;
 import com.ailab.system.domain.LabIpr;
 import com.ailab.system.domain.LabMember;
 import com.ailab.system.domain.LabMemberSkill;
+import com.ailab.system.domain.LabOne2One;
 import com.ailab.system.domain.LabTask;
 import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.dto.LabAccessContext;
@@ -123,6 +124,14 @@ class LabMapperMySqlIT {
         assertEquals(1, jdbcTemplate.queryForObject(
                 "select count(1) from information_schema.statistics where table_schema=database() and table_name='lab_task_block_event' and index_name='uk_lab_block_task_episode'",
                 Integer.class));
+        LabOne2One legacyConversation = ledgerMapper.selectOne2OneById(39991L);
+        LabIpr legacyIpr = ledgerMapper.selectIprById(39991L);
+        assertEquals("Legacy one-to-one feedback", legacyConversation.getFactsEvidence());
+        assertEquals("Legacy action item", legacyConversation.getNextAction());
+        assertEquals("LEGACY-APPLICATION-39991", legacyIpr.getAcceptanceNo());
+        assertEquals("2026-06-15", new java.sql.Date(legacyIpr.getActualSubmitDate().getTime()).toString());
+        assertEquals(1, jdbcTemplate.update("update lab_one2one set facts_evidence='Curated current facts',next_action='Curated current action' where id=39991"));
+        assertEquals(1, jdbcTemplate.update("update lab_ipr set acceptance_no='CURATED-CURRENT-APPLICATION',actual_submit_date='2026-06-14' where id=39991"));
 
         Connection connection = org.springframework.jdbc.datasource.DataSourceUtils
                 .getConnection(jdbcTemplate.getDataSource());
@@ -136,6 +145,10 @@ class LabMapperMySqlIT {
         assertEquals(Arrays.asList(1, 2), jdbcTemplate.queryForList(
                 "select episode_no from lab_task_block_event where task_id=39990 order by block_start_time,id",
                 Integer.class));
+        assertEquals("Curated current facts", ledgerMapper.selectOne2OneById(39991L).getFactsEvidence());
+        assertEquals("Curated current action", ledgerMapper.selectOne2OneById(39991L).getNextAction());
+        assertEquals("CURATED-CURRENT-APPLICATION", ledgerMapper.selectIprById(39991L).getAcceptanceNo());
+        assertEquals("2026-06-14", new java.sql.Date(ledgerMapper.selectIprById(39991L).getActualSubmitDate().getTime()).toString());
     }
 
     @Test

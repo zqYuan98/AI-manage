@@ -168,10 +168,30 @@ SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
 SET @ailab_ddl = (SELECT IF(COUNT(*) = 1,'ALTER TABLE `lab_one2one` MODIFY COLUMN `topic` varchar(500) NULL COMMENT ''topic''','SELECT 1') FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_one2one' AND column_name='topic' AND is_nullable='NO');
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+SET @ailab_ddl = (SELECT IF(
+ (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_one2one' AND column_name='feedback') = 1,
+ 'UPDATE `lab_one2one` SET `facts_evidence`=COALESCE(`facts_evidence`,`feedback`)',
+ 'SELECT 1'));
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+SET @ailab_ddl = (SELECT IF(
+ (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_one2one' AND column_name='action_items') = 1,
+ 'UPDATE `lab_one2one` SET `next_action`=COALESCE(`next_action`,`action_items`)',
+ 'SELECT 1'));
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
 
 SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
  'ALTER TABLE `lab_ipr` ADD COLUMN `planned_submit_date` date NULL COMMENT ''planned submit date'' AFTER `owner_id`, ADD COLUMN `actual_submit_date` date NULL COMMENT ''actual submit date'' AFTER `planned_submit_date`, ADD COLUMN `acceptance_no` varchar(128) NULL COMMENT ''acceptance number'' AFTER `actual_submit_date`, ADD COLUMN `certificate_no` varchar(128) NULL COMMENT ''certificate number'' AFTER `acceptance_no`, ADD COLUMN `status` varchar(16) DEFAULT ''ACTIVE'' COMMENT ''record status'' AFTER `evidence_url`, ADD COLUMN `stage_change_reason` varchar(1000) NULL COMMENT ''audited stage change reason'' AFTER `status`, ADD COLUMN `version` int DEFAULT 0 COMMENT ''optimistic version'' AFTER `stage_change_reason`',
  'SELECT 1') FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_ipr' AND column_name='version');
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+SET @ailab_ddl = (SELECT IF(
+ (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_ipr' AND column_name='application_no') = 1,
+ 'UPDATE `lab_ipr` SET `acceptance_no`=COALESCE(`acceptance_no`,`application_no`)',
+ 'SELECT 1'));
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+SET @ailab_ddl = (SELECT IF(
+ (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_ipr' AND column_name='submit_date') = 1,
+ 'UPDATE `lab_ipr` SET `actual_submit_date`=COALESCE(`actual_submit_date`,`submit_date`)',
+ 'SELECT 1'));
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
 
 SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,'ALTER TABLE `lab_asset` ADD UNIQUE INDEX `uk_lab_asset_business` (`asset_name`,`asset_version`,`asset_type`,`active_unique_flag`)','SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_asset' AND index_name='uk_lab_asset_business');

@@ -1,5 +1,6 @@
 package com.ailab.system.service.impl;
 
+import com.ailab.system.domain.LabAsset;
 import com.ailab.system.domain.LabMember;
 import com.ailab.system.domain.LabMemberSkill;
 import com.ailab.system.domain.LabSkill;
@@ -8,8 +9,10 @@ import com.ailab.system.dto.LabMemberDetail;
 import com.ailab.system.mapper.LabLedgerMapper;
 import com.ailab.system.mapper.LabMemberMapper;
 import com.ailab.system.service.LabAccessService;
+import com.ailab.system.service.LabAssetRiskPolicy;
 import com.ailab.system.service.LabMemberService;
 import com.ruoyi.common.exception.ServiceException;
+import com.github.pagehelper.Page;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -25,25 +29,30 @@ public class LabMemberServiceImpl implements LabMemberService {
     private final LabMemberMapper memberMapper;
     private final LabLedgerMapper ledgerMapper;
     private final LabAccessService accessService;
+    private final LabAssetRiskPolicy assetRiskPolicy;
 
     public LabMemberServiceImpl(LabMemberMapper memberMapper, LabLedgerMapper ledgerMapper,
             LabAccessService accessService) {
+        this(memberMapper, ledgerMapper, accessService, new LabAssetRiskPolicy());
+    }
+
+    @Autowired
+    public LabMemberServiceImpl(LabMemberMapper memberMapper, LabLedgerMapper ledgerMapper,
+            LabAccessService accessService, LabAssetRiskPolicy assetRiskPolicy) {
         this.memberMapper = memberMapper; this.ledgerMapper = ledgerMapper; this.accessService = accessService;
+        this.assetRiskPolicy = assetRiskPolicy;
     }
 
     @Override
     public List<LabMember> listMembers(LabMember query, Long actorId) {
         LabAccessContext actor = accessService.context(actorId);
-        List<LabMember> visible = new ArrayList<LabMember>();
-        for (LabMember row : memberMapper.selectMemberList(query == null ? new LabMember() : query)) {
-            LabMember copy = copyMember(row);
-            boolean sensitive = isManager(actor) || same(actor.getMemberId(), row.getId())
-                    || (isLead(actor) && same(actor.getBizLine(), row.getBizLine()));
-            if (!sensitive) {
-                copy.setPrimaryResponsibilities(null); copy.setBackupResponsibilities(null); copy.setRemark(null);
-            }
-            visible.add(copy);
+        List<LabMember> mapped = memberMapper.selectMemberList(query == null ? new LabMember() : query);
+        if (mapped instanceof Page) {
+            for (int i = 0; i < mapped.size(); i++) mapped.set(i, visibleMember(mapped.get(i), actor));
+            return mapped;
         }
+        List<LabMember> visible = new ArrayList<LabMember>();
+        for (LabMember row : mapped) visible.add(visibleMember(row, actor));
         return visible;
     }
 
@@ -57,19 +66,16 @@ public class LabMemberServiceImpl implements LabMemberService {
     public LabMemberDetail getMemberDetail(Long memberId, Long actorId) {
         LabAccessContext actor = accessService.context(actorId);
         LabMember found = requireMember(memberMapper.selectMemberById(memberId));
-        LabMember visible = copyMember(found);
-        boolean sensitive = isManager(actor) || same(actor.getMemberId(), memberId)
-                || (isLead(actor) && same(actor.getBizLine(), found.getBizLine()));
-        if (!sensitive) {
-            visible.setPrimaryResponsibilities(null);
-            visible.setBackupResponsibilities(null);
-            visible.setRemark(null);
-        }
+        boolean sensitive = canReadSensitiveProfile(actor, found);
+        LabMember visible = visibleMember(found, actor);
         LabMemberDetail detail = new LabMemberDetail();
         detail.setMember(visible);
-        detail.setSkillMatrix(canReadMatrix(actor, found)
+        detail.setSkillMatrix(sensitive
                 ? memberMapper.selectMemberSkills(memberId, false) : Collections.<LabMemberSkill>emptyList());
-        detail.setAssets(ledgerMapper.selectAssetsByMember(memberId));
+        List<LabAsset> assets = sensitive
+                ? ledgerMapper.selectAssetsByMember(memberId) : Collections.emptyList();
+        assetRiskPolicy.applyAll(assets);
+        detail.setAssets(assets);
         detail.setRecentTasks(sensitive ? memberMapper.selectRecentTasks(memberId, 10) : Collections.emptyList());
         detail.setOneToOnes(isManager(actor) || same(actor.getMemberId(), memberId)
                 ? ledgerMapper.selectOne2OneByMember(memberId) : Collections.emptyList());
@@ -226,6 +232,9 @@ public class LabMemberServiceImpl implements LabMemberService {
     }
 
     private boolean canReadMatrix(LabAccessContext actor, LabMember target) {
+        return canReadSensitiveProfile(actor, target);
+    }
+    private boolean canReadSensitiveProfile(LabAccessContext actor, LabMember target) {
         return isManager(actor) || same(actor.getMemberId(), target.getId())
                 || (isLead(actor) && same(actor.getBizLine(), target.getBizLine()));
     }
@@ -272,5 +281,13 @@ public class LabMemberServiceImpl implements LabMemberService {
         out.setPrimaryResponsibilities(source.getPrimaryResponsibilities()); out.setBackupResponsibilities(source.getBackupResponsibilities()); out.setJoinDate(source.getJoinDate());
         out.setMemberStatus(source.getMemberStatus()); out.setVersion(source.getVersion()); out.setDelFlag(source.getDelFlag()); out.setUserName(source.getUserName());
         out.setNickName(source.getNickName()); out.setLeaderName(source.getLeaderName()); out.setRemark(source.getRemark()); return out;
+    }
+    private LabMember visibleMember(LabMember source, LabAccessContext actor) {
+        LabMember out = copyMember(source);
+        if (canReadSensitiveProfile(actor, source)) return out;
+        out.setUserId(null); out.setUserName(null); out.setMemberNo(null); out.setRoleType(null); out.setLeaderId(null);
+        out.setJoinDate(null); out.setMemberStatus(null); out.setVersion(null); out.setDelFlag(null); out.setLeaderName(null);
+        out.setPrimaryResponsibilities(null); out.setBackupResponsibilities(null); out.setRemark(null);
+        return out;
     }
 }

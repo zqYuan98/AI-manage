@@ -1,7 +1,11 @@
 package com.ailab.system.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -14,13 +18,17 @@ import com.ailab.system.domain.LabAsset;
 import com.ailab.system.domain.LabMember;
 import com.ailab.system.domain.LabMemberSkill;
 import com.ailab.system.domain.LabSkill;
+import com.ailab.system.controller.LabMemberController;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.LabMemberDetail;
 import com.ailab.system.mapper.LabLedgerMapper;
 import com.ailab.system.mapper.LabMemberMapper;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
+import com.ailab.system.service.impl.LabLedgerServiceImpl;
 import com.ailab.system.service.impl.LabMemberServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
+import com.ruoyi.common.core.page.TableDataInfo;
+import com.github.pagehelper.Page;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
@@ -121,15 +129,17 @@ class LabMemberServiceTest {
         target.setPrimaryResponsibilities("sensitive primary");
         target.setBackupResponsibilities("sensitive backup");
         when(memberMapper.selectMemberById(20L)).thenReturn(target);
-        when(memberMapper.selectMemberSkills(20L, false)).thenReturn(Collections.<LabMemberSkill>emptyList());
-        when(ledgerMapper.selectAssetsByMember(20L)).thenReturn(Collections.<LabAsset>emptyList());
-        when(memberMapper.selectRecentTasks(20L, 10)).thenReturn(Collections.emptyList());
+        when(ledgerMapper.selectAssetsByMember(20L)).thenReturn(Collections.singletonList(new LabAsset()));
 
         LabMemberDetail detail = service.getMemberDetail(20L, 3L);
 
-        assertNull(detail.getMember().getPrimaryResponsibilities());
-        assertNull(detail.getMember().getBackupResponsibilities());
+        assertPublicDirectoryShape(detail.getMember());
+        assertTrue(detail.getSkillMatrix().isEmpty());
+        assertTrue(detail.getAssets().isEmpty());
+        assertTrue(detail.getRecentTasks().isEmpty());
         assertTrue(detail.getOneToOnes().isEmpty());
+        verify(memberMapper, never()).selectMemberSkills(20L, false);
+        verify(ledgerMapper, never()).selectAssetsByMember(20L);
         verify(ledgerMapper, never()).selectOne2OneByMember(20L);
         verify(memberMapper, never()).selectRecentTasks(20L, 10);
     }
@@ -138,16 +148,90 @@ class LabMemberServiceTest {
     void ordinaryMemberListContainsOnlyBasicFieldsOutsideOwnProfile() {
         memberActor(3L, 30L, "platform");
         LabMember other = member(20L, 90L, "algorithm");
-        other.setPrimaryResponsibilities("sensitive primary");
-        other.setBackupResponsibilities("sensitive backup");
-        other.setRemark("sensitive manager note");
+        populatePrivateDirectoryFields(other);
         when(memberMapper.selectMemberList(any(LabMember.class))).thenReturn(Collections.singletonList(other));
 
         LabMember visible = service.listMembers(new LabMember(), 3L).get(0);
 
-        assertNull(visible.getPrimaryResponsibilities());
-        assertNull(visible.getBackupResponsibilities());
-        assertNull(visible.getRemark());
+        assertPublicDirectoryShape(visible);
+    }
+
+    @Test
+    void crossBusinessLineLeadSeesOnlyPublicDirectoryFieldsAndNoDetailLedgers() {
+        lead(2L, 21L, "algorithm");
+        LabMember other = member(20L, 90L, "platform"); populatePrivateDirectoryFields(other);
+        when(memberMapper.selectMemberList(any(LabMember.class))).thenReturn(Collections.singletonList(other));
+        when(memberMapper.selectMemberById(20L)).thenReturn(other);
+
+        LabMember listed = service.listMembers(new LabMember(), 2L).get(0);
+        LabMemberDetail detail = service.getMemberDetail(20L, 2L);
+
+        assertPublicDirectoryShape(listed);
+        assertPublicDirectoryShape(detail.getMember());
+        assertTrue(detail.getSkillMatrix().isEmpty());
+        assertTrue(detail.getAssets().isEmpty());
+        assertTrue(detail.getRecentTasks().isEmpty());
+        assertTrue(detail.getOneToOnes().isEmpty());
+        verify(memberMapper, never()).selectMemberSkills(20L, false);
+        verify(ledgerMapper, never()).selectAssetsByMember(20L);
+        verify(memberMapper, never()).selectRecentTasks(20L, 10);
+        verify(ledgerMapper, never()).selectOne2OneByMember(20L);
+    }
+
+    @Test
+    void sanitizedDirectoryListPreservesPageHelperMetadataAndDoesNotMutateMapperRows() {
+        memberActor(3L, 30L, "platform");
+        LabMember mapped = member(20L, 90L, "algorithm"); populatePrivateDirectoryFields(mapped);
+        Page<LabMember> page = new Page<LabMember>(2, 1); page.setTotal(9L); page.add(mapped);
+        when(memberMapper.selectMemberList(any(LabMember.class))).thenReturn(page);
+
+        java.util.List<LabMember> visible = service.listMembers(new LabMember(), 3L);
+        TableDataInfo table = new ExposedMemberController(service).table(visible);
+
+        assertSame(page, visible);
+        assertEquals(9L, table.getTotal());
+        assertNotSame(mapped, visible.get(0));
+        assertEquals(Long.valueOf(90L), mapped.getUserId(), "mapper entity must remain untouched");
+        assertPublicDirectoryShape(visible.get(0));
+    }
+
+    @Test
+    void assetRiskIsIdenticalInLedgerApiAndMemberDetailAggregate() {
+        manager(1L);
+        LabMember target = member(20L, 90L, "algorithm");
+        when(memberMapper.selectMemberById(20L)).thenReturn(target);
+        when(memberMapper.selectMemberSkills(20L, false)).thenReturn(Collections.emptyList());
+        when(memberMapper.selectRecentTasks(20L, 10)).thenReturn(Collections.emptyList());
+        when(ledgerMapper.selectOne2OneByMember(20L)).thenReturn(Collections.emptyList());
+        LabAsset ledgerAsset = riskyAsset(70L);
+        LabAsset aggregateAsset = riskyAsset(70L);
+        when(ledgerMapper.selectAssetList(any(LabAsset.class))).thenReturn(Collections.singletonList(ledgerAsset));
+        when(ledgerMapper.selectAssetsByMember(20L)).thenReturn(Collections.singletonList(aggregateAsset));
+
+        LabLedgerService ledgerService = new LabLedgerServiceImpl(ledgerMapper, memberMapper, accessService);
+        boolean ledgerRisk = ledgerService.listAssets(new LabAsset(), 1L).get(0).isSinglePointRisk();
+        boolean aggregateRisk = service.getMemberDetail(20L, 1L).getAssets().get(0).isSinglePointRisk();
+
+        assertTrue(ledgerRisk);
+        assertEquals(ledgerRisk, aggregateRisk);
+    }
+
+    @Test
+    void assetRiskPolicyCoversInUseCriticalAndBackupStatusBranches() {
+        LabAssetRiskPolicy policy = new LabAssetRiskPolicy();
+        LabAsset deployed = asset("0", "ACTIVE", "DEPLOYED", 99L, null);
+        LabAsset accepted = asset("0", "ACTIVE", "ACCEPTED", 99L, "INACTIVE");
+        LabAsset protectedAsset = asset("0", "ACTIVE", "DEPLOYED", 99L, "ACTIVE");
+        LabAsset critical = asset("1", "INACTIVE", "VERIFYING", null, null);
+        LabAsset irrelevant = asset("0", "ACTIVE", "VERIFYING", null, null);
+
+        for (LabAsset asset : Arrays.asList(deployed, accepted, protectedAsset, critical, irrelevant)) policy.apply(asset);
+
+        assertTrue(deployed.isSinglePointRisk(), "non-critical deployed assets are in-use risk candidates");
+        assertTrue(accepted.isSinglePointRisk(), "inactive backups do not mitigate accepted assets");
+        assertFalse(protectedAsset.isSinglePointRisk(), "an active backup mitigates the risk");
+        assertTrue(critical.isSinglePointRisk(), "critical assets remain risk candidates outside active deployment");
+        assertFalse(irrelevant.isSinglePointRisk(), "non-critical verifying assets are outside the policy");
     }
 
     @Test
@@ -229,8 +313,26 @@ class LabMemberServiceTest {
     private void lead(Long userId, Long memberId, String line) { when(accessService.context(userId)).thenReturn(context(userId, memberId, LabAccessServiceImpl.LEAD, line)); }
     private void memberActor(Long userId, Long memberId, String line) { when(accessService.context(userId)).thenReturn(context(userId, memberId, LabAccessServiceImpl.MEMBER, line)); }
     private LabAccessContext context(Long userId, Long memberId, String role, String line) { LabAccessContext c=new LabAccessContext(); c.setUserId(userId); c.setMemberId(memberId); c.setRoleKey(role); c.setBizLine(line); return c; }
-    private LabMember member(Long id, Long userId, String line) { LabMember m=new LabMember(); m.setId(id); m.setUserId(userId); m.setMemberNo("M-"+userId); m.setBizLine(line); m.setPosition("Engineer"); m.setRoleType("MEMBER"); m.setMemberStatus("ACTIVE"); m.setVersion(0); return m; }
+    private LabMember member(Long id, Long userId, String line) { LabMember m=new LabMember(); m.setId(id); m.setUserId(userId); m.setMemberNo("M-"+userId); m.setNickName("Member "+id); m.setBizLine(line); m.setPosition("Engineer"); m.setRoleType("MEMBER"); m.setMemberStatus("ACTIVE"); m.setVersion(0); return m; }
     private LabMember systemUser(Long id, String userName, String nickName) { LabMember m=new LabMember(); m.setUserId(id); m.setUserName(userName); m.setNickName(nickName); return m; }
     private LabSkill skill(Long id, String name, String status, Integer version) { LabSkill s=new LabSkill(); s.setId(id); s.setSkillCode(name.toUpperCase()); s.setSkillName(name); s.setStatus(status); s.setVersion(version); return s; }
     private LabMemberSkill memberSkill(Long id, Long memberId, Long skillId, Integer level, Integer version) { LabMemberSkill s=new LabMemberSkill(); s.setId(id); s.setMemberId(memberId); s.setSkillId(skillId); s.setLevel(level); s.setVersion(version); s.setLastVerifiedDate(new Date()); s.setEvidenceUrl("https://example.invalid/evidence"); return s; }
+    private LabAsset riskyAsset(Long id) { LabAsset a=asset("0", "ACTIVE", "DEPLOYED", 99L, null); a.setId(id); return a; }
+    private LabAsset asset(String critical, String status, String stage, Long backupId, String backupStatus) { LabAsset a=new LabAsset(); a.setCriticalFlag(critical); a.setStatus(status); a.setAssetStage(stage); a.setBackupOwnerId(backupId); a.setBackupOwnerStatus(backupStatus); return a; }
+    private void populatePrivateDirectoryFields(LabMember member) {
+        member.setUserName("private-account"); member.setRoleType("MEMBER"); member.setLeaderId(21L); member.setLeaderName("Private Leader");
+        member.setJoinDate(new Date()); member.setPrimaryResponsibilities("sensitive primary"); member.setBackupResponsibilities("sensitive backup");
+        member.setMemberStatus("ACTIVE"); member.setVersion(7); member.setDelFlag("0"); member.setRemark("sensitive manager note");
+    }
+    private void assertPublicDirectoryShape(LabMember member) {
+        assertNotNull(member.getId()); assertNotNull(member.getNickName()); assertNotNull(member.getPosition()); assertNotNull(member.getBizLine());
+        assertNull(member.getUserId()); assertNull(member.getUserName()); assertNull(member.getMemberNo()); assertNull(member.getRoleType());
+        assertNull(member.getLeaderId()); assertNull(member.getJoinDate()); assertNull(member.getMemberStatus()); assertNull(member.getVersion());
+        assertNull(member.getDelFlag()); assertNull(member.getLeaderName()); assertNull(member.getPrimaryResponsibilities());
+        assertNull(member.getBackupResponsibilities()); assertNull(member.getRemark());
+    }
+    private static final class ExposedMemberController extends LabMemberController {
+        private ExposedMemberController(LabMemberService service) { super(service); }
+        private TableDataInfo table(java.util.List<?> rows) { return getDataTable(rows); }
+    }
 }

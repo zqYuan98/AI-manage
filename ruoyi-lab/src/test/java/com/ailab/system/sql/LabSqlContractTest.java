@@ -181,6 +181,22 @@ class LabSqlContractTest {
                 "legacy block episodes require deterministic MySQL 8 row-number backfill");
         assertTrue(Pattern.compile("(?is)alter\\s+table\\s+`?lab_task_block_event`?\\s+modify\\s+column\\s+`?episode_no`?\\s+int\\s+not\\s+null").matcher(sql).find(),
                 "episode_no must become NOT NULL after backfill");
+        assertTrue(compact.contains("table_name='lab_one2one' and column_name='feedback'"),
+                "legacy one-to-one feedback column must be detected before backfill");
+        assertTrue(compact.contains("table_name='lab_one2one' and column_name='action_items'"),
+                "legacy one-to-one action_items column must be detected before backfill");
+        assertTrue(compact.contains("column_name='feedback') = 1, 'update lab_one2one set facts_evidence=coalesce(facts_evidence,feedback)', 'select 1'"),
+                "legacy one-to-one feedback must be independently detected and backfilled");
+        assertTrue(compact.contains("column_name='action_items') = 1, 'update lab_one2one set next_action=coalesce(next_action,action_items)', 'select 1'"),
+                "legacy one-to-one action items must be independently detected and backfilled");
+        assertTrue(compact.contains("table_name='lab_ipr' and column_name='application_no'"),
+                "legacy IPR application_no column must be detected before backfill");
+        assertTrue(compact.contains("table_name='lab_ipr' and column_name='submit_date'"),
+                "legacy IPR submit_date column must be detected before backfill");
+        assertTrue(compact.contains("column_name='application_no') = 1, 'update lab_ipr set acceptance_no=coalesce(acceptance_no,application_no)', 'select 1'"),
+                "legacy IPR application number must be independently detected and backfilled");
+        assertTrue(compact.contains("column_name='submit_date') = 1, 'update lab_ipr set actual_submit_date=coalesce(actual_submit_date,submit_date)', 'select 1'"),
+                "legacy IPR submit date must be independently detected and backfilled");
         assertTrue(Files.isRegularFile(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")),
                 "legacy MySQL fixture is required");
         String legacy = new String(Files.readAllBytes(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")), StandardCharsets.UTF_8)
@@ -189,6 +205,15 @@ class LabSqlContractTest {
                 "legacy quality gate fixture must predate evidence_id");
         assertTrue(legacy.contains("create table `lab_task_block_event`") && !legacy.contains("`episode_no`"),
                 "legacy block fixture must predate episode_no");
+        assertTrue(legacy.contains("create table `lab_one2one`") && legacy.contains("`feedback`") && legacy.contains("`action_items`")
+                        && !legacy.contains("`facts_evidence`"),
+                "legacy one-to-one fixture must contain the preceding content columns");
+        assertTrue(legacy.contains("create table `lab_ipr`") && legacy.contains("`application_no`") && legacy.contains("`submit_date`")
+                        && !legacy.contains("`acceptance_no`"),
+                "legacy IPR fixture must contain the preceding filing columns");
+        assertTrue(legacy.contains("legacy one-to-one feedback") && legacy.contains("legacy action item")
+                        && legacy.contains("legacy-application-39991") && legacy.contains("2026-06-15"),
+                "legacy Task 5 fixture must seed history for real MySQL upgrade assertions");
     }
 
     private static Set<String> roleMenuIds(String sql, long roleId) {

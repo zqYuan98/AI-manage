@@ -8,6 +8,7 @@ import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.mapper.LabLedgerMapper;
 import com.ailab.system.mapper.LabMemberMapper;
 import com.ailab.system.service.LabAccessService;
+import com.ailab.system.service.LabAssetRiskPolicy;
 import com.ailab.system.service.LabLedgerService;
 import com.ruoyi.common.exception.ServiceException;
 import java.time.Clock;
@@ -19,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -27,23 +29,36 @@ public class LabLedgerServiceImpl implements LabLedgerService {
     private final LabLedgerMapper ledgerMapper;
     private final LabMemberMapper memberMapper;
     private final LabAccessService accessService;
+    private final LabAssetRiskPolicy assetRiskPolicy;
     private final Clock clock;
 
     public LabLedgerServiceImpl(LabLedgerMapper ledgerMapper, LabMemberMapper memberMapper,
             LabAccessService accessService) {
-        this(ledgerMapper, memberMapper, accessService, Clock.systemDefaultZone());
+        this(ledgerMapper, memberMapper, accessService, Clock.systemDefaultZone(), new LabAssetRiskPolicy());
+    }
+
+    @Autowired
+    public LabLedgerServiceImpl(LabLedgerMapper ledgerMapper, LabMemberMapper memberMapper,
+            LabAccessService accessService, LabAssetRiskPolicy assetRiskPolicy) {
+        this(ledgerMapper, memberMapper, accessService, Clock.systemDefaultZone(), assetRiskPolicy);
     }
 
     public LabLedgerServiceImpl(LabLedgerMapper ledgerMapper, LabMemberMapper memberMapper,
             LabAccessService accessService, Clock clock) {
+        this(ledgerMapper, memberMapper, accessService, clock, new LabAssetRiskPolicy());
+    }
+
+    private LabLedgerServiceImpl(LabLedgerMapper ledgerMapper, LabMemberMapper memberMapper,
+            LabAccessService accessService, Clock clock, LabAssetRiskPolicy assetRiskPolicy) {
         this.ledgerMapper=ledgerMapper; this.memberMapper=memberMapper; this.accessService=accessService; this.clock=clock;
+        this.assetRiskPolicy=assetRiskPolicy;
     }
 
     @Override
     public List<LabAsset> listAssets(LabAsset query, Long actorId) {
         accessService.context(actorId);
         List<LabAsset> rows=ledgerMapper.selectAssetList(query==null?new LabAsset():query);
-        for(LabAsset row:rows) deriveRisk(row);
+        assetRiskPolicy.applyAll(rows);
         return rows;
     }
 
@@ -56,7 +71,7 @@ public class LabLedgerServiceImpl implements LabLedgerService {
 
     @Override
     public LabAsset getAsset(Long id, Long actorId) {
-        accessService.context(actorId); LabAsset asset=requireAsset(ledgerMapper.selectAssetById(id)); deriveRisk(asset); return asset;
+        accessService.context(actorId); LabAsset asset=requireAsset(ledgerMapper.selectAssetById(id)); assetRiskPolicy.apply(asset); return asset;
     }
 
     @Override
@@ -70,7 +85,7 @@ public class LabLedgerServiceImpl implements LabLedgerService {
         LabMember primary=find(owners,asset.getPrimaryOwnerId());
         requireAssetWrite(actor,primary);
         if(asset.getBackupOwnerId()!=null)asset.setBackupOwnerStatus(find(owners,asset.getBackupOwnerId()).getMemberStatus());
-        deriveRisk(asset); asset.setVersion(0); asset.setDelFlag("0"); asset.setCreateBy(actor(actorId));
+        assetRiskPolicy.apply(asset); asset.setVersion(0); asset.setDelFlag("0"); asset.setCreateBy(actor(actorId));
         return requireAffected(ledgerMapper.insertAsset(asset),"Asset was not created");
     }
 
@@ -88,7 +103,7 @@ public class LabLedgerServiceImpl implements LabLedgerService {
         requireAssetWrite(actor,currentOwner);
         requireAssetWrite(actor,requireActive(find(owners,asset.getPrimaryOwnerId())));
         if(asset.getBackupOwnerId()!=null)asset.setBackupOwnerStatus(requireActive(find(owners,asset.getBackupOwnerId())).getMemberStatus());
-        deriveRisk(asset); asset.setUpdateBy(actor(actorId));
+        assetRiskPolicy.apply(asset); asset.setUpdateBy(actor(actorId));
         return requireAffected(ledgerMapper.updateAsset(asset),"Asset changed concurrently");
     }
 
@@ -209,7 +224,6 @@ public class LabLedgerServiceImpl implements LabLedgerService {
         throw new ServiceException("Asset is outside the authenticated actor's write scope");
     }
     private void requireOwnerWrite(LabAccessContext actor,LabMember owner){requireAssetWrite(actor,owner);}
-    private void deriveRisk(LabAsset a){boolean inUse="ACTIVE".equals(a.getStatus())&&("DEPLOYED".equals(a.getAssetStage())||"ACCEPTED".equals(a.getAssetStage()));boolean important="1".equals(a.getCriticalFlag())||inUse;a.setSinglePointRisk(important&&(a.getBackupOwnerId()==null||!"ACTIVE".equals(a.getBackupOwnerStatus())));}
     private void applyAssetDefaults(LabAsset a){if(blank(a.getAssetVersion()))a.setAssetVersion("");if(blank(a.getAssetStage()))a.setAssetStage("VERIFYING");if(blank(a.getStatus()))a.setStatus("ACTIVE");if(blank(a.getCriticalFlag()))a.setCriticalFlag("0");if(a.getReuseCount()==null)a.setReuseCount(0);}
     private void requireManager(LabAccessContext actor){if(!isManager(actor))throw new ServiceException("Manager role is required");}
     private boolean isManager(LabAccessContext c){return LabAccessServiceImpl.MANAGER.equals(c.getRoleKey());}
