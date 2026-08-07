@@ -258,9 +258,52 @@ class LabMemberServiceTest {
     void managerConfiguresSkillsAndActiveNameMustBeUnique() {
         manager(1L);
         LabSkill skill = skill(50L, "MLOps", "ACTIVE", 0);
-        when(memberMapper.selectActiveSkillByName("MLOps", null)).thenReturn(skill(51L, "MLOps", "ACTIVE", 0));
+        when(memberMapper.selectSkillByNameForUpdate("MLOps", null)).thenReturn(skill(51L, "MLOps", "ACTIVE", 0));
         assertThrows(ServiceException.class, () -> service.createSkill(skill, 1L));
         verify(memberMapper, never()).insertSkill(any(LabSkill.class));
+    }
+
+    @Test
+    void ordinarySkillDirectoryAlwaysFiltersToActiveRows() {
+        memberActor(3L, 20L, "algorithm");
+        LabSkill query = new LabSkill();
+        query.setStatus("INACTIVE");
+        when(memberMapper.selectSkillList(query)).thenReturn(Collections.<LabSkill>emptyList());
+
+        service.listSkills(query, 3L);
+
+        assertEquals("ACTIVE", query.getStatus());
+        verify(memberMapper).selectSkillList(query);
+    }
+
+    @Test
+    void inactiveSkillNameConflictDirectsManagerToReactivateOrRename() {
+        manager(1L);
+        LabSkill requested = skill(null, "Dormant Skill", "ACTIVE", null);
+        when(memberMapper.selectSkillByNameForUpdate("Dormant Skill", null))
+                .thenReturn(skill(51L, "Dormant Skill", "INACTIVE", 3));
+
+        ServiceException conflict = assertThrows(ServiceException.class, () -> service.createSkill(requested, 1L));
+
+        assertEquals("Skill name belongs to an inactive skill; reactivate it or choose a different name",
+                conflict.getMessage());
+        verify(memberMapper, never()).insertSkill(any(LabSkill.class));
+    }
+
+    @Test
+    void renamingAnInactiveSkillStillChecksEveryUndeletedName() {
+        manager(1L);
+        LabSkill requested = skill(50L, "Dormant Skill", "INACTIVE", 2);
+        when(memberMapper.selectSkillForUpdate(50L)).thenReturn(skill(50L, "Old Name", "INACTIVE", 2));
+        when(memberMapper.selectSkillByNameForUpdate("Dormant Skill", 50L))
+                .thenReturn(skill(51L, "Dormant Skill", "INACTIVE", 3));
+        when(memberMapper.updateSkill(any(LabSkill.class))).thenReturn(1);
+
+        ServiceException conflict = assertThrows(ServiceException.class, () -> service.updateSkill(requested, 1L));
+
+        assertEquals("Skill name belongs to an inactive skill; reactivate it or choose a different name",
+                conflict.getMessage());
+        verify(memberMapper, never()).updateSkill(any(LabSkill.class));
     }
 
     @Test

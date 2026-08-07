@@ -88,9 +88,10 @@ CREATE TABLE `lab_skill` (
  `update_by` varchar(64) DEFAULT '' COMMENT 'updater',
  `update_time` datetime DEFAULT NULL COMMENT 'updated time',
  `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker',
+ `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' AND `status` = 'ACTIVE' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker',
  PRIMARY KEY (`id`),
  UNIQUE KEY `uk_lab_skill_code` (`skill_code`,`active_unique_flag`),
+ UNIQUE KEY `uk_lab_skill_name` (`skill_name`,`active_unique_flag`),
  KEY `idx_lab_skill_category` (`skill_category`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='legacy skill dictionary';
 
@@ -155,11 +156,17 @@ VALUES
  (39994,'LEGACY-ASSET-B','Legacy shared asset','algorithm','DEPLOYED',39203,'ACTIVE','it',NOW());
 
 INSERT INTO `lab_skill`
- (`id`,`skill_code`,`skill_name`,`skill_category`,`status`,`create_by`,`create_time`)
+ (`id`,`skill_code`,`skill_name`,`skill_category`,`status`,`del_flag`,`create_by`,`create_time`)
 VALUES
- (39993,'LEGACY-SKILL-A','Legacy Duplicate Skill','algorithm','ACTIVE','it',NOW()),
- (39994,'LEGACY-SKILL-B','Legacy Duplicate Skill','algorithm','ACTIVE','it',NOW()),
- (39995,'LEGACY-SKILL-C','Legacy Duplicate Skill [LEGACY-SKILL-B:39994]','algorithm','ACTIVE','it',NOW());
+ (39993,'LEGACY-SKILL-A','Legacy Duplicate Skill','algorithm','INACTIVE','0','it',NOW()),
+ (39994,'LEGACY-SKILL-B','Legacy Duplicate Skill','algorithm','ACTIVE','0','it',NOW()),
+ (39995,'LEGACY-SKILL-C','Legacy Duplicate Skill [LEGACY-SKILL-B:39994]','algorithm','ACTIVE','0','it',NOW()),
+ (39996,'LEGACY-SKILL-D','Legacy Mixed Skill','algorithm','INACTIVE','0','it',NOW()),
+ (39997,'LEGACY-SKILL-D','Legacy Mixed Skill','algorithm','ACTIVE','0','it',NOW()),
+ (39998,'LEGACY-SKILL-F','Legacy Inactive Skill','algorithm','INACTIVE','0','it',NOW()),
+ (39999,'LEGACY-SKILL-F','Legacy Inactive Skill','algorithm','INACTIVE','0','it',NOW()),
+ (40000,'LEGACY-SKILL-D','Legacy Mixed Skill','algorithm','ACTIVE','2','it',NOW()),
+ (40001,'LEGACY-SKILL-D-LEGACY-39997','Legacy Code Collision','algorithm','ACTIVE','0','it',NOW());
 
 INSERT INTO `lab_one2one`
  (`id`,`member_id`,`leader_id`,`meeting_date`,`topic`,`feedback`,`action_items`,`status`,`create_by`,`create_time`)

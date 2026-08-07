@@ -142,7 +142,7 @@ public class LabMemberServiceImpl implements LabMemberService {
     @Transactional
     public int createSkill(LabSkill skill, Long actorId) {
         requireManager(actorId); requireSkillInput(skill);
-        if (memberMapper.selectActiveSkillByName(skill.getSkillName(), null) != null) throw new ServiceException("Active skill name already exists");
+        rejectSkillNameConflict(memberMapper.selectSkillByNameForUpdate(skill.getSkillName(), null));
         skill.setStatus(blank(skill.getStatus()) ? "ACTIVE" : skill.getStatus());
         skill.setVersion(0); skill.setDelFlag("0"); skill.setCreateBy(actor(actorId));
         return requireAffected(memberMapper.insertSkill(skill), "Skill was not created");
@@ -154,11 +154,17 @@ public class LabMemberServiceImpl implements LabMemberService {
         requireManager(actorId); requireSkillInput(skill);
         if (skill.getId() == null || skill.getVersion() == null) throw new ServiceException("Skill id and version are required");
         requireSkill(memberMapper.selectSkillForUpdate(skill.getId()));
-        if ("ACTIVE".equals(skill.getStatus()) && memberMapper.selectActiveSkillByName(skill.getSkillName(), skill.getId()) != null) {
-            throw new ServiceException("Active skill name already exists");
-        }
+        rejectSkillNameConflict(memberMapper.selectSkillByNameForUpdate(skill.getSkillName(), skill.getId()));
         skill.setUpdateBy(actor(actorId));
         return requireAffected(memberMapper.updateSkill(skill), "Skill changed concurrently");
+    }
+
+    private void rejectSkillNameConflict(LabSkill conflict) {
+        if (conflict == null) return;
+        if ("INACTIVE".equals(conflict.getStatus())) {
+            throw new ServiceException("Skill name belongs to an inactive skill; reactivate it or choose a different name");
+        }
+        throw new ServiceException("Skill name already exists");
     }
 
     @Override

@@ -101,9 +101,9 @@
     </select>
     <select id="selectSkillById" parameterType="long" resultMap="SkillResult">select <include refid="skillColumns"/> from lab_skill s where s.id=#{id} and s.del_flag='0'</select>
     <select id="selectSkillForUpdate" parameterType="long" resultMap="SkillResult">select <include refid="skillColumns"/> from lab_skill s where s.id=#{id} and s.del_flag='0' for update</select>
-    <select id="selectActiveSkillByName" resultMap="SkillResult">
-        select <include refid="skillColumns"/> from lab_skill s where s.skill_name=#{skillName} and s.status='ACTIVE' and s.del_flag='0'
-        <if test="excludeId != null">and s.id&lt;&gt;#{excludeId}</if> limit 1
+    <select id="selectSkillByNameForUpdate" resultMap="SkillResult">
+        select <include refid="skillColumns"/> from lab_skill s where s.skill_name=#{skillName} and s.del_flag='0'
+        <if test="excludeId != null">and s.id&lt;&gt;#{excludeId}</if> order by s.id limit 1 for update
     </select>
     <select id="lockSkillsForUpdate" resultMap="SkillResult">
         select <include refid="skillColumns"/> from lab_skill s where s.del_flag='0' and s.id in

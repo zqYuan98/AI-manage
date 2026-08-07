@@ -132,17 +132,50 @@ class LabMapperMySqlIT {
                 jdbcTemplate.queryForList(
                         "select column_name from information_schema.statistics where table_schema=database() and table_name='lab_asset' and index_name='uk_lab_asset_business' and non_unique=0 order by seq_in_index",
                         String.class));
-        assertEquals(3, jdbcTemplate.queryForObject("select count(1) from lab_skill where id in (39993,39994,39995)", Integer.class));
+        assertEquals(9, jdbcTemplate.queryForObject("select count(1) from lab_skill where id between 39993 and 40001", Integer.class));
         List<String> migratedSkillNames = jdbcTemplate.queryForList(
-                "select skill_name from lab_skill where id in (39993,39994,39995) order by id", String.class);
+                "select skill_name from lab_skill where id between 39993 and 40001 order by id", String.class);
         assertEquals("Legacy Duplicate Skill", migratedSkillNames.get(0));
         assertEquals("Legacy Duplicate Skill [LEGACY-SKILL-B:39994]", migratedSkillNames.get(1));
         assertTrue(migratedSkillNames.get(2).contains("LEGACY-SKILL-C") && migratedSkillNames.get(2).contains("39995"),
                 "the pre-existing generated-name collision must receive its own stable code/id suffix");
-        assertEquals(3L, migratedSkillNames.stream().distinct().count());
+        assertEquals("Legacy Mixed Skill", migratedSkillNames.get(3));
+        assertTrue(migratedSkillNames.get(4).contains("LEGACY-SKILL-D") && migratedSkillNames.get(4).contains("39997"),
+                "an inactive skill must be renamed when an active undeleted row already owns its name");
+        assertEquals("Legacy Inactive Skill", migratedSkillNames.get(5));
+        assertTrue(migratedSkillNames.get(6).contains("LEGACY-SKILL-F") && migratedSkillNames.get(6).contains("39999"),
+                "two inactive undeleted skills must also receive distinct names");
+        assertEquals("Legacy Mixed Skill", migratedSkillNames.get(7),
+                "a logically deleted skill must stay outside the uniqueness migration");
+        assertEquals("Legacy Code Collision", migratedSkillNames.get(8));
+        assertEquals(8, jdbcTemplate.queryForObject(
+                "select count(distinct skill_name) from lab_skill where id between 39993 and 40001 and del_flag='0'",
+                Integer.class));
         assertTrue(migratedSkillNames.stream().allMatch(name -> name.length() <= 100));
+        List<String> migratedSkillCodes = jdbcTemplate.queryForList(
+                "select skill_code from lab_skill where id between 39993 and 40001 order by id", String.class);
+        assertEquals("LEGACY-SKILL-D", migratedSkillCodes.get(3));
+        assertTrue(migratedSkillCodes.get(4).contains("39997"),
+                "the inactive half of an active/inactive code collision must receive a deterministic code");
+        assertEquals("LEGACY-SKILL-F", migratedSkillCodes.get(5));
+        assertTrue(migratedSkillCodes.get(6).contains("39999"),
+                "two inactive rows sharing a code must also be repaired");
+        assertEquals("LEGACY-SKILL-D", migratedSkillCodes.get(7),
+                "a deleted row may retain a code used by an undeleted row");
+        assertTrue(migratedSkillCodes.get(8).contains("40001"),
+                "a pre-existing first-pass generated code collision needs a second deterministic repair");
+        assertEquals(8, jdbcTemplate.queryForObject(
+                "select count(distinct skill_code) from lab_skill where id between 39993 and 40001 and del_flag='0'",
+                Integer.class));
+        assertTrue(migratedSkillCodes.stream().allMatch(code -> code.length() <= 64));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(1) from information_schema.columns where table_schema=database() and table_name='lab_skill' and column_name='active_unique_flag' and lower(generation_expression) not like '%status%'",
+                Integer.class));
         assertEquals(Arrays.asList("skill_name", "active_unique_flag"), jdbcTemplate.queryForList(
                 "select column_name from information_schema.statistics where table_schema=database() and table_name='lab_skill' and index_name='uk_lab_skill_name' and non_unique=0 order by seq_in_index",
+                String.class));
+        assertEquals(Arrays.asList("skill_code", "active_unique_flag"), jdbcTemplate.queryForList(
+                "select column_name from information_schema.statistics where table_schema=database() and table_name='lab_skill' and index_name='uk_lab_skill_code' and non_unique=0 order by seq_in_index",
                 String.class));
         LabOne2One legacyConversation = ledgerMapper.selectOne2OneById(39991L);
         LabIpr legacyIpr = ledgerMapper.selectIprById(39991L);
@@ -180,9 +213,11 @@ class LabMapperMySqlIT {
         assertEquals(migratedAssetVersions, jdbcTemplate.queryForList(
                 "select asset_version from lab_asset where id in (39993,39994) order by id", String.class));
         assertEquals(migratedSkillNames, jdbcTemplate.queryForList(
-                "select skill_name from lab_skill where id in (39993,39994,39995) order by id", String.class));
+                "select skill_name from lab_skill where id between 39993 and 40001 order by id", String.class));
+        assertEquals(migratedSkillCodes, jdbcTemplate.queryForList(
+                "select skill_code from lab_skill where id between 39993 and 40001 order by id", String.class));
         assertEquals(2, jdbcTemplate.queryForObject("select count(1) from lab_asset where id in (39993,39994)", Integer.class));
-        assertEquals(3, jdbcTemplate.queryForObject("select count(1) from lab_skill where id in (39993,39994,39995)", Integer.class));
+        assertEquals(9, jdbcTemplate.queryForObject("select count(1) from lab_skill where id between 39993 and 40001", Integer.class));
     }
 
     @Test
@@ -383,10 +418,36 @@ class LabMapperMySqlIT {
             try (Connection connection = DriverManager.getConnection(url, username, password)) {
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ry_20240629.sql")));
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-legacy-fixture.sql")));
+                requireLegacySkillUniquenessState(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ailab.sql")));
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-mapper-fixture.sql")));
             } catch (Exception exception) {
                 throw new IllegalStateException("Real MySQL 8 integration database is unavailable or could not be initialized. Configure LAB_IT_DB_URL/LAB_IT_DB_USERNAME/LAB_IT_DB_PASSWORD.", exception);
+            }
+        }
+
+        private static void requireLegacySkillUniquenessState(Connection connection) throws Exception {
+            try (java.sql.Statement statement = connection.createStatement();
+                    java.sql.ResultSet result = statement.executeQuery(
+                            "select generation_expression from information_schema.columns where table_schema=database() and table_name='lab_skill' and column_name='active_unique_flag'")) {
+                if (!result.next() || !result.getString(1).toLowerCase().contains("status")) {
+                    throw new IllegalStateException("Legacy skill fixture must begin with status-scoped uniqueness");
+                }
+            }
+            try (java.sql.Statement statement = connection.createStatement();
+                    java.sql.ResultSet result = statement.executeQuery(
+                            "select count(distinct index_name) from information_schema.statistics where table_schema=database() and table_name='lab_skill' and index_name in ('uk_lab_skill_name','uk_lab_skill_code') and non_unique=0")) {
+                if (!result.next() || result.getInt(1) != 2) {
+                    throw new IllegalStateException("Legacy skill fixture must retain both status-scoped unique indexes");
+                }
+            }
+            try (java.sql.Statement statement = connection.createStatement();
+                    java.sql.ResultSet result = statement.executeQuery(
+                            "select (select count(1) from (select skill_name from lab_skill where del_flag='0' group by skill_name having count(1)>1) names),"
+                                    + "(select count(1) from (select skill_code from lab_skill where del_flag='0' group by skill_code having count(1)>1) codes)")) {
+                if (!result.next() || result.getInt(1) < 3 || result.getInt(2) < 2) {
+                    throw new IllegalStateException("Legacy skill fixture must contain undeleted name and code collisions across statuses");
+                }
             }
         }
 

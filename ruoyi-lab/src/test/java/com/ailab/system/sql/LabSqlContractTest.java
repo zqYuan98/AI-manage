@@ -55,6 +55,8 @@ class LabSqlContractTest {
         String compactSql = sql.toLowerCase(Locale.ROOT).replace("`", "").replaceAll("\\s+", "");
         assertTrue(columns(blocks.get("lab_task_quality_gate")).containsKey("evidence_id"), "quality gate evidence_id missing");
         assertTrue(columns(blocks.get("lab_task_block_event")).containsKey("episode_no"), "block episode_no missing");
+        assertTrue(!columns(blocks.get("lab_skill")).get("active_unique_flag").toLowerCase(Locale.ROOT).contains("status"),
+                "every undeleted skill must occupy its code and display name even while inactive");
         assertLogicalUniqueContracts(sql, blocks);
         assertNoPostCreateActiveUniquenessMigration(sql);
         assertLookupIndexes(blocks);
@@ -111,6 +113,19 @@ class LabSqlContractTest {
         assertTrue(query.contains("left join lab_member m on m.user_id=u.user_id and m.del_flag='0'"),
                 "any existing member profile must be excluded so inactive history is explicitly reactivated");
         assertTrue(!query.contains("m.member_status='active'"), "inactive profiles must not reappear as add candidates");
+    }
+
+    @Test
+    void skillNameConflictLockCoversEveryUndeletedStatus() throws IOException {
+        String xml = new String(Files.readAllBytes(findRoot().resolve("ruoyi-lab/src/main/resources/mapper/lab/LabMemberMapper.xml")), StandardCharsets.UTF_8)
+                .toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        Matcher matcher = Pattern.compile("(?is)<select id=\"selectskillbynameforupdate\".*?</select>").matcher(xml);
+        assertTrue(matcher.find(), "locking skill-name conflict query missing");
+        String query = matcher.group();
+        assertTrue(query.contains("s.skill_name=#{skillname}") && query.contains("s.del_flag='0'"),
+                "skill-name conflicts must include all undeleted rows");
+        assertTrue(!query.contains("s.status='active'") && query.contains("for update"),
+                "conflict lookup must not exclude inactive skills and must lock the current name owner");
     }
 
     @Test
@@ -230,12 +245,43 @@ class LabSqlContractTest {
                 "later duplicate skill names require a stable bounded display-name suffix");
         assertTrue(compact.contains("concat('[ailab-legacy:',id,':',left(skill_code,32),'] ',left(skill_name,30))"),
                 "generated legacy names that collide globally require a second deterministic code/id suffix");
+        assertTrue(compact.contains("row_number() over(partition by skill_code order by id)"),
+                "status-scoped legacy skill codes must be ranked before widening uniqueness");
+        assertTrue(compact.contains("concat(left(skill_code,35),'-legacy-',id)"),
+                "later duplicate skill codes require a stable bounded id suffix");
+        assertTrue(compact.contains("concat('ailab-legacy-',id,'-',left(skill_code,29))"),
+                "generated legacy skill-code collisions require a second bounded repair");
+        assertTrue(compact.indexOf("row_number() over(partition by skill_code order by id)")
+                        != compact.lastIndexOf("row_number() over(partition by skill_code order by id)"),
+                "skill-code migration needs a second global collision pass");
+        assertTrue(!compact.contains("from lab_skill where del_flag='0' and status='active'"),
+                "both legacy skill-name repair passes must include inactive undeleted rows");
+        String skillFlagMigration = "alter table lab_skill modify column active_unique_flag tinyint generated always as (case when del_flag = ''0'' then 1 else null end)";
+        assertTrue(compact.contains(skillFlagMigration),
+                "upgrades from status-scoped uniqueness must converge on undeleted-row uniqueness");
         assertTrue(compact.indexOf("row_number() over(partition by skill_name order by id)")
                         != compact.lastIndexOf("row_number() over(partition by skill_name order by id)"),
                 "legacy skill repair must rerank names after the initial rename to catch generated-name collisions");
         String skillNameIndex = "alter table lab_skill add unique index uk_lab_skill_name (skill_name,active_unique_flag)";
-        assertTrue(compact.indexOf("row_number() over(partition by skill_name order by id)") < compact.indexOf(skillNameIndex),
-                "legacy skill names must be repaired before the active-name unique index is added");
+        String skillCodeIndex = "alter table lab_skill add unique index uk_lab_skill_code (skill_code,active_unique_flag)";
+        String dropSkillNameIndex = "alter table lab_skill drop index uk_lab_skill_name";
+        String dropSkillCodeIndex = "alter table lab_skill drop index uk_lab_skill_code";
+        int flagMigrationPosition = compact.indexOf(skillFlagMigration);
+        int firstSkillRepairPosition = Math.min(compact.indexOf("row_number() over(partition by skill_name order by id)"),
+                compact.indexOf("row_number() over(partition by skill_code order by id)"));
+        assertTrue(compact.contains(dropSkillNameIndex) && compact.contains(dropSkillCodeIndex),
+                "status-scoped skill unique indexes must be conditionally removed before collision repair");
+        assertTrue(compact.indexOf(dropSkillNameIndex) < firstSkillRepairPosition
+                        && compact.indexOf(dropSkillCodeIndex) < firstSkillRepairPosition,
+                "legacy unique indexes must be removed before temporary repair values can collide");
+        assertTrue(compact.lastIndexOf("row_number() over(partition by skill_name order by id)") < flagMigrationPosition,
+                "both skill-name repair passes must finish before widening the generated flag");
+        assertTrue(compact.lastIndexOf("row_number() over(partition by skill_code order by id)") < flagMigrationPosition,
+                "both skill-code repair passes must finish before widening the generated flag");
+        assertTrue(flagMigrationPosition < compact.indexOf(skillNameIndex),
+                "the generated flag must be widened before the final name index is added");
+        assertTrue(flagMigrationPosition < compact.indexOf(skillCodeIndex),
+                "the generated flag must be widened before the final code index is added");
         assertTrue(Files.isRegularFile(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")),
                 "legacy MySQL fixture is required");
         String legacy = new String(Files.readAllBytes(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")), StandardCharsets.UTF_8)
@@ -255,10 +301,21 @@ class LabSqlContractTest {
         assertTrue(legacy.indexOf("legacy shared asset") != legacy.lastIndexOf("legacy shared asset")
                         && legacy.contains("legacy-asset-a") && legacy.contains("legacy-asset-b"),
                 "legacy asset fixture must contain a real business-key collision");
+        Matcher legacySkillBlockMatcher = Pattern.compile("(?is)create table `lab_skill`.*?engine=.*?;").matcher(legacy);
+        assertTrue(legacySkillBlockMatcher.find(), "legacy skill table fixture missing");
+        String legacySkillBlock = legacySkillBlockMatcher.group();
+        assertTrue(legacySkillBlock.contains("case when `del_flag` = '0' and `status` = 'active' then 1 else null end"),
+                "legacy skill fixture must begin with status-scoped uniqueness");
+        assertTrue(legacySkillBlock.contains("unique key `uk_lab_skill_code`")
+                        && legacySkillBlock.contains("unique key `uk_lab_skill_name`"),
+                "legacy fixture must retain both status-scoped unique indexes during upgrade");
         assertTrue(legacy.contains("create table `lab_skill`") && legacy.indexOf("legacy duplicate skill") != legacy.lastIndexOf("legacy duplicate skill")
                         && legacy.contains("legacy-skill-a") && legacy.contains("legacy-skill-b") && legacy.contains("legacy-skill-c")
-                        && legacy.contains("legacy duplicate skill [legacy-skill-b:39994]"),
-                "legacy skill fixture must contain duplicate names and a pre-existing generated-name collision");
+                        && legacy.contains("legacy duplicate skill [legacy-skill-b:39994]")
+                        && legacy.contains("legacy-skill-d") && legacy.contains("legacy-skill-f")
+                        && legacy.contains("legacy-skill-d-legacy-39997")
+                        && legacy.contains("'2','it'"),
+                "legacy skill fixture must cover active/inactive, inactive/inactive and deleted-name collisions");
         assertTrue(legacy.contains("legacy one-to-one feedback") && legacy.contains("legacy action item")
                         && legacy.contains("legacy-application-39991") && legacy.contains("2026-06-15"),
                 "legacy Task 5 fixture must seed history for real MySQL upgrade assertions");

@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS `lab_member` (
 
 CREATE TABLE IF NOT EXISTS `lab_skill` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `skill_code` varchar(64) NOT NULL COMMENT 'skill code', `skill_name` varchar(100) NOT NULL COMMENT 'skill name', `skill_category` varchar(64) DEFAULT NULL COMMENT 'skill category', `skill_desc` varchar(1000) DEFAULT NULL COMMENT 'skill description', `status` varchar(16) DEFAULT 'ACTIVE' COMMENT 'status', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' AND `status` = 'ACTIVE' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker',
+ `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker',
  PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_skill_code` (`skill_code`,`active_unique_flag`), UNIQUE KEY `uk_lab_skill_name` (`skill_name`,`active_unique_flag`), KEY `idx_lab_skill_category` (`skill_category`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='skill dictionary';
 
@@ -144,11 +144,6 @@ SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
  'ALTER TABLE `lab_skill` ADD COLUMN `version` int DEFAULT 0 COMMENT ''optimistic version'' AFTER `status`',
  'SELECT 1') FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_skill' AND column_name='version');
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
-SET @ailab_ddl = (SELECT IF(COUNT(*) = 1,
- 'ALTER TABLE `lab_skill` MODIFY COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = ''0'' AND `status` = ''ACTIVE'' THEN 1 ELSE NULL END) STORED COMMENT ''active record unique marker''',
- 'SELECT 1') FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_skill' AND column_name='active_unique_flag' AND generation_expression NOT LIKE '%status%');
-PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
-
 SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
  'ALTER TABLE `lab_member_skill` ADD COLUMN `skill_level` tinyint NULL COMMENT ''skill level from 1 to 5'' AFTER `skill_id`, ADD COLUMN `last_verified_date` date NULL COMMENT ''last verified date'' AFTER `skill_level`, ADD COLUMN `evidence_url` varchar(1000) NULL COMMENT ''verification evidence URL'' AFTER `last_verified_date`, ADD COLUMN `version` int DEFAULT 0 COMMENT ''optimistic version'' AFTER `evidence_url`',
  'SELECT 1') FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_member_skill' AND column_name='version');
@@ -204,31 +199,73 @@ UPDATE `lab_asset` SET `asset_version`=`asset_no`
 WHERE (`asset_version` IS NULL OR TRIM(`asset_version`)='') AND @ailab_asset_business_index_missing=1;
 
 SET @ailab_skill_name_index_missing = (SELECT IF(COUNT(*) = 0,1,0) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_skill' AND index_name='uk_lab_skill_name');
+SET @ailab_skill_code_index_missing = (SELECT IF(COUNT(*) = 0,1,0) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_skill' AND index_name='uk_lab_skill_code');
+SET @ailab_skill_name_repair_required = (SELECT IF(@ailab_skill_name_index_missing=1 OR @ailab_skill_code_index_missing=1 OR COUNT(*)=1,1,0)
+ FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_skill' AND column_name='active_unique_flag' AND generation_expression LIKE '%status%');
+SET @ailab_ddl = (SELECT IF(@ailab_skill_name_repair_required=1 AND COUNT(*) > 0,
+ 'ALTER TABLE `lab_skill` DROP INDEX `uk_lab_skill_name`',
+ 'SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_skill' AND index_name='uk_lab_skill_name');
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+SET @ailab_ddl = (SELECT IF(@ailab_skill_name_repair_required=1 AND COUNT(*) > 0,
+ 'ALTER TABLE `lab_skill` DROP INDEX `uk_lab_skill_code`',
+ 'SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_skill' AND index_name='uk_lab_skill_code');
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
 UPDATE `lab_skill` target
 JOIN (
  SELECT ranked.id AS duplicate_skill_id
  FROM (
   SELECT id,ROW_NUMBER() OVER(PARTITION BY skill_name ORDER BY id) AS duplicate_rank
-  FROM `lab_skill` WHERE del_flag='0' AND status='ACTIVE'
+  FROM `lab_skill` WHERE del_flag='0'
  ) ranked
  WHERE ranked.duplicate_rank>1
 ) duplicates ON duplicates.duplicate_skill_id=target.id
 SET target.skill_name=CONCAT(LEFT(skill_name,35),' [',LEFT(skill_code,40),':',id,']')
-WHERE @ailab_skill_name_index_missing=1;
+WHERE @ailab_skill_name_repair_required=1;
 
 UPDATE `lab_skill` target
 JOIN (
  SELECT ranked.id AS duplicate_skill_id
  FROM (
   SELECT id,ROW_NUMBER() OVER(PARTITION BY skill_name ORDER BY id) AS duplicate_rank
-  FROM `lab_skill` WHERE del_flag='0' AND status='ACTIVE'
+  FROM `lab_skill` WHERE del_flag='0'
  ) ranked
  WHERE ranked.duplicate_rank>1
 ) collisions ON collisions.duplicate_skill_id=target.id
 SET target.skill_name=CONCAT('[ailab-legacy:',id,':',LEFT(skill_code,32),'] ',LEFT(skill_name,30))
-WHERE @ailab_skill_name_index_missing=1;
+WHERE @ailab_skill_name_repair_required=1;
+
+UPDATE `lab_skill` target
+JOIN (
+ SELECT ranked.id AS duplicate_skill_id
+ FROM (
+  SELECT id,ROW_NUMBER() OVER(PARTITION BY skill_code ORDER BY id) AS duplicate_rank
+  FROM `lab_skill` WHERE del_flag='0'
+ ) ranked
+ WHERE ranked.duplicate_rank>1
+) duplicate_codes ON duplicate_codes.duplicate_skill_id=target.id
+SET target.skill_code=CONCAT(LEFT(skill_code,35),'-LEGACY-',id)
+WHERE @ailab_skill_name_repair_required=1;
+
+UPDATE `lab_skill` target
+JOIN (
+ SELECT ranked.id AS duplicate_skill_id
+ FROM (
+  SELECT id,ROW_NUMBER() OVER(PARTITION BY skill_code ORDER BY id) AS duplicate_rank
+  FROM `lab_skill` WHERE del_flag='0'
+ ) ranked
+ WHERE ranked.duplicate_rank>1
+) code_collisions ON code_collisions.duplicate_skill_id=target.id
+SET target.skill_code=CONCAT('AILAB-LEGACY-',id,'-',LEFT(skill_code,29))
+WHERE @ailab_skill_name_repair_required=1;
+
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 1,
+ 'ALTER TABLE `lab_skill` MODIFY COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = ''0'' THEN 1 ELSE NULL END) STORED COMMENT ''active record unique marker''',
+ 'SELECT 1') FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_skill' AND column_name='active_unique_flag' AND generation_expression LIKE '%status%');
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
 
 SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,'ALTER TABLE `lab_asset` ADD UNIQUE INDEX `uk_lab_asset_business` (`asset_name`,`asset_version`,`asset_type`,`active_unique_flag`)','SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_asset' AND index_name='uk_lab_asset_business');
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,'ALTER TABLE `lab_skill` ADD UNIQUE INDEX `uk_lab_skill_code` (`skill_code`,`active_unique_flag`)','SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_skill' AND index_name='uk_lab_skill_code');
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
 SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,'ALTER TABLE `lab_skill` ADD UNIQUE INDEX `uk_lab_skill_name` (`skill_name`,`active_unique_flag`)','SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_skill' AND index_name='uk_lab_skill_name');
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;

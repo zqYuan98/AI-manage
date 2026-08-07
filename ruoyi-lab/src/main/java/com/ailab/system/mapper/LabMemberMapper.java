@@ -23,7 +23,7 @@ public interface LabMemberMapper {
     List<LabSkill> selectSkillList(LabSkill query);
     LabSkill selectSkillById(Long id);
     LabSkill selectSkillForUpdate(Long id);
-    LabSkill selectActiveSkillByName(@Param("skillName") String skillName, @Param("excludeId") Long excludeId);
+    LabSkill selectSkillByNameForUpdate(@Param("skillName") String skillName, @Param("excludeId") Long excludeId);
     List<LabSkill> lockSkillsForUpdate(@Param("ids") List<Long> ids);
     int insertSkill(LabSkill skill);
     int updateSkill(LabSkill skill);
