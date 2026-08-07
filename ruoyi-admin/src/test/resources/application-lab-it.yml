@@ -1,0 +1,32 @@
+spring:
+  main:
+    web-application-type: none
+  datasource:
+    druid:
+      master:
+        url: ${LAB_IT_DB_URL:jdbc:mysql://localhost:3306/ailab_it?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowMultiQueries=true&serverTimezone=Asia/Shanghai}
+        username: ${LAB_IT_DB_USERNAME:root}
+        password: ${LAB_IT_DB_PASSWORD:password}
+      slave:
+        enabled: false
+      initialSize: 1
+      minIdle: 1
+      maxActive: 4
+      maxWait: 10000
+      connectTimeout: 10000
+      socketTimeout: 30000
+      validationQuery: SELECT 1
+  quartz:
+    auto-startup: false
+  redis:
+    host: ${LAB_IT_REDIS_HOST:localhost}
+    port: ${LAB_IT_REDIS_PORT:6379}
+    password: ${LAB_IT_REDIS_PASSWORD:}
+
+mybatis:
+  typeAliasesPackage: com.ruoyi.**.domain,com.ailab.**.domain
+  mapperLocations: classpath*:mapper/**/*Mapper.xml
+  configLocation: classpath:mybatis/mybatis-config.xml
+
+swagger:
+  enabled: false

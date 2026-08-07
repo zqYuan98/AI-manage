@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabTaskMapper">
+    <resultMap id="LabTaskResult" type="com.ailab.system.domain.LabTask">
+        <id property="id" column="id"/><result property="parentId" column="parent_id"/>
+        <result property="goalId" column="goal_id"/><result property="milestoneId" column="milestone_id"/>
+        <result property="taskLevel" column="task_level"/><result property="period" column="period"/>
+        <result property="bizLine" column="biz_line"/><result property="taskType" column="task_type"/>
+        <result property="title" column="title"/><result property="ownerId" column="owner_id"/>
+        <result property="deptId" column="dept_id"/><result property="planDate" column="plan_date"/>
+        <result property="actualFinishTime" column="actual_finish_time"/><result property="deliverable" column="deliverable"/>
+        <result property="perfWeight" column="perf_weight"/><result property="goalWeight" column="goal_weight"/>
+        <result property="workflowStatus" column="workflow_status"/><result property="resultStatus" column="result_status"/>
+        <result property="resultDesc" column="result_desc"/><result property="failReason" column="fail_reason"/>
+        <result property="nextAction" column="next_action"/><result property="assetId" column="asset_id"/>
+        <result property="coordinationRequired" column="coordination_required"/><result property="coordinationOwnerId" column="coordination_owner_id"/>
+        <result property="coordinationDeptId" column="coordination_dept_id"/><result property="coordinationContent" column="coordination_content"/>
+        <result property="coordinationSupport" column="coordination_support"/><result property="coordinationDesc" column="coordination_desc"/>
+        <result property="blockFlag" column="current_block_flag"/><result property="blockStartTime" column="current_block_start"/>
+        <result property="periodLockFlag" column="period_lock_flag"/><result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="GateResult" type="com.ailab.system.domain.LabTaskQualityGate">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/><result property="gateNo" column="gate_no"/>
+        <result property="gateName" column="gate_name"/><result property="gateStatus" column="gate_status"/><result property="checkerId" column="checker_id"/>
+        <result property="checkTime" column="check_time"/><result property="checkResult" column="check_result"/><result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="BlockResult" type="com.ailab.system.domain.LabTaskBlockEvent">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/><result property="blockType" column="block_type"/>
+        <result property="blockReason" column="block_reason"/><result property="blockStartTime" column="block_start_time"/><result property="blockEndTime" column="block_end_time"/>
+        <result property="blockStatus" column="block_status"/><result property="resolverId" column="resolver_id"/><result property="resolution" column="resolution"/>
+        <result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/><result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+
+    <sql id="taskColumns">t.id,t.parent_id,t.goal_id,t.milestone_id,t.task_level,t.period,t.biz_line,t.task_type,t.title,t.owner_id,t.dept_id,t.plan_date,t.actual_finish_time,t.deliverable,t.perf_weight,t.goal_weight,t.workflow_status,t.result_status,t.result_desc,t.fail_reason,t.next_action,t.asset_id,t.coordination_required,t.coordination_owner_id,t.coordination_dept_id,t.coordination_content,t.coordination_support,t.coordination_desc,t.current_block_flag,t.current_block_start,t.period_lock_flag,t.version,t.del_flag,t.create_by,t.create_time,t.update_by,t.update_time,t.remark</sql>
+    <select id="selectMemberIdByUserId" parameterType="long" resultType="long">select id from lab_member where user_id=#{userId} and member_status='ACTIVE' and del_flag='0' limit 1</select>
+    <select id="selectMemberBizLineById" parameterType="long" resultType="string">select biz_line from lab_member where id=#{memberId} and member_status='ACTIVE' and del_flag='0' limit 1</select>
+    <select id="selectTaskList" parameterType="com.ailab.system.domain.LabTask" resultMap="LabTaskResult">
+        select <include refid="taskColumns"/> from lab_task t
+        left join lab_member lm on lm.id=t.owner_id and lm.del_flag='0'
+        left join sys_user u on u.user_id=lm.user_id and u.del_flag='0'
+        where t.del_flag='0'
+        <if test="id != null">and t.id=#{id}</if><if test="parentId != null">and t.parent_id=#{parentId}</if>
+        <if test="goalId != null">and t.goal_id=#{goalId}</if><if test="milestoneId != null">and t.milestone_id=#{milestoneId}</if>
+        <if test="taskLevel != null and taskLevel != ''">and t.task_level=#{taskLevel}</if>
+        <if test="period != null and period != ''">and t.period=#{period}</if>
+        <if test="bizLine != null and bizLine != ''">and t.biz_line=#{bizLine}</if>
+        <if test="taskType != null and taskType != ''">and t.task_type=#{taskType}</if>
+        <if test="ownerId != null">and t.owner_id=#{ownerId}</if><if test="deptId != null">and t.dept_id=#{deptId}</if>
+        <if test="workflowStatus != null and workflowStatus != ''">and t.workflow_status=#{workflowStatus}</if>
+        <if test="resultStatus != null and resultStatus != ''">and t.result_status=#{resultStatus}</if>
+        <if test="title != null and title != ''">and t.title like concat('%',#{title},'%')</if>
+        <if test="params != null and params.dataScope != null">${params.dataScope}</if>
+        order by t.period desc,t.plan_date,t.id
+    </select>
+    <select id="selectTaskById" parameterType="long" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.id=#{id} and t.del_flag='0'</select>
+    <select id="selectTasksByParentId" parameterType="long" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.parent_id=#{parentId} and t.del_flag='0' order by t.period,t.plan_date,t.id</select>
+    <select id="selectKeyMonthTasksByMilestoneId" parameterType="long" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.milestone_id=#{milestoneId} and t.task_level='month' and t.task_type='key' and t.del_flag='0' order by t.period,t.id</select>
+    <select id="selectKeyMonthTasksByOwnerPeriod" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.owner_id=#{ownerId} and t.period=#{period} and t.task_level='month' and t.task_type='key' and t.del_flag='0' order by t.id</select>
+
+    <insert id="insertTask" parameterType="com.ailab.system.domain.LabTask" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_task(parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,actual_finish_time,deliverable,perf_weight,goal_weight,workflow_status,result_status,result_desc,fail_reason,next_action,asset_id,coordination_required,coordination_owner_id,coordination_dept_id,coordination_content,coordination_support,coordination_desc,current_block_flag,current_block_start,period_lock_flag,version,del_flag,create_by,create_time,remark)
+        values(#{parentId},#{goalId},#{milestoneId},#{taskLevel},#{period},#{bizLine},#{taskType},#{title},#{ownerId},#{deptId},#{planDate},#{actualFinishTime},#{deliverable},#{perfWeight},#{goalWeight},#{workflowStatus},#{resultStatus},#{resultDesc},#{failReason},#{nextAction},#{assetId},#{coordinationRequired},#{coordinationOwnerId},#{coordinationDeptId},#{coordinationContent},#{coordinationSupport},#{coordinationDesc},#{blockFlag},#{blockStartTime},#{periodLockFlag},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="updateTask" parameterType="com.ailab.system.domain.LabTask">
+        update lab_task set parent_id=#{parentId},goal_id=#{goalId},milestone_id=#{milestoneId},task_level=#{taskLevel},period=#{period},biz_line=#{bizLine},task_type=#{taskType},title=#{title},owner_id=#{ownerId},dept_id=#{deptId},plan_date=#{planDate},actual_finish_time=#{actualFinishTime},deliverable=#{deliverable},perf_weight=#{perfWeight},goal_weight=#{goalWeight},workflow_status=#{workflowStatus},result_status=#{resultStatus},result_desc=#{resultDesc},fail_reason=#{failReason},next_action=#{nextAction},asset_id=#{assetId},coordination_required=#{coordinationRequired},coordination_owner_id=#{coordinationOwnerId},coordination_dept_id=#{coordinationDeptId},coordination_content=#{coordinationContent},coordination_support=#{coordinationSupport},coordination_desc=#{coordinationDesc},current_block_flag=#{blockFlag},current_block_start=#{blockStartTime},period_lock_flag=#{periodLockFlag},update_by=#{updateBy},update_time=sysdate(),remark=#{remark},version=version+1
+        where id=#{id} and version=#{version} and del_flag='0'
+    </update>
+    <update id="deleteTask">update lab_task set del_flag='2',update_by=#{updateBy},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and del_flag='0'</update>
+
+    <select id="selectQualityGates" parameterType="long" resultMap="GateResult">select id,task_id,gate_no,gate_name,gate_status,checker_id,check_time,check_result,del_flag,create_by,create_time,update_by,update_time,remark from lab_task_quality_gate where task_id=#{taskId} and del_flag='0' order by gate_no,id</select>
+    <select id="selectQualityGateById" parameterType="long" resultMap="GateResult">select id,task_id,gate_no,gate_name,gate_status,checker_id,check_time,check_result,del_flag,create_by,create_time,update_by,update_time,remark from lab_task_quality_gate where id=#{id} and del_flag='0'</select>
+    <insert id="insertQualityGate" parameterType="com.ailab.system.domain.LabTaskQualityGate" useGeneratedKeys="true" keyProperty="id">insert into lab_task_quality_gate(task_id,gate_no,gate_name,gate_status,checker_id,check_time,check_result,del_flag,create_by,create_time,remark) values(#{taskId},#{gateNo},#{gateName},#{gateStatus},#{checkerId},#{checkTime},#{checkResult},#{delFlag},#{createBy},sysdate(),#{remark})</insert>
+    <update id="updateQualityGate" parameterType="com.ailab.system.domain.LabTaskQualityGate">update lab_task_quality_gate set gate_no=#{gateNo},gate_name=#{gateName},update_by=#{updateBy},update_time=sysdate(),remark=#{remark} where id=#{id} and task_id=#{taskId} and gate_status='PENDING' and del_flag='0'</update>
+    <update id="deleteQualityGate">update lab_task_quality_gate set del_flag='2',update_by=#{updateBy},update_time=sysdate() where id=#{id} and gate_status='PENDING' and del_flag='0'</update>
+    <update id="markQualityGatePassed">update lab_task_quality_gate set gate_status='PASSED',checker_id=#{checkerId},check_time=#{checkTime},check_result=#{checkResult},update_by=#{updateBy},update_time=sysdate() where id=#{id} and gate_status='PENDING' and del_flag='0'</update>
+
+    <select id="selectOpenBlockEvent" parameterType="long" resultMap="BlockResult">select id,task_id,block_type,block_reason,block_start_time,block_end_time,block_status,resolver_id,resolution,del_flag,create_by,create_time,update_by,update_time,remark from lab_task_block_event where task_id=#{taskId} and block_status='OPEN' and del_flag='0' order by id desc limit 1</select>
+    <select id="selectBlockEvents" parameterType="long" resultMap="BlockResult">select id,task_id,block_type,block_reason,block_start_time,block_end_time,block_status,resolver_id,resolution,del_flag,create_by,create_time,update_by,update_time,remark from lab_task_block_event where task_id=#{taskId} and del_flag='0' order by block_start_time desc,id desc</select>
+    <insert id="insertBlockEvent" parameterType="com.ailab.system.domain.LabTaskBlockEvent" useGeneratedKeys="true" keyProperty="id">insert into lab_task_block_event(task_id,block_type,block_reason,block_start_time,block_end_time,block_status,resolver_id,resolution,del_flag,create_by,create_time,remark) values(#{taskId},#{blockType},#{blockReason},#{blockStartTime},#{blockEndTime},#{blockStatus},#{resolverId},#{resolution},#{delFlag},#{createBy},sysdate(),#{remark})</insert>
+    <update id="closeBlockEvent">update lab_task_block_event set block_end_time=#{endTime},block_status='CLOSED',resolver_id=#{resolverId},resolution=#{resolution},update_by=#{updateBy},update_time=sysdate() where id=#{id} and block_status='OPEN' and del_flag='0'</update>
+</mapper>

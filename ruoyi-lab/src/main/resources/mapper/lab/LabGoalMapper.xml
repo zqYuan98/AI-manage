@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabGoalMapper">
+    <resultMap id="LabGoalResult" type="com.ailab.system.domain.LabGoal">
+        <id property="id" column="id"/>
+        <result property="parentId" column="parent_id"/>
+        <result property="goalLevel" column="goal_level"/>
+        <result property="year" column="year"/>
+        <result property="period" column="period"/>
+        <result property="goalNo" column="goal_no"/>
+        <result property="title" column="title"/>
+        <result property="targetValue" column="target_value"/>
+        <result property="acceptCriteria" column="accept_criteria"/>
+        <result property="ownerId" column="owner_id"/>
+        <result property="weight" column="weight"/>
+        <result property="progressMode" column="progress_mode"/>
+        <result property="progressRate" column="progress_rate"/>
+        <result property="progressDesc" column="progress_desc"/>
+        <result property="status" column="status"/>
+        <result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+        <result property="remark" column="remark"/>
+    </resultMap>
+
+    <sql id="goalColumns">g.id,g.parent_id,g.goal_level,g.year,g.period,g.goal_no,g.title,g.target_value,g.accept_criteria,g.owner_id,g.weight,g.progress_mode,g.progress_rate,g.progress_desc,g.status,g.version,g.del_flag,g.create_by,g.create_time,g.update_by,g.update_time,g.remark</sql>
+
+    <select id="selectGoalList" parameterType="com.ailab.system.domain.LabGoal" resultMap="LabGoalResult">
+        select <include refid="goalColumns"/>
+        from lab_goal g
+        left join lab_member lm on lm.id=g.owner_id and lm.del_flag='0'
+        left join sys_user u on u.user_id=lm.user_id and u.del_flag='0'
+        where g.del_flag='0'
+        <if test="id != null">and g.id=#{id}</if>
+        <if test="parentId != null">and g.parent_id=#{parentId}</if>
+        <if test="goalLevel != null and goalLevel != ''">and g.goal_level=#{goalLevel}</if>
+        <if test="year != null">and g.year=#{year}</if>
+        <if test="period != null and period != ''">and g.period=#{period}</if>
+        <if test="ownerId != null">and g.owner_id=#{ownerId}</if>
+        <if test="status != null and status != ''">and g.status=#{status}</if>
+        <if test="title != null and title != ''">and g.title like concat('%',#{title},'%')</if>
+        <if test="params != null and params.dataScope != null">${params.dataScope}</if>
+        order by g.year desc,g.parent_id,g.period,g.id
+    </select>
+
+    <select id="selectGoalById" parameterType="long" resultMap="LabGoalResult">
+        select <include refid="goalColumns"/> from lab_goal g where g.id=#{id} and g.del_flag='0'
+    </select>
+
+    <select id="selectChildrenByParentId" parameterType="long" resultMap="LabGoalResult">
+        select <include refid="goalColumns"/> from lab_goal g
+        where g.parent_id=#{parentId} and g.del_flag='0' order by g.period,g.id
+    </select>
+
+    <insert id="insertGoal" parameterType="com.ailab.system.domain.LabGoal" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_goal(parent_id,goal_level,year,period,goal_no,title,target_value,accept_criteria,owner_id,weight,progress_mode,progress_rate,progress_desc,status,version,del_flag,create_by,create_time,remark)
+        values(#{parentId},#{goalLevel},#{year},#{period},#{goalNo},#{title},#{targetValue},#{acceptCriteria},#{ownerId},#{weight},#{progressMode},#{progressRate},#{progressDesc},#{status},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+
+    <update id="updateGoal" parameterType="com.ailab.system.domain.LabGoal">
+        update lab_goal set parent_id=#{parentId},goal_level=#{goalLevel},year=#{year},period=#{period},goal_no=#{goalNo},title=#{title},target_value=#{targetValue},accept_criteria=#{acceptCriteria},owner_id=#{ownerId},weight=#{weight},progress_mode=#{progressMode},progress_rate=#{progressRate},progress_desc=#{progressDesc},status=#{status},update_by=#{updateBy},update_time=sysdate(),remark=#{remark},version=version+1
+        where id=#{id} and version=#{version} and del_flag='0'
+    </update>
+
+    <update id="deleteGoal">
+        update lab_goal set del_flag='2',update_by=#{updateBy},update_time=sysdate(),version=version+1
+        where id=#{id} and version=#{version} and del_flag='0'
+    </update>
+</mapper>
