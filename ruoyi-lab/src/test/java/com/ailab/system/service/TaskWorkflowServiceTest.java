@@ -185,7 +185,7 @@ class TaskWorkflowServiceTest {
 
         List<String> fields = fields(service.submitResult(task, command, SUBMITTER_ID));
 
-        assertTrue(fields.contains("evidenceList"));
+        assertEquals(Arrays.asList("evidenceList[0].evidenceType", "evidenceList[0].evidenceTitle", "evidenceList[0].evidenceUrl"), fields);
     }
 
     @Test
@@ -246,24 +246,28 @@ class TaskWorkflowServiceTest {
     }
 
     @Test
-    void mixedEvidenceAllowsValidProofAndLeavesInvalidEvidencePending() {
+    void rejectsMixedEvidenceBatchWithPreciseIndexedErrorsAndNoTaskMutation() {
         LabTask task = activeTask(LocalDate.of(2026, 8, 10));
         TaskSubmitCommand command = completionCommand(LocalDate.of(2026, 8, 9));
         LabTaskEvidence valid = command.getEvidenceList().get(0);
-        LabTaskEvidence invalid = new LabTaskEvidence();
-        invalid.setEvidenceTitle(" ");
-        invalid.setEvidenceUrl("https://example.invalid/evidence/invalid");
-        command.setEvidenceList(Arrays.asList(valid, invalid));
+        LabTaskEvidence missingType = new LabTaskEvidence();
+        missingType.setEvidenceTitle("missing type");
+        missingType.setEvidenceUrl("https://example.invalid/evidence/missing-type");
+        LabTaskEvidence missingTitle = new LabTaskEvidence();
+        missingTitle.setEvidenceType("DOCUMENT");
+        missingTitle.setEvidenceUrl("https://example.invalid/evidence/missing-title");
+        LabTaskEvidence missingUrl = new LabTaskEvidence();
+        missingUrl.setEvidenceType("DOCUMENT");
+        missingUrl.setEvidenceTitle("missing url");
+        command.setEvidenceList(Arrays.asList(valid, missingType, missingTitle, missingUrl, null));
 
-        assertTrue(service.submitResult(task, command, SUBMITTER_ID).isEmpty());
-        assignEvidenceId(task, 0, 1L);
-        assertTrue(service.reviewPass(task, reviewCommand(99L, false), 99L).isEmpty());
+        List<FieldValidationError> errors = service.submitResult(task, command, SUBMITTER_ID);
 
-        LabTaskEvidence approved = task.getEvidenceList().get(0);
-        assertEquals(LabConstants.WORKFLOW_CONFIRMED, task.getWorkflowStatus());
-        assertEquals(1, task.getEvidenceList().size());
-        assertEquals(LabConstants.EVIDENCE_AUDIT_APPROVED, approved.getAuditStatus());
-        assertEquals(Long.valueOf(99L), approved.getAuditorId());
+        assertEquals(Arrays.asList("evidenceList[1].evidenceType", "evidenceList[2].evidenceTitle", "evidenceList[3].evidenceUrl", "evidenceList[4]"), fields(errors));
+        assertEquals(LabConstants.WORKFLOW_ACTIVE, task.getWorkflowStatus());
+        assertEquals(LabConstants.RESULT_DOING, task.getResultStatus());
+        assertNull(task.getActualFinishTime());
+        assertTrue(task.getEvidenceList().isEmpty());
     }
 
     @Test
@@ -375,7 +379,7 @@ class TaskWorkflowServiceTest {
         evidence.setEvidenceType(null);
         command.setEvidenceList(Collections.singletonList(evidence));
 
-        assertEquals(Collections.singletonList("evidenceList"), fields(service.submitResult(task, command, SUBMITTER_ID)));
+        assertEquals(Collections.singletonList("evidenceList[0].evidenceType"), fields(service.submitResult(task, command, SUBMITTER_ID)));
         assertEquals(LabConstants.WORKFLOW_ACTIVE, task.getWorkflowStatus());
         assertEquals(0, task.getEvidenceList().size());
     }

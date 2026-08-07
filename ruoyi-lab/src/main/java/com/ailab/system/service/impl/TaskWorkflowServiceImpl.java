@@ -70,6 +70,9 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         }
         List<FieldValidationError> errors = LabConstants.RESULT_UNDONE.equals(requested)
                 ? validateUndone(command) : validateCompletion(command);
+        if (LabConstants.RESULT_UNDONE.equals(requested)) {
+            validateEvidenceBatch(command.getEvidenceList(), false, errors);
+        }
         validateSubmissionContext(task, actorId, errors);
         validateCoordination(task, errors);
         if (!errors.isEmpty()) {
@@ -193,8 +196,28 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         List<FieldValidationError> errors = new ArrayList<FieldValidationError>();
         required(errors, "resultDesc", command.getResultDesc(), "完成说明不能为空");
         if (command.getActualFinishTime() == null) { error(errors, "actualFinishTime", "实际完成时间不能为空"); }
-        if (!hasValidEvidence(command.getEvidenceList())) { error(errors, "evidenceList", "至少需要一条包含名称和链接的佐证材料"); }
+        validateEvidenceBatch(command.getEvidenceList(), true, errors);
         return errors;
+    }
+
+    private void validateEvidenceBatch(List<LabTaskEvidence> evidenceList, boolean required, List<FieldValidationError> errors) {
+        if (evidenceList == null || evidenceList.isEmpty()) {
+            if (required) {
+                error(errors, "evidenceList", "至少需要一条佐证材料");
+            }
+            return;
+        }
+        for (int index = 0; index < evidenceList.size(); index++) {
+            LabTaskEvidence evidence = evidenceList.get(index);
+            String fieldPrefix = "evidenceList[" + index + "]";
+            if (evidence == null) {
+                error(errors, fieldPrefix, "佐证材料不能为空");
+                continue;
+            }
+            required(errors, fieldPrefix + ".evidenceType", evidence.getEvidenceType(), "佐证类型不能为空");
+            required(errors, fieldPrefix + ".evidenceTitle", evidence.getEvidenceTitle(), "佐证名称不能为空");
+            required(errors, fieldPrefix + ".evidenceUrl", evidence.getEvidenceUrl(), "佐证链接不能为空");
+        }
     }
 
     private List<FieldValidationError> validateUndone(TaskSubmitCommand command) {
@@ -243,9 +266,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         List<LabTaskEvidence> evidence = new ArrayList<LabTaskEvidence>(task.getEvidenceList());
         if (evidenceList != null) {
             for (LabTaskEvidence item : evidenceList) {
-                if (isValidEvidence(item)) {
-                    evidence.add(copyPendingEvidence(task, item, actorId));
-                }
+                evidence.add(copyPendingEvidence(task, item, actorId));
             }
         }
         task.setEvidenceList(evidence);
@@ -280,18 +301,6 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
             }
         }
         task.setEvidenceList(evidenceList);
-    }
-
-    private boolean hasValidEvidence(List<LabTaskEvidence> evidenceList) {
-        if (evidenceList == null || evidenceList.isEmpty()) {
-            return false;
-        }
-        for (LabTaskEvidence evidence : evidenceList) {
-            if (isValidEvidence(evidence)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private boolean hasApprovedEvidence(List<LabTaskEvidence> evidenceList) {
