@@ -504,10 +504,126 @@ class LabTaskServiceTest {
         assertTrue(goalXml.contains("id=\"selectgoalforupdate\"") && goalXml.contains("for update"));
         assertTrue(goalXml.contains("id=\"selectchildrenbyparentidforupdate\"") && goalXml.contains("for update"));
         assertTrue(taskXml.contains("id=\"selectkeymonthtasksbymilestoneidforupdate\"") && taskXml.contains("for update"));
+        assertTrue(taskXml.contains("id=\"selecttasksbymilestoneidforupdate\"") && taskXml.contains("for update"));
         assertTrue(taskXml.contains("id=\"selectkeymonthtasksbyownerperiodforupdate\"") && taskXml.contains("for update"));
         assertTrue(taskXml.contains("id=\"lockmemberforupdate\"") && taskXml.contains("for update"));
+        assertTrue(taskXml.contains("<select id=\"lockmemberforupdate\" parametertype=\"long\" resulttype=\"string\">select biz_line from lab_member"),
+                "member lock must return the current business line from the locking read");
         assertTrue(taskXml.contains("id=\"selecttaskforupdate\"") && taskXml.contains("for update"));
         assertTrue(taskXml.contains("id=\"selecttasksbyparentidforupdate\"") && taskXml.contains("for update"));
+    }
+
+    @Test
+    void everyMonthlyTaskWriteLocksItsMilestoneMembershipRow() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask daily = task(null, 0L, "month", "2026-08", 8L, "0", "0");
+        daily.setGoalId(1L); daily.setMilestoneId(2L); daily.setTaskType("daily");
+
+        service.createTask(daily, 8L);
+        assertEquals(Arrays.asList(1L, 2L), goals.lockedGoalIds);
+
+        goals.lockedGoalIds.clear();
+        daily.setTitle("updated daily month");
+        service.updateTask(daily, 8L);
+        assertEquals(Arrays.asList(1L, 2L), goals.lockedGoalIds);
+
+        goals.lockedGoalIds.clear();
+        service.deleteTask(daily.getId(), daily.getVersion(), 8L);
+        assertEquals(Arrays.asList(1L, 2L), goals.lockedGoalIds);
+    }
+
+    @Test
+    void monthUpdateValidatesAgainstLockedCurrentGoalRowsInsteadOfOldSnapshots() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        goals.put(goal(3L, 1L, "QUARTER", 2026, "2026Q3"));
+        goals.lockedOverrides.put(3L, goal(3L, 1L, "QUARTER", 2026, "2026Q4"));
+        LabTask stored = task(10L, 0L, "month", "2026-08", 8L, "0", "0");
+        stored.setGoalId(1L); stored.setMilestoneId(2L); stored.setTaskType("daily"); tasks.put(stored);
+        LabTask movedUsingStaleQuarter = task(10L, 0L, "month", "2026-08", 8L, "0", "0");
+        movedUsingStaleQuarter.setGoalId(1L); movedUsingStaleQuarter.setMilestoneId(3L); movedUsingStaleQuarter.setTaskType("daily");
+
+        ServiceException error = assertThrows(ServiceException.class,
+                () -> service.updateTask(movedUsingStaleQuarter, 8L));
+
+        assertEquals("Month task period must belong to its quarterly milestone", error.getMessage());
+    }
+
+    @Test
+    void weeklyUpdateValidatesAgainstTheLockedCurrentParentTask() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask oldParent = task(10L, 0L, "month", "2026-08", 8L, "0", "0");
+        oldParent.setGoalId(1L); oldParent.setMilestoneId(2L); oldParent.setTaskType("daily"); tasks.put(oldParent);
+        LabTask staleNewParent = task(12L, 0L, "month", "2026-08", 8L, "0", "0");
+        staleNewParent.setGoalId(1L); staleNewParent.setMilestoneId(2L); staleNewParent.setTaskType("daily"); tasks.put(staleNewParent);
+        LabTask currentNewParent = task(12L, 0L, "month", "2026-08", 8L, "0", "0");
+        currentNewParent.setGoalId(1L); currentNewParent.setMilestoneId(2L); currentNewParent.setTaskType("daily");
+        currentNewParent.setBizLine("platform"); tasks.lockedOverrides.put(12L, currentNewParent);
+        LabTask storedWeek = task(11L, 10L, "week", "2026-W32", 8L, "0", "0");
+        storedWeek.setGoalId(1L); storedWeek.setMilestoneId(2L); tasks.put(storedWeek);
+        LabTask movedWeek = task(11L, 12L, "week", "2026-W32", 8L, "0", "0");
+        movedWeek.setGoalId(1L); movedWeek.setMilestoneId(2L);
+
+        ServiceException error = assertThrows(ServiceException.class,
+                () -> service.updateTask(movedWeek, 8L));
+
+        assertEquals("Weekly task must use its month task business line", error.getMessage());
+    }
+
+    @Test
+    void invalidCallerDeclaredGoalTypesAreRejectedBeforeGoalLocks() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask malicious = task(null, 0L, "month", "2026-08", 8L, "0", "0");
+        malicious.setGoalId(2L); malicious.setMilestoneId(1L); malicious.setTaskType("daily");
+
+        assertThrows(ServiceException.class, () -> service.createTask(malicious, 8L));
+
+        assertTrue(goals.lockedGoalIds.isEmpty(), "unvalidated row types must not define a lock phase");
+    }
+
+    @Test
+    void monthTaskCannotBecomeItsOwnWeeklyParent() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask stored = task(10L, 0L, "month", "2026-08", 8L, "0", "0");
+        stored.setGoalId(1L); stored.setMilestoneId(2L); stored.setTaskType("daily"); tasks.put(stored);
+        LabTask selfParent = task(10L, 10L, "week", "2026-W32", 8L, "0", "0");
+        selfParent.setGoalId(1L); selfParent.setMilestoneId(2L);
+
+        ServiceException error = assertThrows(ServiceException.class,
+                () -> service.updateTask(selfParent, 8L));
+
+        assertEquals("Task cannot be its own parent", error.getMessage());
+        assertEquals(0L, tasks.find(10L).getParentId());
+    }
+
+    @Test
+    void taskWritesUseLockedCurrentOwnersInSortedOrder() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        tasks.memberLines.put(8L, "algorithm");
+        tasks.lockedMemberLines.put(8L, "platform");
+        LabTask daily = task(null, 0L, "month", "2026-08", 8L, "0", "0");
+        daily.setGoalId(1L); daily.setMilestoneId(2L); daily.setTaskType("daily");
+
+        ServiceException staleCreate = assertThrows(ServiceException.class,
+                () -> service.createTask(daily, 8L));
+        assertEquals("Task business line must match the active owner's responsible scope", staleCreate.getMessage());
+        assertEquals(Arrays.asList(8L), tasks.lockedMemberIds);
+
+        tasks.lockedMemberIds.clear();
+        tasks.lockedMemberLines.clear();
+        LabTask stored = task(10L, 0L, "month", "2026-08", 9L, "0", "0");
+        stored.setGoalId(1L); stored.setMilestoneId(2L); stored.setTaskType("daily"); tasks.put(stored);
+        LabTask changedOwner = task(10L, 0L, "month", "2026-08", 8L, "0", "0");
+        changedOwner.setGoalId(1L); changedOwner.setMilestoneId(2L); changedOwner.setTaskType("daily");
+
+        service.updateTask(changedOwner, 9L);
+
+        assertEquals(Arrays.asList(8L, 9L), tasks.lockedMemberIds);
     }
 
     @Test
@@ -562,10 +678,12 @@ class LabTaskServiceTest {
 
     static final class MemoryGoalMapper implements LabGoalMapper {
         final Map<Long, LabGoal> data = new LinkedHashMap<Long, LabGoal>();
+        final Map<Long, LabGoal> lockedOverrides = new LinkedHashMap<Long, LabGoal>();
+        final List<Long> lockedGoalIds = new ArrayList<Long>();
         void put(LabGoal goal) { data.put(goal.getId(), goal); }
         @Override public List<LabGoal> selectGoalList(LabGoal q) { return new ArrayList<LabGoal>(data.values()); }
         @Override public LabGoal selectGoalById(Long id) { return data.get(id); }
-        @Override public LabGoal selectGoalForUpdate(Long id) { return selectGoalById(id); }
+        @Override public LabGoal selectGoalForUpdate(Long id) { lockedGoalIds.add(id); LabGoal current = lockedOverrides.get(id); return current == null ? selectGoalById(id) : current; }
         @Override public List<LabGoal> selectChildrenByParentId(Long id) { return new ArrayList<LabGoal>(); }
         @Override public List<LabGoal> selectChildrenByParentIdForUpdate(Long id) { return selectChildrenByParentId(id); }
         @Override public int insertGoal(LabGoal goal) { return 1; }
@@ -590,10 +708,13 @@ class LabTaskServiceTest {
         final Map<Long, LabTask> data = new LinkedHashMap<Long, LabTask>();
         final Map<Long, LabTaskQualityGate> gates = new LinkedHashMap<Long, LabTaskQualityGate>();
         final Map<Long, LabTaskBlockEvent> events = new LinkedHashMap<Long, LabTaskBlockEvent>();
+        final Map<Long, LabTask> lockedOverrides = new LinkedHashMap<Long, LabTask>();
         final List<Long> lockedTaskIds = new ArrayList<Long>();
         final List<Long> lockedChildrenParentIds = new ArrayList<Long>();
         final Map<Long, Long> memberIds = new LinkedHashMap<Long, Long>();
         final Map<Long, String> memberLines = new LinkedHashMap<Long, String>();
+        final Map<Long, String> lockedMemberLines = new LinkedHashMap<Long, String>();
+        final List<Long> lockedMemberIds = new ArrayList<Long>();
         long seq = 50L, gateSeq = 70L, eventSeq = 90L;
         boolean rejectGateWrite;
         void put(LabTask task) { data.put(task.getId(), task); }
@@ -603,15 +724,16 @@ class LabTaskServiceTest {
         @Override public String selectMemberBizLineById(Long memberId) { String line = memberLines.get(memberId); return line == null ? "algorithm" : line; }
         @Override public List<LabTask> selectTaskList(LabTask query) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if (!"2".equals(task.getDelFlag()) && (query.getOwnerId() == null || query.getOwnerId().equals(task.getOwnerId())) && (query.getBizLine() == null || query.getBizLine().equals(task.getBizLine()))) result.add(task); return result; }
         @Override public LabTask selectTaskById(Long id) { LabTask t = data.get(id); return t == null || "2".equals(t.getDelFlag()) ? null : t; }
-        @Override public LabTask selectTaskForUpdate(Long id) { lockedTaskIds.add(id); return selectTaskById(id); }
+        @Override public LabTask selectTaskForUpdate(Long id) { lockedTaskIds.add(id); LabTask current = lockedOverrides.get(id); return current == null ? selectTaskById(id) : current; }
         @Override public List<LabTask> selectTasksByParentId(Long parentId) { List<LabTask> r = new ArrayList<LabTask>(); for (LabTask t : data.values()) if (parentId.equals(t.getParentId()) && !"2".equals(t.getDelFlag())) r.add(t); return r; }
         @Override public List<LabTask> selectTasksByParentIdForUpdate(Long parentId) { lockedChildrenParentIds.add(parentId); return selectTasksByParentId(parentId); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneId(Long id) { return new ArrayList<LabTask>(); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long id) { return selectKeyMonthTasksByMilestoneId(id); }
+        @Override public List<LabTask> selectTasksByMilestoneIdForUpdate(Long id) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if (id.equals(task.getMilestoneId()) && !"2".equals(task.getDelFlag())) result.add(task); return result; }
         @Override public int countTasksByMilestoneId(Long id) { int count = 0; for (LabTask task : data.values()) if (id.equals(task.getMilestoneId()) && !"2".equals(task.getDelFlag())) count++; return count; }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriod(Long ownerId, String period) { List<LabTask> r = new ArrayList<LabTask>(); for (LabTask t : data.values()) if (ownerId.equals(t.getOwnerId()) && period.equals(t.getPeriod()) && "month".equals(t.getTaskLevel()) && "key".equals(t.getTaskType()) && !"2".equals(t.getDelFlag())) r.add(t); return r; }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriodForUpdate(Long ownerId, String period) { return selectKeyMonthTasksByOwnerPeriod(ownerId, period); }
-        @Override public Long lockMemberForUpdate(Long memberId) { return memberId; }
+        @Override public String lockMemberForUpdate(Long memberId) { lockedMemberIds.add(memberId); String current = lockedMemberLines.containsKey(memberId) ? lockedMemberLines.get(memberId) : selectMemberBizLineById(memberId); return "INACTIVE".equals(current) ? null : current; }
         @Override public int insertTask(LabTask task) { if (task.getId() == null) task.setId(++seq); data.put(task.getId(), task); return 1; }
         @Override public int updateTask(LabTask task) { LabTask stored = data.get(task.getId()); if (stored == null || !stored.getVersion().equals(task.getVersion())) return 0; task.setVersion(task.getVersion() + 1); data.put(task.getId(), task); return 1; }
         @Override public int deleteTask(Long id, Integer version, String actor) { LabTask t = data.get(id); if (t == null || !t.getVersion().equals(version)) return 0; t.setDelFlag("2"); t.setVersion(version + 1); return 1; }

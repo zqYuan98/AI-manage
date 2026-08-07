@@ -17,10 +17,11 @@ public interface LabTaskMapper {
     List<LabTask> selectTasksByParentIdForUpdate(Long parentId);
     List<LabTask> selectKeyMonthTasksByMilestoneId(Long milestoneId);
     List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long milestoneId);
+    List<LabTask> selectTasksByMilestoneIdForUpdate(Long milestoneId);
     int countTasksByMilestoneId(Long milestoneId);
     List<LabTask> selectKeyMonthTasksByOwnerPeriod(@Param("ownerId") Long ownerId, @Param("period") String period);
     List<LabTask> selectKeyMonthTasksByOwnerPeriodForUpdate(@Param("ownerId") Long ownerId, @Param("period") String period);
-    Long lockMemberForUpdate(Long memberId);
+    String lockMemberForUpdate(Long memberId);
     int insertTask(LabTask task);
     int updateTask(LabTask task);
     int deleteTask(@Param("id") Long id, @Param("version") Integer version, @Param("updateBy") String updateBy);

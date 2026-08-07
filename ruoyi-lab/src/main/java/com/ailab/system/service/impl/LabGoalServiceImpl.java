@@ -34,13 +34,13 @@ public class LabGoalServiceImpl implements LabGoalService {
     @Override
     public List<LabGoal> listGoals(LabGoal query, Long actorId) {
         accessService.requireGoalRead(actorId);
-        return goalMapper.selectGoalList(query == null ? new LabGoal() : query);
+        return goalMapper.selectGoalList(safeGoalQuery(query));
     }
 
     @Override
     public List<LabGoal> goalTree(LabGoal query, Long actorId) {
         accessService.requireGoalRead(actorId);
-        List<LabGoal> flat = goalMapper.selectGoalList(query == null ? new LabGoal() : query);
+        List<LabGoal> flat = goalMapper.selectGoalList(safeGoalQuery(query));
         Map<Long, LabGoal> index = new LinkedHashMap<Long, LabGoal>();
         for (LabGoal goal : flat) {
             goal.setChildren(new ArrayList<LabGoal>());
@@ -74,7 +74,7 @@ public class LabGoalServiceImpl implements LabGoalService {
     @Transactional
     public int createGoal(LabGoal goal, Long actorId) {
         LabGoal lockedParent = lockNewGoalParent(goal);
-        validateGoal(goal);
+        validateGoal(goal, lockedParent);
         if (lockedParent != null && !"DRAFT".equals(lockedParent.getStatus())) {
             throw new ServiceException("Quarter membership is frozen after annual goal activation");
         }
@@ -95,14 +95,16 @@ public class LabGoalServiceImpl implements LabGoalService {
             throw new ServiceException("Goal id and version are required");
         }
         LabGoal snapshot = loadGoal(goal.getId());
-        lockGoalParents(snapshot.getParentId(), goal.getParentId());
+        accessService.requireGoalWrite(snapshot, actorId);
+        prevalidateGoalUpdate(snapshot, goal);
+        Map<Long, LabGoal> lockedParents = lockGoalParents(snapshot.getParentId(), goal.getParentId());
         LabGoal stored = goalMapper.selectGoalForUpdate(goal.getId());
         if (stored == null || !stored.getVersion().equals(goal.getVersion())) throw optimisticConflict();
         accessService.requireGoalWrite(stored, actorId);
         accessService.requireGoalWrite(goal, actorId);
-        requireStableStructure(stored, goal);
-        requireStableWeight(stored, goal);
-        validateGoal(goal);
+        requireStableStructure(stored, goal, lockStructureDependents(stored, goal), lockedParents);
+        requireStableWeight(stored, goal, lockedParents);
+        validateGoal(goal, lockedParents.get(goal.getParentId()));
         goal.setStatus(stored.getStatus());
         goal.setProgressRate(stored.getProgressRate());
         goal.setDelFlag(stored.getDelFlag());
@@ -115,13 +117,12 @@ public class LabGoalServiceImpl implements LabGoalService {
     @Transactional
     public int deleteGoal(Long id, Integer version, Long actorId) {
         LabGoal snapshot = loadGoal(id);
-        lockGoalParents(snapshot.getParentId());
+        Map<Long, LabGoal> lockedParents = lockGoalParents(snapshot.getParentId());
         LabGoal stored = goalMapper.selectGoalForUpdate(id);
         if (stored == null || !same(stored.getVersion(), version)) throw optimisticConflict();
         accessService.requireGoalWrite(stored, actorId);
         if (!"DRAFT".equals(stored.getStatus())) throw new ServiceException("Only draft goals can be deleted");
-        LabGoal parent = stored.getParentId() == null || stored.getParentId() == 0L
-                ? null : goalMapper.selectGoalById(stored.getParentId());
+        LabGoal parent = lockedParents.get(stored.getParentId());
         if (parent != null && !"DRAFT".equals(parent.getStatus())) {
             throw new ServiceException("Quarter membership is frozen after annual goal activation");
         }
@@ -142,7 +143,8 @@ public class LabGoalServiceImpl implements LabGoalService {
         lockGoalParents(snapshot.getParentId());
         LabGoal goal = goalMapper.selectGoalForUpdate(id);
         if (goal == null) throw new ServiceException("Goal does not exist");
-        accessService.requireGoalWrite(goal, actorId);
+        accessService.requireManager(actorId);
+        if (!"DRAFT".equals(goal.getStatus())) throw new ServiceException("Only draft goals can be activated");
         if (!goal.getVersion().equals(version)) throw optimisticConflict();
         if ("YEAR".equals(goal.getGoalLevel())) {
             requireWeightTotal(goalMapper.selectChildrenByParentIdForUpdate(id), "Quarter milestone weights must total 100 before annual goal activation");
@@ -206,7 +208,7 @@ public class LabGoalServiceImpl implements LabGoalService {
                 .divide(new BigDecimal(confirmed), 2, RoundingMode.HALF_UP);
     }
 
-    private void validateGoal(LabGoal goal) {
+    private void validateGoal(LabGoal goal, LabGoal lockedParent) {
         if (goal == null || blank(goal.getGoalLevel()) || goal.getYear() == null || blank(goal.getGoalNo())
                 || blank(goal.getTitle()) || goal.getOwnerId() == null) {
             throw new ServiceException("Goal level, year, number, title and owner are required");
@@ -222,10 +224,19 @@ public class LabGoalServiceImpl implements LabGoalService {
         if (!"QUARTER".equals(goal.getGoalLevel()) || goal.getParentId() == null || goal.getParentId() == 0L) {
             throw new ServiceException("Quarter milestone must have an annual parent");
         }
-        LabGoal parent = goalMapper.selectGoalById(goal.getParentId());
+        LabGoal parent = lockedParent;
         if (parent == null || !"YEAR".equals(parent.getGoalLevel())) throw new ServiceException("Quarter milestone parent must be an annual goal");
         if (!parent.getYear().equals(goal.getYear())) throw new ServiceException("Quarter milestone must use the parent annual goal year");
         if (!isQuarter(goal.getPeriod(), goal.getYear())) throw new ServiceException("Quarter milestone period must use YYYYQ1 through YYYYQ4");
+    }
+
+    private void prevalidateGoalUpdate(LabGoal stored, LabGoal proposed) {
+        if (!same(stored.getGoalLevel(), proposed.getGoalLevel())) {
+            throw new ServiceException("Goal level is immutable after creation");
+        }
+        LabGoal parent = proposed.getParentId() == null || proposed.getParentId() == 0L
+                ? null : goalMapper.selectGoalById(proposed.getParentId());
+        validateGoal(proposed, parent);
     }
 
     private void requireWeightTotal(List<LabGoal> children, String message) {
@@ -240,27 +251,39 @@ public class LabGoalServiceImpl implements LabGoalService {
         if (tasks.isEmpty() || sum.compareTo(ONE_HUNDRED) != 0) throw new ServiceException(message);
     }
 
-    private void requireStableWeight(LabGoal stored, LabGoal proposed) {
+    private void requireStableWeight(LabGoal stored, LabGoal proposed, Map<Long, LabGoal> lockedParents) {
         if (same(stored.getWeight(), proposed.getWeight())) return;
-        LabGoal parent = stored.getParentId() == null ? null : goalMapper.selectGoalById(stored.getParentId());
+        LabGoal parent = lockedParents.get(stored.getParentId());
         if (frozen(stored) || frozen(parent)) {
             throw new ServiceException("Goal weight is immutable after the goal or annual parent is activated");
         }
     }
 
-    private void requireStableStructure(LabGoal stored, LabGoal proposed) {
-        boolean changed = !same(stored.getParentId(), proposed.getParentId()) || !same(stored.getGoalLevel(), proposed.getGoalLevel())
-                || !same(stored.getYear(), proposed.getYear()) || !same(stored.getPeriod(), proposed.getPeriod())
-                || !same(stored.getGoalNo(), proposed.getGoalNo()) || !same(stored.getOwnerId(), proposed.getOwnerId());
-        if (!changed) return;
-        if (frozen(stored) || frozenGoal(stored.getParentId()) || frozenGoal(proposed.getParentId())) {
+    private void requireStableStructure(LabGoal stored, LabGoal proposed, boolean hasDependents,
+            Map<Long, LabGoal> lockedParents) {
+        if (!structureChanged(stored, proposed)) return;
+        if (hasDependents) throw new ServiceException("Goal structure is immutable after dependent records exist");
+        if (frozen(stored) || frozen(lockedParents.get(stored.getParentId()))
+                || frozen(lockedParents.get(proposed.getParentId()))) {
             throw new ServiceException("Activated goal hierarchy, period, number and owner are immutable");
         }
     }
 
-    private boolean frozenGoal(Long id) {
-        if (id == null || id == 0L) return false;
-        return frozen(goalMapper.selectGoalById(id));
+    private boolean lockStructureDependents(LabGoal stored, LabGoal proposed) {
+        if (!structureChanged(stored, proposed)) return false;
+        if ("YEAR".equals(stored.getGoalLevel())) {
+            return !goalMapper.selectChildrenByParentIdForUpdate(stored.getId()).isEmpty();
+        }
+        if ("QUARTER".equals(stored.getGoalLevel())) {
+            return !taskMapper.selectTasksByMilestoneIdForUpdate(stored.getId()).isEmpty();
+        }
+        return false;
+    }
+
+    private boolean structureChanged(LabGoal stored, LabGoal proposed) {
+        return !same(stored.getParentId(), proposed.getParentId()) || !same(stored.getGoalLevel(), proposed.getGoalLevel())
+                || !same(stored.getYear(), proposed.getYear()) || !same(stored.getPeriod(), proposed.getPeriod())
+                || !same(stored.getGoalNo(), proposed.getGoalNo()) || !same(stored.getOwnerId(), proposed.getOwnerId());
     }
 
     private boolean frozen(LabGoal goal) { return goal != null && !"DRAFT".equals(goal.getStatus()); }
@@ -272,7 +295,7 @@ public class LabGoalServiceImpl implements LabGoalService {
         return goalMapper.selectGoalForUpdate(goal.getParentId());
     }
 
-    private void lockGoalParents(Long... parentIds) {
+    private Map<Long, LabGoal> lockGoalParents(Long... parentIds) {
         List<Long> ids = new ArrayList<Long>();
         if (parentIds != null) {
             for (Long parentId : parentIds) {
@@ -280,7 +303,9 @@ public class LabGoalServiceImpl implements LabGoalService {
             }
         }
         Collections.sort(ids);
-        for (Long parentId : ids) goalMapper.selectGoalForUpdate(parentId);
+        Map<Long, LabGoal> locked = new LinkedHashMap<Long, LabGoal>();
+        for (Long parentId : ids) locked.put(parentId, goalMapper.selectGoalForUpdate(parentId));
+        return locked;
     }
 
     private BigDecimal completionCoefficient(String result) {
@@ -293,6 +318,12 @@ public class LabGoalServiceImpl implements LabGoalService {
     }
 
     private boolean same(Object left, Object right) { return left == null ? right == null : left.equals(right); }
+
+    private LabGoal safeGoalQuery(LabGoal query) {
+        LabGoal safe = query == null ? new LabGoal() : query;
+        safe.getParams().remove("dataScope");
+        return safe;
+    }
 
     private String actor(Long actorId) {
         if (actorId == null) throw new ServiceException("Authenticated actor is required");

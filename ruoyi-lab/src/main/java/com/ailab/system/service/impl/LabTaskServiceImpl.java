@@ -25,7 +25,9 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,11 +76,14 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Override
     @Transactional
     public int createTask(LabTask task, Long actorId) {
-        lockTaskHierarchyForCreate(task);
-        validateTaskConnections(task, actorId);
+        if (task != null) task.setId(null);
+        prevalidateMonthlyGoalTypes(task);
+        Map<Long, LabGoal> lockedGoals = lockMonthlyGoalMembership(task);
+        Map<Long, String> lockedOwners = lockTaskOwners(task);
+        lockKeyTaskCollectionsForCreate(task, lockedGoals);
+        Map<Long, LabTask> lockedTasks = lockTaskHierarchyForCreate(task);
+        validateTaskConnections(task, actorId, lockedGoals, lockedTasks, lockedOwners);
         accessService.requireTaskWrite(task, actorId);
-        lockKeyTaskCollectionsForCreate(task);
-        task.setId(null);
         task.setWorkflowStatus(LabConstants.WORKFLOW_DRAFT);
         task.setResultStatus(LabConstants.RESULT_DOING);
         task.setActualFinishTime(null);
@@ -100,16 +105,19 @@ public class LabTaskServiceImpl implements LabTaskService {
         requireIdentity(task);
         LabTask snapshot = taskMapper.selectTaskById(task.getId());
         if (snapshot == null) throw new ServiceException("Task does not exist");
-        lockKeyTaskCollectionsForUpdate(snapshot, task);
-        lockTaskHierarchyForUpdate(snapshot, task);
+        prevalidateMonthlyGoalTypes(snapshot, task);
+        Map<Long, LabGoal> lockedGoals = lockMonthlyGoalMembership(snapshot, task);
+        Map<Long, String> lockedOwners = lockTaskOwners(snapshot, task);
+        lockKeyTaskCollectionsForUpdate(snapshot, task, lockedGoals);
+        Map<Long, LabTask> lockedTasks = lockTaskHierarchyForUpdate(snapshot, task);
         LabTask stored = taskMapper.selectTaskById(task.getId());
         if (stored == null || !stored.getVersion().equals(task.getVersion())) throw optimisticConflict();
         requireContentMutable(stored);
         accessService.requireTaskWrite(stored, actorId);
         accessService.requireTaskWrite(task, actorId);
-        requireStableActivatedFields(stored, task);
+        requireStableActivatedFields(stored, task, lockedGoals);
         requireMonthChildrenStable(stored, task);
-        validateTaskConnections(task, actorId);
+        validateTaskConnections(task, actorId, lockedGoals, lockedTasks, lockedOwners);
         preserveServerState(task, stored);
         task.setUpdateBy(actor(actorId));
         if (taskMapper.updateTask(task) != 1) throw optimisticConflict();
@@ -121,7 +129,8 @@ public class LabTaskServiceImpl implements LabTaskService {
     public int deleteTask(Long id, Integer version, Long actorId) {
         LabTask snapshot = taskMapper.selectTaskById(id);
         if (snapshot == null) throw new ServiceException("Task does not exist");
-        lockKeyTaskCollectionsForDelete(snapshot);
+        Map<Long, LabGoal> lockedGoals = lockMonthlyGoalMembership(snapshot);
+        lockKeyTaskCollectionsForDelete(snapshot, lockedGoals);
         lockTaskHierarchyForDelete(snapshot);
         LabTask stored = taskMapper.selectTaskById(id);
         if (stored == null || version == null || !version.equals(stored.getVersion())) throw optimisticConflict();
@@ -412,16 +421,20 @@ public class LabTaskServiceImpl implements LabTaskService {
         if (taskMapper.updateTask(task) != 1) throw optimisticConflict();
     }
 
-    private void validateTaskConnections(LabTask task, Long actorId) {
+    private void validateTaskConnections(LabTask task, Long actorId, Map<Long, LabGoal> lockedGoals,
+            Map<Long, LabTask> lockedTasks, Map<Long, String> lockedOwners) {
         if (task == null || blank(task.getTaskLevel()) || blank(task.getPeriod())) throw new ServiceException("Task level and period are required");
         requireWeight("Performance weight", task.getPerfWeight());
         requireWeight("Goal weight", task.getGoalWeight());
-        String ownerBizLine = task.getOwnerId() == null ? null : taskMapper.selectMemberBizLineById(task.getOwnerId());
+        String ownerBizLine = task.getOwnerId() == null ? null : lockedOwners.get(task.getOwnerId());
         if (ownerBizLine == null || !ownerBizLine.equals(task.getBizLine())) {
             throw new ServiceException("Task business line must match the active owner's responsible scope");
         }
         if (LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel())) {
-            LabTask parent = taskMapper.selectTaskById(task.getParentId());
+            if (task.getId() != null && task.getId().equals(task.getParentId())) {
+                throw new ServiceException("Task cannot be its own parent");
+            }
+            LabTask parent = lockedTasks.get(task.getParentId());
             if (parent == null || !LabConstants.TASK_LEVEL_MONTH.equals(parent.getTaskLevel())) throw new ServiceException("Weekly task must belong to a month task");
             accessService.requireTaskRead(parent, actorId);
             if (!same(parent.getGoalId(), task.getGoalId()) || !same(parent.getMilestoneId(), task.getMilestoneId())) {
@@ -441,8 +454,8 @@ public class LabTaskServiceImpl implements LabTaskService {
             throw new ServiceException("Month task cannot have a task parent");
         }
         LabPeriodUtils.parseMonth(task.getPeriod());
-        LabGoal annual = goalMapper.selectGoalById(task.getGoalId());
-        LabGoal milestone = goalMapper.selectGoalById(task.getMilestoneId());
+        LabGoal annual = lockedGoals.get(task.getGoalId());
+        LabGoal milestone = lockedGoals.get(task.getMilestoneId());
         if (annual == null || milestone == null || !"YEAR".equals(annual.getGoalLevel())
                 || !"QUARTER".equals(milestone.getGoalLevel()) || !annual.getId().equals(milestone.getParentId())) {
             throw new ServiceException("Month task must link a quarterly milestone under its annual goal");
@@ -452,6 +465,20 @@ public class LabTaskServiceImpl implements LabTaskService {
         if (!milestone.getYear().equals(monthStart.getYear())
                 || !milestone.getPeriod().equals(monthStart.getYear() + "Q" + quarter)) {
             throw new ServiceException("Month task period must belong to its quarterly milestone");
+        }
+    }
+
+    private void prevalidateMonthlyGoalTypes(LabTask... tasks) {
+        if (tasks == null) return;
+        for (LabTask task : tasks) {
+            if (!isMonth(task)) continue;
+            LabGoal annual = goalMapper.selectGoalById(task.getGoalId());
+            LabGoal milestone = goalMapper.selectGoalById(task.getMilestoneId());
+            if (annual == null || milestone == null || !"YEAR".equals(annual.getGoalLevel())
+                    || !"QUARTER".equals(milestone.getGoalLevel())
+                    || !annual.getId().equals(milestone.getParentId())) {
+                throw new ServiceException("Month task must link a quarterly milestone under its annual goal");
+            }
         }
     }
 
@@ -494,9 +521,11 @@ public class LabTaskServiceImpl implements LabTaskService {
         }
     }
 
-    private void requireStableActivatedFields(LabTask stored, LabTask proposed) {
+    private void requireStableActivatedFields(LabTask stored, LabTask proposed,
+            Map<Long, LabGoal> lockedGoals) {
         if (LabConstants.WORKFLOW_DRAFT.equals(stored.getWorkflowStatus())) {
-            LabGoal milestone = goalMapper.selectGoalById(stored.getMilestoneId());
+            LabGoal milestone = isMonth(stored) ? lockedGoals.get(stored.getMilestoneId())
+                    : goalMapper.selectGoalById(stored.getMilestoneId());
             if (milestone != null && "ACTIVE".equals(milestone.getStatus())
                     && !same(stored.getGoalWeight(), proposed.getGoalWeight())) {
                 throw new ServiceException("Goal weight is immutable after milestone activation");
@@ -524,28 +553,72 @@ public class LabTaskServiceImpl implements LabTaskService {
         }
     }
 
-    private void lockKeyTaskCollectionsForCreate(LabTask task) {
+    private void lockKeyTaskCollectionsForCreate(LabTask task, Map<Long, LabGoal> lockedGoals) {
         if (!isKeyMonth(task)) return;
-        LabGoal milestone = goalMapper.selectGoalForUpdate(task.getMilestoneId());
+        LabGoal milestone = lockedGoals.get(task.getMilestoneId());
         if (milestone == null || !"DRAFT".equals(milestone.getStatus())) {
             throw new ServiceException("Key month membership is frozen after milestone activation");
         }
-        lockMember(task.getOwnerId());
         requirePlanCollectionDraft(task.getOwnerId(), task.getPeriod());
     }
 
-    private void lockTaskHierarchyForCreate(LabTask task) {
+    private Map<Long, LabTask> lockTaskHierarchyForCreate(LabTask task) {
+        Map<Long, LabTask> locked = new LinkedHashMap<Long, LabTask>();
         if (task != null && LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel()) && task.getParentId() != null) {
-            taskMapper.selectTaskForUpdate(task.getParentId());
+            locked.put(task.getParentId(), taskMapper.selectTaskForUpdate(task.getParentId()));
         }
+        return locked;
     }
 
-    private void lockTaskHierarchyForUpdate(LabTask stored, LabTask proposed) {
+    private Map<Long, LabGoal> lockMonthlyGoalMembership(LabTask... tasks) {
+        List<Long> annualIds = new ArrayList<Long>();
+        List<Long> milestoneIds = new ArrayList<Long>();
+        if (tasks != null) {
+            for (LabTask task : tasks) {
+                if (!isMonth(task)) continue;
+                addDistinctId(annualIds, task.getGoalId());
+                addDistinctId(milestoneIds, task.getMilestoneId());
+            }
+        }
+        Collections.sort(annualIds);
+        Collections.sort(milestoneIds);
+        Map<Long, LabGoal> locked = new LinkedHashMap<Long, LabGoal>();
+        for (Long annualId : annualIds) locked.put(annualId, goalMapper.selectGoalForUpdate(annualId));
+        for (Long milestoneId : milestoneIds) {
+            if (!locked.containsKey(milestoneId)) locked.put(milestoneId, goalMapper.selectGoalForUpdate(milestoneId));
+        }
+        return locked;
+    }
+
+    private Map<Long, String> lockTaskOwners(LabTask... tasks) {
+        List<Long> ownerIds = new ArrayList<Long>();
+        if (tasks != null) {
+            for (LabTask task : tasks) {
+                if (task != null) addDistinctId(ownerIds, task.getOwnerId());
+            }
+        }
+        Collections.sort(ownerIds);
+        Map<Long, String> locked = new LinkedHashMap<Long, String>();
+        for (Long ownerId : ownerIds) {
+            String bizLine = taskMapper.lockMemberForUpdate(ownerId);
+            if (bizLine == null) throw new ServiceException("Task owner is not an active lab member");
+            locked.put(ownerId, bizLine);
+        }
+        return locked;
+    }
+
+    private void addDistinctId(List<Long> ids, Long id) {
+        if (id != null && !ids.contains(id)) ids.add(id);
+    }
+
+    private Map<Long, LabTask> lockTaskHierarchyForUpdate(LabTask stored, LabTask proposed) {
         List<Long> ids = new ArrayList<Long>();
         addHierarchyLockId(ids, stored);
         addHierarchyLockId(ids, proposed);
         Collections.sort(ids);
-        for (Long id : ids) taskMapper.selectTaskForUpdate(id);
+        Map<Long, LabTask> locked = new LinkedHashMap<Long, LabTask>();
+        for (Long id : ids) locked.put(id, taskMapper.selectTaskForUpdate(id));
+        return locked;
     }
 
     private void lockTaskHierarchyForDelete(LabTask task) {
@@ -561,9 +634,9 @@ public class LabTaskServiceImpl implements LabTaskService {
         if (id != null && !ids.contains(id)) ids.add(id);
     }
 
-    private void lockKeyTaskCollectionsForDelete(LabTask task) {
+    private void lockKeyTaskCollectionsForDelete(LabTask task, Map<Long, LabGoal> lockedGoals) {
         if (!isKeyMonth(task)) return;
-        LabGoal milestone = goalMapper.selectGoalForUpdate(task.getMilestoneId());
+        LabGoal milestone = lockedGoals.get(task.getMilestoneId());
         if (milestone == null || !"DRAFT".equals(milestone.getStatus())) {
             throw new ServiceException("Key month membership is frozen after milestone activation");
         }
@@ -571,16 +644,14 @@ public class LabTaskServiceImpl implements LabTaskService {
         requirePlanCollectionDraft(task.getOwnerId(), task.getPeriod());
     }
 
-    private void lockKeyTaskCollectionsForUpdate(LabTask stored, LabTask proposed) {
+    private void lockKeyTaskCollectionsForUpdate(LabTask stored, LabTask proposed,
+            Map<Long, LabGoal> lockedGoals) {
         boolean storedKeyMonth = isKeyMonth(stored);
         boolean proposedKeyMonth = isKeyMonth(proposed);
         if (!storedKeyMonth && !proposedKeyMonth) return;
         List<Long> milestoneIds = distinctSorted(stored.getMilestoneId(), proposed.getMilestoneId());
         List<LabGoal> milestones = new ArrayList<LabGoal>();
-        for (Long milestoneId : milestoneIds) milestones.add(goalMapper.selectGoalForUpdate(milestoneId));
-        List<Long> ownerIds = distinctSorted(stored.getOwnerId(), proposed.getOwnerId());
-        for (Long ownerId : ownerIds) lockMember(ownerId);
-
+        for (Long milestoneId : milestoneIds) milestones.add(lockedGoals.get(milestoneId));
         boolean milestoneCollectionChanges = storedKeyMonth != proposedKeyMonth
                 || !same(stored.getMilestoneId(), proposed.getMilestoneId())
                 || !same(stored.getGoalWeight(), proposed.getGoalWeight());
@@ -630,6 +701,10 @@ public class LabTaskServiceImpl implements LabTaskService {
 
     private boolean isKeyMonth(LabTask task) {
         return task != null && LabConstants.TASK_LEVEL_MONTH.equals(task.getTaskLevel()) && "key".equals(task.getTaskType());
+    }
+
+    private boolean isMonth(LabTask task) {
+        return task != null && LabConstants.TASK_LEVEL_MONTH.equals(task.getTaskLevel());
     }
 
     private void requireWeight(String label, BigDecimal value) {

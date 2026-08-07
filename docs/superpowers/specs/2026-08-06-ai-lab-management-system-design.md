@@ -263,7 +263,7 @@ Markdown 回编只允许修改正文内容，不允许借 Markdown 修改模板�
 接口遵循 `/lab/{domain}`，使用 RuoYi `AjaxResult` 与 `TableDataInfo`。主要权限：
 
 - `lab:dashboard:view`
-- `lab:goal:list/add/edit/remove`
+- `lab:goal:list/add/edit/remove/activate`
 - `lab:task:list/add/edit/submit/remove`
 - `lab:member:list/edit/one2one`
 - `lab:asset:list/add/edit/remove`

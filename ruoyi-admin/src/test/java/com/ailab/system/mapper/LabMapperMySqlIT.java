@@ -86,6 +86,8 @@ class LabMapperMySqlIT {
         LabTask task = taskMapper.selectTaskById(39001L);
         LabTaskEvidence evidence = evidenceMapper.selectEvidenceById(39001L);
 
+        assertEquals("algorithm", taskMapper.lockMemberForUpdate(39203L),
+                "member locking read must return the current active business line");
         assertEquals(new BigDecimal("70.00"), task.getPerfWeight());
         assertEquals(new BigDecimal("25.00"), task.getGoalWeight());
         assertTrue(evidence.getEvidenceJson().contains("integration"));
@@ -148,8 +150,12 @@ class LabMapperMySqlIT {
                 () -> accessService.requireGoalWrite(goalMapper.selectGoalById(39003L), 39102L));
         assertThrows(ServiceException.class, () -> accessService.requireGoalWrite(ownQuarter, 39103L));
         int managerGoals = goalService.listGoals(new LabGoal(), 39101L).size();
-        assertEquals(managerGoals, goalService.listGoals(new LabGoal(), 39102L).size());
-        assertEquals(managerGoals, goalService.listGoals(new LabGoal(), 39103L).size());
+        for (Long actorId : new Long[] {39102L, 39103L}) {
+            LabGoal unrestricted = new LabGoal();
+            unrestricted.getParams().put("dataScope", " AND 1=0 /* goal scope must be ignored */");
+            assertEquals(managerGoals, goalService.listGoals(unrestricted, actorId).size());
+            assertFalse(unrestricted.getParams().containsKey("dataScope"));
+        }
     }
 
     @Test

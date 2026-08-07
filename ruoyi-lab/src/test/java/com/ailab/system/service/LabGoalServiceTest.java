@@ -1,10 +1,13 @@
 package com.ailab.system.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ailab.system.constant.LabConstants;
+import com.ailab.system.controller.LabGoalController;
 import com.ailab.system.domain.LabGoal;
 import com.ailab.system.domain.LabTask;
 import com.ailab.system.dto.LabAccessContext;
@@ -16,12 +19,17 @@ import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.annotation.DataScope;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 class LabGoalServiceTest {
     private MemoryGoalMapper goals;
@@ -82,6 +90,41 @@ class LabGoalServiceTest {
     }
 
     @Test
+    void goalActivationRequiresDraftLifecycleAndManagerRole() {
+        String[] closedStatuses = {"ACTIVE", "COMPLETED", "TERMINATED"};
+        for (int i = 0; i < closedStatuses.length; i++) {
+            long goalId = 20L + i;
+            LabGoal milestone = goal(goalId, 1L, "QUARTER", 2026, "2026Q1", 10L, "100");
+            milestone.setStatus(closedStatuses[i]);
+            goals.put(milestone);
+            tasks.put(month(30L + i, goalId, "2026-01", "100", "100",
+                    LabConstants.WORKFLOW_DRAFT, LabConstants.RESULT_DOING));
+
+            ServiceException error = assertThrows(ServiceException.class,
+                    () -> service.activateGoal(goalId, 0, 99L));
+            assertEquals("Only draft goals can be activated", error.getMessage());
+        }
+
+        LabGoal leadOwnedMilestone = goal(40L, 1L, "QUARTER", 2026, "2026Q2", 10L, "100");
+        goals.put(leadOwnedMilestone);
+        tasks.put(month(41L, 40L, "2026-04", "100", "100",
+                LabConstants.WORKFLOW_DRAFT, LabConstants.RESULT_DOING));
+
+        ServiceException roleError = assertThrows(ServiceException.class,
+                () -> service.activateGoal(40L, 0, 2L));
+        assertEquals("Manager role is required", roleError.getMessage());
+    }
+
+    @Test
+    void goalActivationControllerUsesItsOwnPermission() throws Exception {
+        PreAuthorize permission = LabGoalController.class
+                .getMethod("activate", Long.class, Integer.class)
+                .getAnnotation(PreAuthorize.class);
+
+        assertEquals("@ss.hasPermi('lab:goal:activate')", permission.value());
+    }
+
+    @Test
     void milestoneAndAnnualProgressUseGoalWeightAndConfirmedResultsOnly() {
         LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 10L, "100");
         LabGoal q1 = goal(2L, 1L, "QUARTER", 2026, "2026Q1", 10L, "40");
@@ -130,6 +173,27 @@ class LabGoalServiceTest {
                 .getAnnotation(DataScope.class));
         assertNull(LabGoalServiceImpl.class.getMethod("goalTree", LabGoal.class, Long.class)
                 .getAnnotation(DataScope.class));
+
+        goals.put(goal(1L, 0L, "YEAR", 2026, null, 99L, "100"));
+        for (Long actorId : new Long[] {99L, 2L, 3L}) {
+            LabGoal query = new LabGoal();
+            query.getParams().put("dataScope", " AND 1=0 /* untrusted goal scope */");
+            assertEquals(1, service.listGoals(query, actorId).size());
+            assertFalse(goals.lastQuery.getParams().containsKey("dataScope"));
+        }
+    }
+
+    @Test
+    void goalMapperNeverExpandsDynamicSqlFragments() throws Exception {
+        Path root = Paths.get("").toAbsolutePath();
+        while (root != null && !Files.exists(root.resolve("ruoyi-lab/src/main/resources/mapper/lab/LabGoalMapper.xml"))) {
+            root = root.getParent();
+        }
+        String xml = new String(Files.readAllBytes(root.resolve("ruoyi-lab/src/main/resources/mapper/lab/LabGoalMapper.xml")),
+                StandardCharsets.UTF_8);
+
+        assertFalse(xml.contains("${"), "goal queries must never expand caller-provided SQL fragments");
+        assertFalse(xml.toLowerCase().contains("datascope"), "goal reads are intentionally global for all lab roles");
     }
 
     @Test
@@ -198,6 +262,83 @@ class LabGoalServiceTest {
     }
 
     @Test
+    void draftAnnualStructureIsFrozenOnceItHasQuarterMilestonesButContentRemainsEditable() {
+        LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 99L, "100");
+        goals.put(annual);
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100"));
+        LabGoal changedYear = goal(1L, 0L, "YEAR", 2027, null, 99L, "100");
+
+        ServiceException error = assertThrows(ServiceException.class,
+                () -> service.updateGoal(changedYear, 99L));
+        assertEquals("Goal structure is immutable after dependent records exist", error.getMessage());
+
+        LabGoal contentEdit = goal(1L, 0L, "YEAR", 2026, null, 99L, "100");
+        contentEdit.setTitle("updated annual content");
+        service.updateGoal(contentEdit, 99L);
+        assertEquals("updated annual content", goals.find(1L).getTitle());
+    }
+
+    @Test
+    void draftQuarterStructureIsFrozenOnceItHasMonthlyTasksButContentRemainsEditable() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null, 99L, "100"));
+        LabGoal quarter = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100");
+        goals.put(quarter);
+        LabTask linked = month(11L, 2L, "2026-08", "0", "0",
+                LabConstants.WORKFLOW_DRAFT, LabConstants.RESULT_DOING);
+        linked.setTaskType("daily");
+        tasks.put(linked);
+        LabGoal changedOwner = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 99L, "100");
+
+        ServiceException error = assertThrows(ServiceException.class,
+                () -> service.updateGoal(changedOwner, 99L));
+        assertEquals("Goal structure is immutable after dependent records exist", error.getMessage());
+
+        LabGoal contentEdit = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100");
+        contentEdit.setTitle("updated milestone content");
+        service.updateGoal(contentEdit, 99L);
+        assertEquals("updated milestone content", goals.find(2L).getTitle());
+    }
+
+    @Test
+    void goalUpdateValidatesAgainstTheLockedCurrentParentInsteadOfAnOldSnapshot() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null, 99L, "100"));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100"));
+        goals.put(goal(3L, 0L, "YEAR", 2026, null, 99L, "100"));
+        goals.lockedOverrides.put(3L, goal(3L, 0L, "YEAR", 2027, null, 99L, "100"));
+        LabGoal reparentedUsingStaleYear = goal(2L, 3L, "QUARTER", 2026, "2026Q3", 10L, "100");
+
+        ServiceException error = assertThrows(ServiceException.class,
+                () -> service.updateGoal(reparentedUsingStaleYear, 99L));
+
+        assertEquals("Quarter milestone must use the parent annual goal year", error.getMessage());
+    }
+
+    @Test
+    void invalidRequestedParentIsRejectedBeforeTakingAnyGoalLock() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null, 99L, "100"));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q1", 10L, "50"));
+        goals.put(goal(3L, 1L, "QUARTER", 2026, "2026Q2", 10L, "50"));
+        LabGoal cyclicRequest = goal(2L, 3L, "QUARTER", 2026, "2026Q1", 10L, "50");
+
+        assertThrows(ServiceException.class, () -> service.updateGoal(cyclicRequest, 99L));
+
+        assertTrue(goals.lockedGoalIds.isEmpty(), "invalid caller-declared parent types must not influence lock order");
+    }
+
+    @Test
+    void goalLevelIsImmutableSoPreLockTypeValidationCannotGoStale() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null, 99L, "100"));
+        goals.put(goal(2L, 0L, "YEAR", 2026, null, 99L, "100"));
+        LabGoal converted = goal(1L, 2L, "QUARTER", 2026, "2026Q3", 99L, "100");
+
+        ServiceException error = assertThrows(ServiceException.class,
+                () -> service.updateGoal(converted, 99L));
+
+        assertEquals("Goal level is immutable after creation", error.getMessage());
+        assertTrue(goals.lockedGoalIds.isEmpty());
+    }
+
+    @Test
     void optimisticConflictDoesNotOverwriteGoal() {
         LabGoal stored = goal(1L, 0L, "YEAR", 2026, null, 10L, "100");
         stored.setVersion(3);
@@ -231,12 +372,15 @@ class LabGoalServiceTest {
 
     static final class MemoryGoalMapper implements LabGoalMapper {
         private final Map<Long, LabGoal> data = new LinkedHashMap<Long, LabGoal>();
+        private final Map<Long, LabGoal> lockedOverrides = new LinkedHashMap<Long, LabGoal>();
+        private final List<Long> lockedGoalIds = new ArrayList<Long>();
         private long sequence = 100L;
+        private LabGoal lastQuery;
         void put(LabGoal goal) { data.put(goal.getId(), goal); }
         LabGoal find(Long id) { return data.get(id); }
-        @Override public List<LabGoal> selectGoalList(LabGoal query) { return new ArrayList<LabGoal>(data.values()); }
+        @Override public List<LabGoal> selectGoalList(LabGoal query) { lastQuery = query; return new ArrayList<LabGoal>(data.values()); }
         @Override public LabGoal selectGoalById(Long id) { LabGoal value = data.get(id); return value == null || "2".equals(value.getDelFlag()) ? null : value; }
-        @Override public LabGoal selectGoalForUpdate(Long id) { return selectGoalById(id); }
+        @Override public LabGoal selectGoalForUpdate(Long id) { lockedGoalIds.add(id); LabGoal current = lockedOverrides.get(id); return current == null ? selectGoalById(id) : current; }
         @Override public List<LabGoal> selectChildrenByParentId(Long parentId) {
             List<LabGoal> result = new ArrayList<LabGoal>();
             for (LabGoal value : data.values()) if (parentId.equals(value.getParentId()) && !"2".equals(value.getDelFlag())) result.add(value);
@@ -272,10 +416,11 @@ class LabGoalServiceTest {
             return result;
         }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long milestoneId) { return selectKeyMonthTasksByMilestoneId(milestoneId); }
+        @Override public List<LabTask> selectTasksByMilestoneIdForUpdate(Long milestoneId) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if (milestoneId.equals(task.getMilestoneId()) && !"2".equals(task.getDelFlag())) result.add(task); return result; }
         @Override public int countTasksByMilestoneId(Long milestoneId) { int count = 0; for (LabTask task : data.values()) if (milestoneId.equals(task.getMilestoneId()) && !"2".equals(task.getDelFlag())) count++; return count; }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriod(Long ownerId, String period) { return new ArrayList<LabTask>(); }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriodForUpdate(Long ownerId, String period) { return selectKeyMonthTasksByOwnerPeriod(ownerId, period); }
-        @Override public Long lockMemberForUpdate(Long memberId) { return memberId; }
+        @Override public String lockMemberForUpdate(Long memberId) { return "algorithm"; }
         @Override public int insertTask(LabTask task) { return 1; }
         @Override public int updateTask(LabTask task) { return 1; }
         @Override public int deleteTask(Long id, Integer version, String updateBy) { return 1; }

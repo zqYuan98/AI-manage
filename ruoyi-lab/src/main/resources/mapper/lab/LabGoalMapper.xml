@@ -42,7 +42,6 @@
         <if test="ownerId != null">and g.owner_id=#{ownerId}</if>
         <if test="status != null and status != ''">and g.status=#{status}</if>
         <if test="title != null and title != ''">and g.title like concat('%',#{title},'%')</if>
-        <if test="params != null and params.dataScope != null">${params.dataScope}</if>
         order by g.year desc,g.parent_id,g.period,g.id
     </select>
 

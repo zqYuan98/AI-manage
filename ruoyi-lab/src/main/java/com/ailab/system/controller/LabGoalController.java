@@ -64,7 +64,7 @@ public class LabGoalController extends BaseController {
         return toAjax(goalService.updateGoal(goal, SecurityUtils.getUserId()));
     }
 
-    @PreAuthorize("@ss.hasPermi('lab:goal:edit')")
+    @PreAuthorize("@ss.hasPermi('lab:goal:activate')")
     @Log(title = "AI lab goal activation", businessType = BusinessType.UPDATE)
     @PutMapping("/{id}/activate")
     public AjaxResult activate(@PathVariable Long id, @RequestParam Integer version) {
