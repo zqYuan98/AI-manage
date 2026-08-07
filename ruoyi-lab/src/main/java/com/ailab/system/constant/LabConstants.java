@@ -23,6 +23,20 @@ public final class LabConstants {
     public static final String YES = "1";
     public static final String NO = "0";
 
+    public static final String REVIEW_PENDING = "PENDING";
+    public static final String REVIEW_APPROVED = "APPROVED";
+    public static final String PERIOD_OPEN = "OPEN";
+    public static final String PERIOD_CLOSED = "CLOSED";
+    public static final String PERF_RESULT_NORMAL = "NORMAL";
+    public static final String PERF_RESULT_RED_LINE = "RED_LINE";
+    public static final String PERF_FORMULA_VERSION = "AILAB_PERF_V1";
+
+    public static final String COLLAB_CROSS_DEPT = "CROSS_DEPT";
+    public static final String COLLAB_KNOWLEDGE = "KNOWLEDGE";
+    public static final String COLLAB_BACKUP = "BACKUP";
+    public static final String COLLAB_OVERDUE = "OVERDUE";
+    public static final String COLLAB_DEDUCTION = "DEDUCTION";
+
     private LabConstants() {
     }
 }

@@ -15,13 +15,16 @@ import com.ailab.system.domain.LabMemberSkill;
 import com.ailab.system.domain.LabOne2One;
 import com.ailab.system.domain.LabTask;
 import com.ailab.system.domain.LabTaskEvidence;
+import com.ailab.system.domain.LabPerfScore;
 import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.dto.RedLineRevokeCommand;
 import com.ailab.system.dto.TaskSubmitCommand;
 import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.LabGoalService;
 import com.ailab.system.service.LabLedgerService;
 import com.ailab.system.service.LabMemberService;
 import com.ailab.system.service.LabTaskService;
+import com.ailab.system.service.LabPerformanceService;
 import com.ruoyi.RuoYiApplication;
 import com.ruoyi.common.core.domain.entity.SysRole;
 import com.ruoyi.common.core.domain.entity.SysUser;
@@ -39,6 +42,10 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +60,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 /**
  * Real MySQL 8 mapper integration. This class deliberately ends in IT so normal
@@ -73,6 +81,8 @@ class LabMapperMySqlIT {
     @Autowired private LabMemberService memberService;
     @Autowired private LabLedgerService ledgerService;
     @Autowired private LabAccessService accessService;
+    @Autowired private LabPerformanceMapper performanceMapper;
+    @Autowired private LabPerformanceService performanceService;
     @Autowired private ISysUserService userService;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -389,6 +399,72 @@ class LabMapperMySqlIT {
         assertEquals(1, goalMapper.deleteGoal(39003L, 0, "it"));
         assertNull(goalMapper.selectGoalById(39003L));
         assertFalse(goalMapper.selectChildrenByParentId(39001L).isEmpty());
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrentCloseReopenAndRecloseKeepImmutableRevisionsAndIdempotentDeductions() throws Exception {
+        String period = "2098-11";
+        long taskId = 39880L;
+        cleanupPerformanceFixture(period, taskId);
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,asset_id,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values(?,0,39001,39002,'month',?,'algorithm','key','IT concurrent close',39203,101,'2098-11-20','artifact',100,100,'ACTIVE','DOING',39301,'0','0','0',0,'0','it',now())", taskId, period);
+        try {
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            CountDownLatch start = new CountDownLatch(1);
+            Future<List<LabPerfScore>> first = pool.submit(() -> { start.await(); return performanceService.closePeriod(period, "concurrent close", 39101L); });
+            Future<List<LabPerfScore>> second = pool.submit(() -> { start.await(); return performanceService.closePeriod(period, "concurrent close", 39101L); });
+            start.countDown();
+            assertEquals(3, first.get().size());
+            assertEquals(3, second.get().size());
+            pool.shutdownNow();
+
+            assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_period_close where period=? and close_status='CLOSED' and del_flag='0'", Integer.class, period));
+            assertEquals(3, jdbcTemplate.queryForObject("select count(1) from lab_perf_score where period=? and current_flag='1' and del_flag='0'", Integer.class, period));
+            assertEquals(3, jdbcTemplate.queryForObject("select count(1) from lab_perf_score where period=? and revision_no=1 and del_flag='0'", Integer.class, period));
+            assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_collaboration_record where idempotency_key=? and del_flag='0'", Integer.class, "PERIOD_OVERDUE:" + period + ":" + taskId));
+            assertEquals("ACTIVE", jdbcTemplate.queryForObject("select workflow_status from lab_task where id=?", String.class, taskId));
+            assertEquals("DOING", jdbcTemplate.queryForObject("select result_status from lab_task where id=?", String.class, taskId));
+            assertEquals("1", jdbcTemplate.queryForObject("select period_lock_flag from lab_task where id=?", String.class, taskId));
+
+            Long oldId = jdbcTemplate.queryForObject("select id from lab_perf_score where member_id=39203 and period=? and current_flag='1'", Long.class, period);
+            LabPerfScore old = performanceMapper.selectScoreForUpdate(oldId);
+            assertNotNull(old);
+            assertEquals("RED_LINE", old.getResultStatus());
+            assertTrue(old.getDetailJson().contains("MONTH_CLOSE_UNCONFIRMED_AS_UNDONE"));
+            String originalDetail = old.getDetailJson();
+            performanceService.revokeRedLine(old.getId(), new RedLineRevokeCommand("https://example.invalid/it/corrective", "corrected evidence"), 39101L);
+            assertEquals(originalDetail, jdbcTemplate.queryForObject("select cast(detail_json as char) from lab_perf_score where id=?", String.class, old.getId()));
+            assertTrue(jdbcTemplate.queryForObject("select cast(red_line_correction_json as char) from lab_perf_score where id=?", String.class, old.getId()).contains("originalTriggers"));
+
+            performanceService.reopenPeriod(period, "late correction", 39101L);
+            assertEquals("OPEN", jdbcTemplate.queryForObject("select close_status from lab_period_close where period=?", String.class, period));
+            assertEquals(0, jdbcTemplate.queryForObject("select count(1) from lab_perf_score where period=? and current_flag='1'", Integer.class, period));
+            assertEquals("0", jdbcTemplate.queryForObject("select period_lock_flag from lab_task where id=?", String.class, taskId));
+            assertEquals(1, jdbcTemplate.queryForObject("select json_length(reopen_history_json) from lab_period_close where period=?", Integer.class, period));
+
+            jdbcTemplate.update("update lab_task set workflow_status='CONFIRMED',result_status='ONTIME',actual_finish_time='2098-11-19 10:00:00',result_desc='fixed',version=version+1 where id=?", taskId);
+            jdbcTemplate.update("insert into lab_task_evidence(id,task_id,evidence_type,evidence_title,evidence_url,submitter_id,submit_time,audit_status,auditor_id,audit_time,audit_comment,del_flag,create_by,create_time) values(39880,?,'URL','IT corrected evidence','https://example.invalid/it/fixed',39203,now(),'APPROVED',39201,now(),'verified','0','it',now())", taskId);
+            jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?, ?,39202,39203,'BACKUP',4,'https://example.invalid/it/backup',39201,'APPROVED',now(),'trained',0,'0','it',now())", taskId, period);
+
+            List<LabPerfScore> revised = performanceService.closePeriod(period, "corrected close", 39101L);
+            assertEquals(3, revised.size());
+            assertEquals(Arrays.asList(1, 2), jdbcTemplate.queryForList("select revision_no from lab_perf_score where member_id=39203 and period=? order by revision_no", Integer.class, period));
+            assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_perf_score where member_id=39203 and period=? and current_flag='1' and revision_no=2", Integer.class, period));
+            assertEquals(originalDetail, jdbcTemplate.queryForObject("select cast(detail_json as char) from lab_perf_score where id=?", String.class, old.getId()));
+            assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_collaboration_record where idempotency_key=? and del_flag='0'", Integer.class, "PERIOD_OVERDUE:" + period + ":" + taskId));
+            assertEquals("CONFIRMED", jdbcTemplate.queryForObject("select workflow_status from lab_task where id=?", String.class, taskId));
+            assertThrows(org.springframework.dao.DuplicateKeyException.class, () -> jdbcTemplate.update("insert into lab_perf_score(member_id,period,revision_no,current_flag,version,del_flag,create_by,create_time) values(39203,?,99,'1',0,'0','it',now())", period));
+        } finally {
+            cleanupPerformanceFixture(period, taskId);
+        }
+    }
+
+    private void cleanupPerformanceFixture(String period, long taskId) {
+        jdbcTemplate.update("delete from lab_perf_score where period=?", period);
+        jdbcTemplate.update("delete from lab_collaboration_record where period=? or idempotency_key=?", period, "PERIOD_OVERDUE:" + period + ":" + taskId);
+        jdbcTemplate.update("delete from lab_task_evidence where task_id=?", taskId);
+        jdbcTemplate.update("delete from lab_task where id=?", taskId);
+        jdbcTemplate.update("delete from lab_period_close where period=?", period);
     }
 
     private LabTask newTask(Long ownerId, String title) {

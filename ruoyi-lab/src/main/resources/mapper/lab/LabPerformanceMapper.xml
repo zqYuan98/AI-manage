@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabPerformanceMapper">
+    <resultMap id="PeriodResult" type="com.ailab.system.domain.LabPeriodClose">
+        <id property="id" column="id"/><result property="period" column="period"/><result property="closeStatus" column="close_status"/>
+        <result property="closeBy" column="close_by"/><result property="closeTime" column="close_time"/><result property="closeReason" column="close_reason"/>
+        <result property="reopenBy" column="reopen_by"/><result property="reopenTime" column="reopen_time"/><result property="reopenReason" column="reopen_reason"/>
+        <result property="reopenHistoryJson" column="reopen_history_json"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="ScoreResult" type="com.ailab.system.domain.LabPerfScore">
+        <id property="id" column="id"/><result property="memberId" column="member_id"/><result property="period" column="period"/>
+        <result property="revisionNo" column="revision_no"/><result property="currentFlag" column="current_flag"/><result property="deliveryScore" column="delivery_score"/>
+        <result property="qualityScore" column="quality_score"/><result property="collaborationScore" column="collaboration_score"/><result property="score" column="score"/>
+        <result property="detailJson" column="detail_json"/><result property="calculationVersion" column="calculation_version"/><result property="cutoffTime" column="cutoff_time"/>
+        <result property="resultStatus" column="result_status"/><result property="redLineFlag" column="red_line_flag"/><result property="redLineReason" column="red_line_reason"/>
+        <result property="revokedFlag" column="revoked_flag"/><result property="revokeReason" column="revoke_reason"/><result property="redLineCorrectionJson" column="red_line_correction_json"/>
+        <result property="confirmationStatus" column="confirmation_status"/><result property="confirmedBy" column="confirmed_by"/><result property="confirmedTime" column="confirmed_time"/>
+        <result property="calibrationStatus" column="calibration_status"/><result property="calibrateScore" column="calibrate_score"/><result property="calibratorId" column="calibrator_id"/>
+        <result property="calibrationNote" column="calibration_note"/><result property="calibrationTime" column="calibration_time"/><result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/><result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="CollaborationResult" type="com.ailab.system.domain.LabCollaborationRecord">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/><result property="period" column="period"/>
+        <result property="fromMemberId" column="from_member_id"/><result property="toMemberId" column="to_member_id"/><result property="category" column="category"/>
+        <result property="signedScore" column="signed_score"/><result property="evidenceUrl" column="evidence_url"/><result property="reviewerId" column="reviewer_id"/>
+        <result property="reviewStatus" column="review_status"/><result property="reviewTime" column="review_time"/><result property="reviewComment" column="review_comment"/>
+        <result property="idempotencyKey" column="idempotency_key"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="TaskResult" type="com.ailab.system.domain.LabTask">
+        <id property="id" column="id"/><result property="parentId" column="parent_id"/><result property="goalId" column="goal_id"/><result property="milestoneId" column="milestone_id"/>
+        <result property="taskLevel" column="task_level"/><result property="period" column="period"/><result property="bizLine" column="biz_line"/><result property="taskType" column="task_type"/>
+        <result property="title" column="title"/><result property="ownerId" column="owner_id"/><result property="deptId" column="dept_id"/><result property="planDate" column="plan_date"/>
+        <result property="actualFinishTime" column="actual_finish_time"/><result property="deliverable" column="deliverable"/><result property="perfWeight" column="perf_weight"/><result property="goalWeight" column="goal_weight"/>
+        <result property="workflowStatus" column="workflow_status"/><result property="resultStatus" column="result_status"/><result property="resultDesc" column="result_desc"/>
+        <result property="failReason" column="fail_reason"/><result property="nextAction" column="next_action"/><result property="assetId" column="asset_id"/>
+        <result property="coordinationRequired" column="coordination_required"/><result property="coordinationOwnerId" column="coordination_owner_id"/><result property="coordinationDeptId" column="coordination_dept_id"/>
+        <result property="coordinationContent" column="coordination_content"/><result property="coordinationSupport" column="coordination_support"/><result property="coordinationDesc" column="coordination_desc"/>
+        <result property="blockFlag" column="current_block_flag"/><result property="blockStartTime" column="current_block_start"/><result property="periodLockFlag" column="period_lock_flag"/>
+        <result property="version" column="version"/><result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/><result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="EvidenceResult" type="com.ailab.system.domain.LabTaskEvidence">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/><result property="evidenceType" column="evidence_type"/><result property="evidenceTitle" column="evidence_title"/>
+        <result property="evidenceUrl" column="evidence_url"/><result property="evidenceJson" column="evidence_json"/><result property="submitterId" column="submitter_id"/><result property="submitTime" column="submit_time"/>
+        <result property="auditStatus" column="audit_status"/><result property="auditorId" column="auditor_id"/><result property="auditTime" column="audit_time"/><result property="auditComment" column="audit_comment"/>
+        <result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="GateResult" type="com.ailab.system.domain.LabTaskQualityGate">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/><result property="gateNo" column="gate_no"/><result property="gateName" column="gate_name"/>
+        <result property="gateStatus" column="gate_status"/><result property="evidenceId" column="evidence_id"/><result property="checkerId" column="checker_id"/>
+        <result property="checkTime" column="check_time"/><result property="checkResult" column="check_result"/><result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="MemberResult" type="com.ailab.system.domain.LabMember">
+        <id property="id" column="id"/><result property="userId" column="user_id"/><result property="memberNo" column="member_no"/><result property="position" column="position"/>
+        <result property="bizLine" column="biz_line"/><result property="roleType" column="role_type"/><result property="leaderId" column="leader_id"/>
+        <result property="primaryResponsibilities" column="primary_responsibilities"/><result property="backupResponsibilities" column="backup_responsibilities"/><result property="joinDate" column="join_date"/>
+        <result property="memberStatus" column="member_status"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="AssetFactResult" type="com.ailab.system.dto.PerformanceAssetFact">
+        <id property="assetId" column="asset_id"/><result property="assetName" column="asset_name"/><result property="primaryOwnerId" column="primary_owner_id"/>
+        <result property="activeBackup" column="active_backup"/><result property="quarterBackupTraining" column="quarter_backup_training"/>
+    </resultMap>
+
+    <sql id="scoreColumns">id,member_id,period,revision_no,current_flag,delivery_score,quality_score,collaboration_score,score,detail_json,calculation_version,cutoff_time,result_status,red_line_flag,red_line_reason,revoked_flag,revoke_reason,red_line_correction_json,confirmation_status,confirmed_by,confirmed_time,calibration_status,calibrate_score,calibrator_id,calibration_note,calibration_time,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
+    <sql id="collaborationColumns">id,task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,idempotency_key,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
+
+    <select id="selectPeriodForUpdate" parameterType="string" resultMap="PeriodResult">select * from lab_period_close where period=#{period} and del_flag='0' for update</select>
+    <insert id="ensureOpenPeriod">insert ignore into lab_period_close(period,close_status,version,del_flag,create_by,create_time) values(#{period},'OPEN',0,'0',#{actor},sysdate())</insert>
+    <select id="selectPeriodTasks" parameterType="string" resultMap="TaskResult">select * from lab_task where period=#{period} and del_flag='0' order by id</select>
+    <select id="selectPeriodTasksForUpdate" parameterType="string" resultMap="TaskResult">select * from lab_task where period=#{period} and del_flag='0' order by id for update</select>
+    <select id="selectActiveMembersForUpdate" resultMap="MemberResult">
+        select m.* from lab_member m join sys_user u on u.user_id=m.user_id and u.status='0' and u.del_flag='0'
+        where m.member_status='ACTIVE' and m.del_flag='0' order by m.id for update
+    </select>
+    <select id="selectEvidenceForTaskIds" resultMap="EvidenceResult">
+        select * from lab_task_evidence where del_flag='0' and
+        <choose><when test="taskIds != null and taskIds.size() > 0">task_id in <foreach collection="taskIds" item="id" open="(" separator="," close=")">#{id}</foreach></when><otherwise>1=0</otherwise></choose>
+        order by task_id,id
+    </select>
+    <select id="selectQualityGatesForTaskIds" resultMap="GateResult">
+        select * from lab_task_quality_gate where del_flag='0' and
+        <choose><when test="taskIds != null and taskIds.size() > 0">task_id in <foreach collection="taskIds" item="id" open="(" separator="," close=")">#{id}</foreach></when><otherwise>1=0</otherwise></choose>
+        order by task_id,id
+    </select>
+    <select id="selectCollaborationForPeriod" parameterType="string" resultMap="CollaborationResult">select <include refid="collaborationColumns"/> from lab_collaboration_record where period=#{period} and del_flag='0' order by id</select>
+    <select id="selectCriticalAssetFacts" resultMap="AssetFactResult">
+        select a.id asset_id,a.asset_name,a.primary_owner_id,
+               case when bm.id is not null and bm.member_status='ACTIVE' and bu.user_id is not null and bu.status='0' then 1 else 0 end active_backup,
+               case when exists(select 1 from lab_collaboration_record c join lab_task t on t.id=c.task_id and t.asset_id=a.id and t.del_flag='0'
+                    where c.category='BACKUP' and c.review_status='APPROVED' and c.evidence_url is not null and trim(c.evidence_url)&lt;&gt;''
+                      and c.period between #{quarterStart} and #{quarterEnd} and c.del_flag='0') then 1 else 0 end quarter_backup_training
+        from lab_asset a left join lab_member bm on bm.id=a.backup_owner_id and bm.del_flag='0'
+        left join sys_user bu on bu.user_id=bm.user_id and bu.del_flag='0'
+        where a.critical_flag='1' and a.status='ACTIVE' and a.del_flag='0' order by a.id
+    </select>
+    <select id="selectCriticalAssetFactsForUpdate" resultMap="AssetFactResult">
+        select a.id asset_id,a.asset_name,a.primary_owner_id,
+               case when bm.id is not null and bm.member_status='ACTIVE' and bu.user_id is not null and bu.status='0' then 1 else 0 end active_backup,
+               case when exists(select 1 from lab_collaboration_record c join lab_task t on t.id=c.task_id and t.asset_id=a.id and t.del_flag='0'
+                    where c.category='BACKUP' and c.review_status='APPROVED' and c.evidence_url is not null and trim(c.evidence_url)&lt;&gt;''
+                      and c.period between #{quarterStart} and #{quarterEnd} and c.del_flag='0') then 1 else 0 end quarter_backup_training
+        from lab_asset a left join lab_member bm on bm.id=a.backup_owner_id and bm.del_flag='0'
+        left join sys_user bu on bu.user_id=bm.user_id and bu.del_flag='0'
+        where a.critical_flag='1' and a.status='ACTIVE' and a.del_flag='0' order by a.id for update
+    </select>
+    <insert id="insertOverdueRecord" parameterType="com.ailab.system.domain.LabCollaborationRecord" useGeneratedKeys="true" keyProperty="id">
+        insert ignore into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,idempotency_key,version,del_flag,create_by,create_time,remark)
+        values(#{taskId},#{period},#{fromMemberId},#{toMemberId},#{category},#{signedScore},#{evidenceUrl},#{reviewerId},#{reviewStatus},#{reviewTime},#{reviewComment},#{idempotencyKey},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <select id="selectMaxRevision" resultType="int">select revision_no from lab_perf_score where member_id=#{memberId} and period=#{period} and del_flag='0' order by revision_no desc limit 1 for update</select>
+    <update id="markCurrentScoresHistorical">update lab_perf_score set current_flag='0',update_by=#{actor},update_time=sysdate(),version=version+1 where member_id=#{memberId} and period=#{period} and current_flag='1' and del_flag='0'</update>
+    <update id="markPeriodScoresHistorical">update lab_perf_score set current_flag='0',update_by=#{actor},update_time=sysdate(),version=version+1 where period=#{period} and current_flag='1' and del_flag='0'</update>
+    <insert id="insertPerfScore" parameterType="com.ailab.system.domain.LabPerfScore" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_perf_score(member_id,period,revision_no,current_flag,delivery_score,quality_score,collaboration_score,score,detail_json,calculation_version,cutoff_time,result_status,red_line_flag,red_line_reason,revoked_flag,revoke_reason,red_line_correction_json,confirmation_status,confirmed_by,confirmed_time,calibration_status,calibrate_score,calibrator_id,calibration_note,calibration_time,version,del_flag,create_by,create_time,remark)
+        values(#{memberId},#{period},#{revisionNo},#{currentFlag},#{deliveryScore},#{qualityScore},#{collaborationScore},#{score},#{detailJson},#{calculationVersion},#{cutoffTime},#{resultStatus},#{redLineFlag},#{redLineReason},#{revokedFlag},#{revokeReason},#{redLineCorrectionJson},#{confirmationStatus},#{confirmedBy},#{confirmedTime},#{calibrationStatus},#{calibrateScore},#{calibratorId},#{calibrationNote},#{calibrationTime},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="lockTasksForPeriod">update lab_task set period_lock_flag=#{lockFlag},update_by='period-close',update_time=sysdate(),version=version+1 where period=#{period} and del_flag='0' and period_lock_flag&lt;&gt;#{lockFlag}</update>
+    <update id="closePeriod">update lab_period_close set close_status='CLOSED',close_by=#{actor},close_time=#{time},close_reason=#{reason},update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and close_status='OPEN' and del_flag='0'</update>
+    <update id="reopenPeriod">
+        update lab_period_close set close_status='OPEN',reopen_by=#{actor},reopen_time=#{time},reopen_reason=#{reason},
+        reopen_history_json=json_array_append(coalesce(reopen_history_json,json_array()),'$',json_object('version',version+1,'actor',#{actor},'time',date_format(#{time},'%Y-%m-%d %H:%i:%s'),'reason',#{reason})),
+        update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and close_status='CLOSED' and del_flag='0'
+    </update>
+    <select id="selectCurrentScores" parameterType="string" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where period=#{period} and current_flag='1' and del_flag='0' order by member_id,id</select>
+    <select id="selectCurrentScoresForUpdate" parameterType="string" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where period=#{period} and current_flag='1' and del_flag='0' order by member_id,id for update</select>
+    <select id="selectScoresForMember" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where member_id=#{memberId} and period=#{period} and del_flag='0' order by revision_no desc,id desc</select>
+
+    <select id="selectCollaborationList" resultMap="CollaborationResult">
+        select c.* from lab_collaboration_record c join lab_member fm on fm.id=c.from_member_id and fm.del_flag='0' join lab_member tm on tm.id=c.to_member_id and tm.del_flag='0'
+        where c.period=#{period} and c.del_flag='0'
+        <if test="roleKey == 'lab_lead'">and (fm.biz_line=#{bizLine} or tm.biz_line=#{bizLine})</if>
+        <if test="roleKey == 'lab_member'">and (c.from_member_id=#{memberId} or c.to_member_id=#{memberId})</if>
+        order by c.id desc
+    </select>
+    <select id="selectCollaborationForUpdate" parameterType="long" resultMap="CollaborationResult">select <include refid="collaborationColumns"/> from lab_collaboration_record where id=#{id} and del_flag='0' for update</select>
+    <insert id="insertCollaboration" parameterType="com.ailab.system.domain.LabCollaborationRecord" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,idempotency_key,version,del_flag,create_by,create_time,remark)
+        values(#{taskId},#{period},#{fromMemberId},#{toMemberId},#{category},#{signedScore},#{evidenceUrl},null,'PENDING',null,null,null,#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="reviewCollaboration">update lab_collaboration_record set signed_score=#{score},reviewer_id=#{reviewerId},review_status='APPROVED',review_time=#{reviewTime},review_comment=#{comment},update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and review_status='PENDING' and del_flag='0'</update>
+    <select id="selectScoreForUpdate" parameterType="long" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where id=#{id} and del_flag='0' for update</select>
+    <update id="revokeRedLine">
+        update lab_perf_score set revoked_flag='1',revoke_reason=#{reason},
+        red_line_correction_json=json_object('originalTriggers',json_extract(detail_json,'$.redLineTriggers'),'evidenceUrl',#{evidenceUrl},'reason',#{reason},'managerId',#{managerId},'time',date_format(#{time},'%Y-%m-%d %H:%i:%s')),
+        update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and current_flag='1' and red_line_flag='1' and revoked_flag='0' and del_flag='0'
+    </update>
+    <select id="selectCurrentMonthlyScoresForUpdate" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where member_id=#{memberId} and period between #{startPeriod} and #{endPeriod} and current_flag='1' and del_flag='0' order by period,id for update</select>
+    <update id="confirmScore">update lab_perf_score set confirmation_status='CONFIRMED',confirmed_by=#{memberId},confirmed_time=#{time},update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and current_flag='1' and confirmation_status='PENDING' and del_flag='0'</update>
+</mapper>
