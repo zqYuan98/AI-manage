@@ -141,7 +141,7 @@ class TaskWorkflowServiceTest {
         TaskSubmitCommand command = completionCommand(LocalDate.of(2026, 8, 9));
         LabTaskEvidence clientEvidence = command.getEvidenceList().get(0);
         Date clientAuditTime = dateAtStartOfDay(LocalDate.of(2026, 8, 8));
-        clientEvidence.setAuditStatus(LabConstants.EVIDENCE_AUDIT_VERIFIED);
+        clientEvidence.setAuditStatus(LabConstants.EVIDENCE_AUDIT_APPROVED);
         clientEvidence.setAuditorId(77L);
         clientEvidence.setAuditTime(clientAuditTime);
         clientEvidence.setAuditComment("client preapproval");
@@ -153,7 +153,7 @@ class TaskWorkflowServiceTest {
         assertEquals(null, attached.getAuditorId());
         assertEquals(null, attached.getAuditTime());
         assertEquals(null, attached.getAuditComment());
-        assertEquals(LabConstants.EVIDENCE_AUDIT_VERIFIED, clientEvidence.getAuditStatus());
+        assertEquals(LabConstants.EVIDENCE_AUDIT_APPROVED, clientEvidence.getAuditStatus());
         assertEquals(Long.valueOf(77L), clientEvidence.getAuditorId());
         assertEquals(clientAuditTime, clientEvidence.getAuditTime());
     }
@@ -170,22 +170,85 @@ class TaskWorkflowServiceTest {
 
         LabTaskEvidence evidence = task.getEvidenceList().get(0);
         assertEquals(LabConstants.WORKFLOW_CONFIRMED, task.getWorkflowStatus());
-        assertEquals(LabConstants.EVIDENCE_AUDIT_VERIFIED, evidence.getAuditStatus());
+        assertEquals(LabConstants.EVIDENCE_AUDIT_APPROVED, evidence.getAuditStatus());
         assertEquals(Long.valueOf(99L), evidence.getAuditorId());
         assertEquals(reviewTime, evidence.getAuditTime());
         assertEquals("evidence verified", evidence.getAuditComment());
     }
 
     @Test
-    void invalidEvidenceCannotYieldConfirmedTask() {
+    void reviewRequiresAtLeastOneValidEvidence() {
         LabTask task = pendingOnTimeTask();
         LabTaskEvidence invalid = new LabTaskEvidence();
         invalid.setEvidenceTitle(" ");
         invalid.setEvidenceUrl("https://example.invalid/evidence/invalid");
-        task.getEvidenceList().add(invalid);
+        task.setEvidenceList(Collections.singletonList(invalid));
 
         assertEquals(Collections.singletonList("evidenceList"), fields(service.reviewPass(task, reviewCommand(99L, false))));
         assertEquals(LabConstants.WORKFLOW_PENDING_REVIEW, task.getWorkflowStatus());
+    }
+
+    @Test
+    void mixedEvidenceAllowsValidProofAndLeavesInvalidEvidencePending() {
+        LabTask task = activeTask(LocalDate.of(2026, 8, 10));
+        TaskSubmitCommand command = completionCommand(LocalDate.of(2026, 8, 9));
+        LabTaskEvidence valid = command.getEvidenceList().get(0);
+        LabTaskEvidence invalid = new LabTaskEvidence();
+        invalid.setEvidenceTitle(" ");
+        invalid.setEvidenceUrl("https://example.invalid/evidence/invalid");
+        command.setEvidenceList(Arrays.asList(valid, invalid));
+
+        assertTrue(service.submitResult(task, command).isEmpty());
+        assertTrue(service.reviewPass(task, reviewCommand(99L, false)).isEmpty());
+
+        LabTaskEvidence approved = task.getEvidenceList().get(0);
+        LabTaskEvidence pending = task.getEvidenceList().get(1);
+        assertEquals(LabConstants.WORKFLOW_CONFIRMED, task.getWorkflowStatus());
+        assertEquals(LabConstants.EVIDENCE_AUDIT_APPROVED, approved.getAuditStatus());
+        assertEquals(Long.valueOf(99L), approved.getAuditorId());
+        assertEquals(LabConstants.EVIDENCE_AUDIT_PENDING, pending.getAuditStatus());
+        assertEquals(null, pending.getAuditorId());
+        assertEquals(null, pending.getAuditTime());
+        assertEquals(null, pending.getAuditComment());
+    }
+
+    @Test
+    void preservesApprovedEvidenceHistoryAcrossReopenAndSecondReview() {
+        LabTask task = pendingOnTimeTask();
+        TaskSubmitCommand firstReview = reviewCommand(99L, false);
+        Date firstReviewTime = dateAtStartOfDay(LocalDate.of(2026, 8, 12));
+        firstReview.setReviewTime(firstReviewTime);
+        firstReview.setEvidenceAuditComment("first approval");
+        assertTrue(service.reviewPass(task, firstReview).isEmpty());
+        assertEquals(LabConstants.WORKFLOW_CONFIRMED, task.getWorkflowStatus());
+        LabTaskEvidence historical = task.getEvidenceList().get(0);
+        assertEquals(LabConstants.EVIDENCE_AUDIT_APPROVED, historical.getAuditStatus());
+        String historicalStatus = historical.getAuditStatus();
+        Long historicalAuditor = historical.getAuditorId();
+        Date historicalTime = historical.getAuditTime();
+        String historicalComment = historical.getAuditComment();
+
+        service.managerReopen(task, 90L, "recheck");
+        TaskSubmitCommand secondSubmission = completionCommand(LocalDate.of(2026, 8, 13));
+        assertTrue(service.submitResult(task, secondSubmission).isEmpty());
+        assertEquals(LabConstants.EVIDENCE_AUDIT_PENDING, task.getEvidenceList().get(1).getAuditStatus());
+        TaskSubmitCommand secondReview = reviewCommand(88L, false);
+        Date secondReviewTime = dateAtStartOfDay(LocalDate.of(2026, 8, 14));
+        secondReview.setReviewTime(secondReviewTime);
+        secondReview.setEvidenceAuditComment("second approval");
+
+        assertTrue(service.reviewPass(task, secondReview).isEmpty());
+
+        LabTaskEvidence retained = task.getEvidenceList().get(0);
+        LabTaskEvidence newlyApproved = task.getEvidenceList().get(1);
+        assertEquals(historicalStatus, retained.getAuditStatus());
+        assertEquals(historicalAuditor, retained.getAuditorId());
+        assertEquals(historicalTime, retained.getAuditTime());
+        assertEquals(historicalComment, retained.getAuditComment());
+        assertEquals(LabConstants.EVIDENCE_AUDIT_APPROVED, newlyApproved.getAuditStatus());
+        assertEquals(Long.valueOf(88L), newlyApproved.getAuditorId());
+        assertEquals(secondReviewTime, newlyApproved.getAuditTime());
+        assertEquals("second approval", newlyApproved.getAuditComment());
     }
 
     @Test

@@ -191,7 +191,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         if (command.getReviewerId() == null) { error(errors, "reviewerId", "审核人不能为空"); }
         required(errors, "reviewerComment", command.getReviewerComment(), "审核意见不能为空");
         if (command.getReviewTime() == null) { error(errors, "reviewTime", "审核时间不能为空"); }
-        if (isCompletion(task.getResultStatus()) && !hasOnlyValidEvidence(task.getEvidenceList())) {
+        if (isCompletion(task.getResultStatus()) && !hasApprovableEvidence(task.getEvidenceList())) {
             error(errors, "evidenceList", "完成结果需要可核验的佐证材料");
         }
         if (LabConstants.RESULT_EXCEEDED.equals(task.getResultStatus()) && !command.isExceededConfirmed()) {
@@ -248,10 +248,12 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
 
     private void verifyEvidence(List<LabTaskEvidence> evidenceList, TaskSubmitCommand command) {
         for (LabTaskEvidence evidence : evidenceList) {
-            evidence.setAuditStatus(LabConstants.EVIDENCE_AUDIT_VERIFIED);
-            evidence.setAuditorId(command.getReviewerId());
-            evidence.setAuditTime(copyDate(command.getReviewTime()));
-            evidence.setAuditComment(command.getEvidenceAuditComment());
+            if (isValidEvidence(evidence) && LabConstants.EVIDENCE_AUDIT_PENDING.equals(evidence.getAuditStatus())) {
+                evidence.setAuditStatus(LabConstants.EVIDENCE_AUDIT_APPROVED);
+                evidence.setAuditorId(command.getReviewerId());
+                evidence.setAuditTime(copyDate(command.getReviewTime()));
+                evidence.setAuditComment(command.getEvidenceAuditComment());
+            }
         }
     }
 
@@ -267,16 +269,22 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         return false;
     }
 
-    private boolean hasOnlyValidEvidence(List<LabTaskEvidence> evidenceList) {
+    private boolean hasApprovableEvidence(List<LabTaskEvidence> evidenceList) {
         if (evidenceList == null || evidenceList.isEmpty()) {
             return false;
         }
         for (LabTaskEvidence evidence : evidenceList) {
-            if (evidence == null || isBlank(evidence.getEvidenceTitle()) || isBlank(evidence.getEvidenceUrl())) {
-                return false;
+            if (isValidEvidence(evidence)
+                    && (LabConstants.EVIDENCE_AUDIT_PENDING.equals(evidence.getAuditStatus())
+                    || LabConstants.EVIDENCE_AUDIT_APPROVED.equals(evidence.getAuditStatus()))) {
+                return true;
             }
         }
-        return true;
+        return false;
+    }
+
+    private boolean isValidEvidence(LabTaskEvidence evidence) {
+        return evidence != null && !isBlank(evidence.getEvidenceTitle()) && !isBlank(evidence.getEvidenceUrl());
     }
 
     private void validateCoordination(LabTask task, List<FieldValidationError> errors) {
