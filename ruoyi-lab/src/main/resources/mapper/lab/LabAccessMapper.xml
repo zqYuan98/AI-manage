@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabAccessMapper">
+    <resultMap id="LabAccessContextResult" type="com.ailab.system.dto.LabAccessContext">
+        <result property="userId" column="user_id"/><result property="memberId" column="member_id"/>
+        <result property="deptId" column="dept_id"/><result property="roleKey" column="role_key"/>
+        <result property="bizLine" column="biz_line"/>
+    </resultMap>
+    <select id="selectAccessContext" parameterType="long" resultMap="LabAccessContextResult">
+        select u.user_id,lm.id member_id,u.dept_id,r.role_key,lm.biz_line
+        from sys_user u
+        join lab_member lm on lm.user_id=u.user_id and lm.member_status='ACTIVE' and lm.del_flag='0'
+        join sys_user_role ur on ur.user_id=u.user_id
+        join sys_role r on r.role_id=ur.role_id and r.status='0' and r.del_flag='0'
+        where u.user_id=#{userId} and u.status='0' and u.del_flag='0' and r.role_key in ('lab_manager','lab_lead','lab_member')
+        order by case r.role_key when 'lab_manager' then 1 when 'lab_lead' then 2 else 3 end
+        limit 1
+    </select>
+</mapper>

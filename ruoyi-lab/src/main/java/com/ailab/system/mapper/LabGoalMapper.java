@@ -7,7 +7,9 @@ import org.apache.ibatis.annotations.Param;
 public interface LabGoalMapper {
     List<LabGoal> selectGoalList(LabGoal query);
     LabGoal selectGoalById(Long id);
+    LabGoal selectGoalForUpdate(Long id);
     List<LabGoal> selectChildrenByParentId(Long parentId);
+    List<LabGoal> selectChildrenByParentIdForUpdate(Long parentId);
     int insertGoal(LabGoal goal);
     int updateGoal(LabGoal goal);
     int deleteGoal(@Param("id") Long id, @Param("version") Integer version, @Param("updateBy") String updateBy);

@@ -50,9 +50,18 @@
         select <include refid="goalColumns"/> from lab_goal g where g.id=#{id} and g.del_flag='0'
     </select>
 
+    <select id="selectGoalForUpdate" parameterType="long" resultMap="LabGoalResult">
+        select <include refid="goalColumns"/> from lab_goal g where g.id=#{id} and g.del_flag='0' for update
+    </select>
+
     <select id="selectChildrenByParentId" parameterType="long" resultMap="LabGoalResult">
         select <include refid="goalColumns"/> from lab_goal g
         where g.parent_id=#{parentId} and g.del_flag='0' order by g.period,g.id
+    </select>
+
+    <select id="selectChildrenByParentIdForUpdate" parameterType="long" resultMap="LabGoalResult">
+        select <include refid="goalColumns"/> from lab_goal g
+        where g.parent_id=#{parentId} and g.del_flag='0' order by g.id for update
     </select>
 
     <insert id="insertGoal" parameterType="com.ailab.system.domain.LabGoal" useGeneratedKeys="true" keyProperty="id">

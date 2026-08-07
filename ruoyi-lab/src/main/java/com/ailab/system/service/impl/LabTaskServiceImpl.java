@@ -13,6 +13,7 @@ import com.ailab.system.mapper.LabGoalMapper;
 import com.ailab.system.mapper.LabTaskEvidenceMapper;
 import com.ailab.system.mapper.LabTaskMapper;
 import com.ailab.system.service.LabTaskService;
+import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.TaskWorkflowService;
 import com.ailab.system.util.LabPeriodUtils;
 import com.ruoyi.common.annotation.DataScope;
@@ -21,6 +22,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,41 +37,47 @@ public class LabTaskServiceImpl implements LabTaskService {
     private final LabTaskEvidenceMapper evidenceMapper;
     private final LabGoalMapper goalMapper;
     private final TaskWorkflowService workflowService;
+    private final LabAccessService accessService;
     private final Clock clock;
 
     @Autowired
     public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
-            LabGoalMapper goalMapper, TaskWorkflowService workflowService) {
-        this(taskMapper, evidenceMapper, goalMapper, workflowService, Clock.systemDefaultZone());
+            LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService) {
+        this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService, Clock.systemDefaultZone());
     }
 
     public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
-            LabGoalMapper goalMapper, TaskWorkflowService workflowService, Clock clock) {
+            LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService, Clock clock) {
         this.taskMapper = taskMapper;
         this.evidenceMapper = evidenceMapper;
         this.goalMapper = goalMapper;
         this.workflowService = workflowService;
+        this.accessService = accessService;
         this.clock = clock;
     }
 
     @Override
     @DataScope(deptAlias = "t", userAlias = "u", permission = "lab:task:list")
-    public List<LabTask> listTasks(LabTask query) {
-        return taskMapper.selectTaskList(query == null ? new LabTask() : query);
+    public List<LabTask> listTasks(LabTask query, Long actorId) {
+        LabTask scoped = query == null ? new LabTask() : query;
+        accessService.scopeTaskQuery(scoped, actorId);
+        return taskMapper.selectTaskList(scoped);
     }
 
     @Override
-    public LabTask getTask(Long id) {
-        LabTask task = taskMapper.selectTaskById(id);
-        if (task == null) throw new ServiceException("Task does not exist");
-        task.setEvidenceList(evidenceMapper.selectEvidenceByTaskId(id));
+    public LabTask getTask(Long id, Long actorId) {
+        LabTask task = loadTask(id);
+        accessService.requireTaskRead(task, actorId);
         return task;
     }
 
     @Override
     @Transactional
     public int createTask(LabTask task, Long actorId) {
-        validateTaskConnections(task);
+        lockTaskHierarchyForCreate(task);
+        validateTaskConnections(task, actorId);
+        accessService.requireTaskWrite(task, actorId);
+        lockKeyTaskCollectionsForCreate(task);
         task.setId(null);
         task.setWorkflowStatus(LabConstants.WORKFLOW_DRAFT);
         task.setResultStatus(LabConstants.RESULT_DOING);
@@ -89,11 +98,18 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public int updateTask(LabTask task, Long actorId) {
         requireIdentity(task);
+        LabTask snapshot = taskMapper.selectTaskById(task.getId());
+        if (snapshot == null) throw new ServiceException("Task does not exist");
+        lockKeyTaskCollectionsForUpdate(snapshot, task);
+        lockTaskHierarchyForUpdate(snapshot, task);
         LabTask stored = taskMapper.selectTaskById(task.getId());
-        if (stored == null) throw new ServiceException("Task does not exist");
-        if (!stored.getVersion().equals(task.getVersion())) throw optimisticConflict();
-        requireMutable(stored);
-        validateTaskConnections(task);
+        if (stored == null || !stored.getVersion().equals(task.getVersion())) throw optimisticConflict();
+        requireContentMutable(stored);
+        accessService.requireTaskWrite(stored, actorId);
+        accessService.requireTaskWrite(task, actorId);
+        requireStableActivatedFields(stored, task);
+        requireMonthChildrenStable(stored, task);
+        validateTaskConnections(task, actorId);
         preserveServerState(task, stored);
         task.setUpdateBy(actor(actorId));
         if (taskMapper.updateTask(task) != 1) throw optimisticConflict();
@@ -103,11 +119,18 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Override
     @Transactional
     public int deleteTask(Long id, Integer version, Long actorId) {
+        LabTask snapshot = taskMapper.selectTaskById(id);
+        if (snapshot == null) throw new ServiceException("Task does not exist");
+        lockKeyTaskCollectionsForDelete(snapshot);
+        lockTaskHierarchyForDelete(snapshot);
         LabTask stored = taskMapper.selectTaskById(id);
-        if (stored == null) throw new ServiceException("Task does not exist");
-        if (version == null || !version.equals(stored.getVersion())) throw optimisticConflict();
-        requireMutable(stored);
-        if (!taskMapper.selectTasksByParentId(id).isEmpty()) throw new ServiceException("Delete weekly child tasks first");
+        if (stored == null || version == null || !version.equals(stored.getVersion())) throw optimisticConflict();
+        requireContentMutable(stored);
+        accessService.requireTaskWrite(stored, actorId);
+        if (!LabConstants.WORKFLOW_DRAFT.equals(stored.getWorkflowStatus())) {
+            throw new ServiceException("Only draft tasks can be deleted");
+        }
+        if (!taskMapper.selectTasksByParentIdForUpdate(id).isEmpty()) throw new ServiceException("Delete weekly child tasks first");
         if (taskMapper.deleteTask(id, version, actor(actorId)) != 1) throw optimisticConflict();
         return 1;
     }
@@ -117,7 +140,9 @@ public class LabTaskServiceImpl implements LabTaskService {
     public int activateMonthlyPlan(Long ownerId, String period, Long actorId) {
         if (ownerId == null || blank(period)) throw new ServiceException("Owner and month period are required");
         LabPeriodUtils.parseMonth(period);
-        List<LabTask> tasks = taskMapper.selectKeyMonthTasksByOwnerPeriod(ownerId, period);
+        if (taskMapper.lockMemberForUpdate(ownerId) == null) throw new ServiceException("Task owner is not an active lab member");
+        List<LabTask> tasks = taskMapper.selectKeyMonthTasksByOwnerPeriodForUpdate(ownerId, period);
+        for (LabTask task : tasks) { requireUnlocked(task); accessService.requireTaskWrite(task, actorId); }
         BigDecimal total = BigDecimal.ZERO;
         for (LabTask task : tasks) total = total.add(zero(task.getPerfWeight()));
         if (tasks.isEmpty() || total.compareTo(ONE_HUNDRED) != 0) {
@@ -138,6 +163,8 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public void activateTask(Long id, Integer version, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        requireUnlocked(task);
+        accessService.requireTaskWrite(task, actorId);
         if (!LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel())) {
             throw new ServiceException("Monthly key tasks must be activated through owner-period plan activation");
         }
@@ -155,6 +182,8 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public void submitResult(Long id, Integer version, TaskSubmitCommand command, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        requireUnlocked(task);
+        accessService.requireTaskWrite(task, actorId);
         Long actorMemberId = member(actorId);
         requireOwner(task, actorMemberId);
         requireValid(workflowService.submitResult(task, command, actorMemberId));
@@ -171,6 +200,8 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public void withdrawResult(Long id, Integer version, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        requireUnlocked(task);
+        accessService.requireTaskWrite(task, actorId);
         requireOwner(task, member(actorId));
         workflowService.withdraw(task);
         saveWorkflowTask(task, actorId);
@@ -180,6 +211,8 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public void reviewPass(Long id, Integer version, TaskSubmitCommand command, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        requireUnlocked(task);
+        accessService.requireTaskReview(task, actorId);
         Long actorMemberId = member(actorId);
         requireValid(workflowService.reviewPass(task, command, actorMemberId));
         for (Long evidenceId : command.getApprovedEvidenceIds()) {
@@ -195,6 +228,8 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public void reviewReturn(Long id, Integer version, TaskSubmitCommand command, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        requireUnlocked(task);
+        accessService.requireTaskReview(task, actorId);
         workflowService.reviewReturn(task, command, member(actorId));
         saveWorkflowTask(task, actorId);
     }
@@ -203,34 +238,42 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public void reopenTask(Long id, Integer version, String reason, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        requireUnlocked(task);
+        accessService.requireManager(actorId);
         workflowService.managerReopen(task, member(actorId), reason);
         task.setRemark(reason);
         saveWorkflowTask(task, actorId);
     }
 
     @Override
-    public BigDecimal calculateMonthProgress(Long monthTaskId) {
+    public BigDecimal calculateMonthProgress(Long monthTaskId, Long actorId) {
         LabTask month = taskMapper.selectTaskById(monthTaskId);
         if (month == null || !LabConstants.TASK_LEVEL_MONTH.equals(month.getTaskLevel())) {
             throw new ServiceException("Monthly progress requires a month task");
         }
+        accessService.requireTaskRead(month, actorId);
         List<LabTask> weeks = taskMapper.selectTasksByParentId(monthTaskId);
         if (weeks.isEmpty()) return BigDecimal.ZERO.setScale(2);
-        int completed = 0;
+        int confirmed = 0, completed = 0;
         for (LabTask week : weeks) {
-            if (LabConstants.WORKFLOW_CONFIRMED.equals(week.getWorkflowStatus()) && isCompleted(week.getResultStatus())) completed++;
+            if (LabConstants.WORKFLOW_CONFIRMED.equals(week.getWorkflowStatus())) {
+                confirmed++;
+                if (isCompleted(week.getResultStatus())) completed++;
+            }
         }
+        if (confirmed == 0) return BigDecimal.ZERO.setScale(2);
         return new BigDecimal(completed).multiply(ONE_HUNDRED)
-                .divide(new BigDecimal(weeks.size()), 2, RoundingMode.HALF_UP);
+                .divide(new BigDecimal(confirmed), 2, RoundingMode.HALF_UP);
     }
 
-    @Override public List<LabTaskEvidence> listEvidence(Long taskId) { getTask(taskId); return evidenceMapper.selectEvidenceByTaskId(taskId); }
+    @Override public List<LabTaskEvidence> listEvidence(Long taskId, Long actorId) { getTask(taskId, actorId); return evidenceMapper.selectEvidenceByTaskId(taskId); }
 
     @Override
     @Transactional
     public LabTaskEvidence addEvidence(Long taskId, LabTaskEvidence evidence, Long actorId) {
-        LabTask task = getTask(taskId);
-        if (LabConstants.WORKFLOW_CONFIRMED.equals(task.getWorkflowStatus())) throw new ServiceException("Confirmed task evidence is immutable");
+        LabTask task = loadTask(taskId);
+        requireContentMutable(task);
+        accessService.requireTaskWrite(task, actorId);
         if (evidence == null || blank(evidence.getEvidenceType()) || blank(evidence.getEvidenceTitle()) || blank(evidence.getEvidenceUrl())) {
             throw new ServiceException("Evidence type, title and URL are required");
         }
@@ -247,29 +290,33 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Override
     @Transactional
     public int deleteEvidence(Long taskId, Long evidenceId, Long actorId) {
-        requireMutable(getTask(taskId));
+        LabTask task = loadTask(taskId);
+        requireContentMutable(task);
+        accessService.requireTaskWrite(task, actorId);
         if (evidenceMapper.deleteEvidence(evidenceId, taskId, actor(actorId)) != 1) {
             throw new ServiceException("Only pending evidence belonging to this task can be deleted");
         }
         return 1;
     }
 
-    @Override public List<LabTaskQualityGate> listQualityGates(Long taskId) { getTask(taskId); return taskMapper.selectQualityGates(taskId); }
+    @Override public List<LabTaskQualityGate> listQualityGates(Long taskId, Long actorId) { getTask(taskId, actorId); return taskMapper.selectQualityGates(taskId); }
 
     @Override
-    public LabTaskQualityGate getQualityGate(Long id) {
+    public LabTaskQualityGate getQualityGate(Long id, Long actorId) {
         LabTaskQualityGate gate = taskMapper.selectQualityGateById(id);
         if (gate == null) throw new ServiceException("Quality gate does not exist");
+        accessService.requireTaskRead(loadTask(gate.getTaskId()), actorId);
         return gate;
     }
 
     @Override
     @Transactional
     public LabTaskQualityGate addQualityGate(LabTaskQualityGate gate, Long actorId) {
-        validateGate(gate); getTask(gate.getTaskId());
+        validateGate(gate); LabTask task = loadTask(gate.getTaskId()); requireContentMutable(task); accessService.requireTaskWrite(task, actorId);
         gate.setId(null); gate.setGateStatus("PENDING"); gate.setCheckerId(null); gate.setCheckTime(null);
         gate.setCheckResult(null); gate.setDelFlag(LabConstants.NO); gate.setCreateBy(actor(actorId));
-        taskMapper.insertQualityGate(gate); return gate;
+        if (taskMapper.insertQualityGate(gate) != 1) throw new ServiceException("Quality gate could not be added because the task changed or became read-only");
+        return gate;
     }
 
     @Override
@@ -278,10 +325,12 @@ public class LabTaskServiceImpl implements LabTaskService {
         validateGate(gate);
         LabTaskQualityGate stored = taskMapper.selectQualityGateById(gate.getId());
         if (stored == null || "PASSED".equals(stored.getGateStatus())) throw new ServiceException("Passed or missing quality gate cannot be edited");
+        LabTask task = loadTask(stored.getTaskId()); requireContentMutable(task); accessService.requireTaskWrite(task, actorId);
         gate.setTaskId(stored.getTaskId());
         gate.setGateStatus(stored.getGateStatus()); gate.setCheckerId(stored.getCheckerId()); gate.setCheckTime(stored.getCheckTime());
         gate.setCheckResult(stored.getCheckResult()); gate.setDelFlag(stored.getDelFlag()); gate.setUpdateBy(actor(actorId));
-        return taskMapper.updateQualityGate(gate);
+        if (taskMapper.updateQualityGate(gate) != 1) throw new ServiceException("Quality gate changed or its task became read-only");
+        return 1;
     }
 
     @Override
@@ -289,7 +338,9 @@ public class LabTaskServiceImpl implements LabTaskService {
     public int deleteQualityGate(Long id, Long actorId) {
         LabTaskQualityGate stored = taskMapper.selectQualityGateById(id);
         if (stored == null || "PASSED".equals(stored.getGateStatus())) throw new ServiceException("Passed or missing quality gate cannot be deleted");
-        return taskMapper.deleteQualityGate(id, actor(actorId));
+        LabTask task = loadTask(stored.getTaskId()); requireContentMutable(task); accessService.requireTaskWrite(task, actorId);
+        if (taskMapper.deleteQualityGate(id, actor(actorId)) != 1) throw new ServiceException("Quality gate changed or its task became read-only");
+        return 1;
     }
 
     @Override
@@ -297,11 +348,12 @@ public class LabTaskServiceImpl implements LabTaskService {
     public void passQualityGate(Long gateId, Long approvedEvidenceId, String result, Long actorId) {
         LabTaskQualityGate gate = taskMapper.selectQualityGateById(gateId);
         LabTaskEvidence evidence = evidenceMapper.selectEvidenceById(approvedEvidenceId);
+        if (gate != null) { LabTask task = loadTask(gate.getTaskId()); requireGatePassAllowed(task); accessService.requireTaskReview(task, actorId); }
         if (gate == null || evidence == null || !gate.getTaskId().equals(evidence.getTaskId())
                 || !LabConstants.EVIDENCE_AUDIT_APPROVED.equals(evidence.getAuditStatus()) || "2".equals(evidence.getDelFlag())) {
             throw new ServiceException("Quality gate requires explicit approved evidence from the same task");
         }
-        if (taskMapper.markQualityGatePassed(gateId, member(actorId), Date.from(clock.instant()), result, actor(actorId)) != 1) {
+        if (taskMapper.markQualityGatePassed(gateId, approvedEvidenceId, member(actorId), Date.from(clock.instant()), result, actor(actorId)) != 1) {
             throw new ServiceException("Quality gate is already passed or changed");
         }
     }
@@ -310,7 +362,8 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public LabTaskBlockEvent blockTask(Long taskId, Integer version, String type, String reason, Long actorId) {
         LabTask task = loadVersioned(taskId, version);
-        requireMutable(task);
+        requireContentMutable(task);
+        accessService.requireTaskWrite(task, actorId);
         if (LabConstants.YES.equals(task.getBlockFlag()) || taskMapper.selectOpenBlockEvent(taskId) != null) {
             throw new ServiceException("Task is already blocked");
         }
@@ -318,6 +371,7 @@ public class LabTaskServiceImpl implements LabTaskService {
         Date now = Date.from(clock.instant());
         task.setBlockFlag(LabConstants.YES); task.setBlockStartTime(now); saveWorkflowTask(task, actorId);
         LabTaskBlockEvent event = new LabTaskBlockEvent(); event.setTaskId(taskId); event.setBlockType(type);
+        event.setEpisodeNo(taskMapper.selectNextBlockEpisodeNo(taskId));
         event.setBlockReason(reason); event.setBlockStartTime(now); event.setBlockStatus("OPEN");
         event.setDelFlag(LabConstants.NO); event.setCreateBy(actor(actorId)); taskMapper.insertBlockEvent(event); return event;
     }
@@ -326,6 +380,8 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public void unblockTask(Long taskId, Integer version, String resolution, Long actorId) {
         LabTask task = loadVersioned(taskId, version);
+        requireContentMutable(task);
+        accessService.requireTaskWrite(task, actorId);
         LabTaskBlockEvent event = taskMapper.selectOpenBlockEvent(taskId);
         if (!LabConstants.YES.equals(task.getBlockFlag()) || event == null) throw new ServiceException("Task is not blocked");
         if (blank(resolution)) throw new ServiceException("Block resolution is required");
@@ -336,11 +392,18 @@ public class LabTaskServiceImpl implements LabTaskService {
         }
     }
 
-    @Override public List<LabTaskBlockEvent> listBlockEvents(Long taskId) { getTask(taskId); return taskMapper.selectBlockEvents(taskId); }
+    @Override public List<LabTaskBlockEvent> listBlockEvents(Long taskId, Long actorId) { getTask(taskId, actorId); return taskMapper.selectBlockEvents(taskId); }
 
     private LabTask loadVersioned(Long id, Integer version) {
-        LabTask task = getTask(id);
+        LabTask task = loadTask(id);
         if (version == null || !version.equals(task.getVersion())) throw optimisticConflict();
+        return task;
+    }
+
+    private LabTask loadTask(Long id) {
+        LabTask task = taskMapper.selectTaskById(id);
+        if (task == null) throw new ServiceException("Task does not exist");
+        task.setEvidenceList(evidenceMapper.selectEvidenceByTaskId(id));
         return task;
     }
 
@@ -349,8 +412,10 @@ public class LabTaskServiceImpl implements LabTaskService {
         if (taskMapper.updateTask(task) != 1) throw optimisticConflict();
     }
 
-    private void validateTaskConnections(LabTask task) {
+    private void validateTaskConnections(LabTask task, Long actorId) {
         if (task == null || blank(task.getTaskLevel()) || blank(task.getPeriod())) throw new ServiceException("Task level and period are required");
+        requireWeight("Performance weight", task.getPerfWeight());
+        requireWeight("Goal weight", task.getGoalWeight());
         String ownerBizLine = task.getOwnerId() == null ? null : taskMapper.selectMemberBizLineById(task.getOwnerId());
         if (ownerBizLine == null || !ownerBizLine.equals(task.getBizLine())) {
             throw new ServiceException("Task business line must match the active owner's responsible scope");
@@ -358,9 +423,12 @@ public class LabTaskServiceImpl implements LabTaskService {
         if (LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel())) {
             LabTask parent = taskMapper.selectTaskById(task.getParentId());
             if (parent == null || !LabConstants.TASK_LEVEL_MONTH.equals(parent.getTaskLevel())) throw new ServiceException("Weekly task must belong to a month task");
+            accessService.requireTaskRead(parent, actorId);
             if (!same(parent.getGoalId(), task.getGoalId()) || !same(parent.getMilestoneId(), task.getMilestoneId())) {
                 throw new ServiceException("Weekly task must inherit annual goal and milestone links from its month task");
             }
+            if (!same(parent.getBizLine(), task.getBizLine())) throw new ServiceException("Weekly task must use its month task business line");
+            if (LabConstants.YES.equals(parent.getPeriodLockFlag())) throw new ServiceException("Weekly task cannot change a period-locked month plan");
             LabPeriodUtils.PeriodRange month = LabPeriodUtils.parseMonth(parent.getPeriod());
             LabPeriodUtils.PeriodRange week = LabPeriodUtils.parseWeek(task.getPeriod());
             if (week.getStartDate().isBefore(month.getStartDate()) || week.getEndDate().isAfter(month.getEndDate())) {
@@ -369,6 +437,9 @@ public class LabTaskServiceImpl implements LabTaskService {
             return;
         }
         if (!LabConstants.TASK_LEVEL_MONTH.equals(task.getTaskLevel())) throw new ServiceException("Task level must be month or week");
+        if (task.getParentId() != null && task.getParentId() != 0L) {
+            throw new ServiceException("Month task cannot have a task parent");
+        }
         LabPeriodUtils.parseMonth(task.getPeriod());
         LabGoal annual = goalMapper.selectGoalById(task.getGoalId());
         LabGoal milestone = goalMapper.selectGoalById(task.getMilestoneId());
@@ -402,12 +473,168 @@ public class LabTaskServiceImpl implements LabTaskService {
         if (task == null || task.getId() == null || task.getVersion() == null) throw new ServiceException("Task id and version are required");
     }
 
-    private void requireMutable(LabTask task) {
-        if (LabConstants.WORKFLOW_CONFIRMED.equals(task.getWorkflowStatus())) {
-            throw new ServiceException("Confirmed task is immutable; reopen it before editing");
+    private void requireContentMutable(LabTask task) {
+        requireUnlocked(task);
+        if (LabConstants.WORKFLOW_PENDING_REVIEW.equals(task.getWorkflowStatus())
+                || LabConstants.WORKFLOW_CONFIRMED.equals(task.getWorkflowStatus())) {
+            throw new ServiceException("Pending-review and confirmed task content is immutable; withdraw or reopen it first");
         }
+    }
+
+    private void requireGatePassAllowed(LabTask task) {
+        requireUnlocked(task);
+        if (!LabConstants.WORKFLOW_CONFIRMED.equals(task.getWorkflowStatus())) {
+            throw new ServiceException("Quality gate can pass only after task review confirms its approved evidence");
+        }
+    }
+
+    private void requireUnlocked(LabTask task) {
         if (LabConstants.YES.equals(task.getPeriodLockFlag())) {
             throw new ServiceException("Period-locked task is read-only");
+        }
+    }
+
+    private void requireStableActivatedFields(LabTask stored, LabTask proposed) {
+        if (LabConstants.WORKFLOW_DRAFT.equals(stored.getWorkflowStatus())) {
+            LabGoal milestone = goalMapper.selectGoalById(stored.getMilestoneId());
+            if (milestone != null && "ACTIVE".equals(milestone.getStatus())
+                    && !same(stored.getGoalWeight(), proposed.getGoalWeight())) {
+                throw new ServiceException("Goal weight is immutable after milestone activation");
+            }
+            return;
+        }
+        if (!same(stored.getPlanDate(), proposed.getPlanDate()) || !same(stored.getGoalId(), proposed.getGoalId())
+                || !same(stored.getMilestoneId(), proposed.getMilestoneId()) || !same(stored.getPerfWeight(), proposed.getPerfWeight())
+                || !same(stored.getGoalWeight(), proposed.getGoalWeight()) || !same(stored.getOwnerId(), proposed.getOwnerId())
+                || !same(stored.getPeriod(), proposed.getPeriod()) || !same(stored.getParentId(), proposed.getParentId())
+                || !same(stored.getTaskLevel(), proposed.getTaskLevel()) || !same(stored.getBizLine(), proposed.getBizLine())
+                || !same(stored.getTaskType(), proposed.getTaskType()) || !same(stored.getDeptId(), proposed.getDeptId())) {
+            throw new ServiceException("Activated task planning links, owner, period and weights are immutable");
+        }
+    }
+
+    private void requireMonthChildrenStable(LabTask stored, LabTask proposed) {
+        if (!LabConstants.TASK_LEVEL_MONTH.equals(stored.getTaskLevel()) || taskMapper.selectTasksByParentIdForUpdate(stored.getId()).isEmpty()) return;
+        if (!same(stored.getGoalId(), proposed.getGoalId()) || !same(stored.getMilestoneId(), proposed.getMilestoneId())
+                || !same(stored.getOwnerId(), proposed.getOwnerId()) || !same(stored.getPeriod(), proposed.getPeriod())
+                || !same(stored.getParentId(), proposed.getParentId()) || !same(stored.getTaskLevel(), proposed.getTaskLevel())
+                || !same(stored.getBizLine(), proposed.getBizLine()) || !same(stored.getDeptId(), proposed.getDeptId())
+                || !same(stored.getTaskType(), proposed.getTaskType())) {
+            throw new ServiceException("Month task hierarchy and inherited links are immutable while weekly children exist");
+        }
+    }
+
+    private void lockKeyTaskCollectionsForCreate(LabTask task) {
+        if (!isKeyMonth(task)) return;
+        LabGoal milestone = goalMapper.selectGoalForUpdate(task.getMilestoneId());
+        if (milestone == null || !"DRAFT".equals(milestone.getStatus())) {
+            throw new ServiceException("Key month membership is frozen after milestone activation");
+        }
+        lockMember(task.getOwnerId());
+        requirePlanCollectionDraft(task.getOwnerId(), task.getPeriod());
+    }
+
+    private void lockTaskHierarchyForCreate(LabTask task) {
+        if (task != null && LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel()) && task.getParentId() != null) {
+            taskMapper.selectTaskForUpdate(task.getParentId());
+        }
+    }
+
+    private void lockTaskHierarchyForUpdate(LabTask stored, LabTask proposed) {
+        List<Long> ids = new ArrayList<Long>();
+        addHierarchyLockId(ids, stored);
+        addHierarchyLockId(ids, proposed);
+        Collections.sort(ids);
+        for (Long id : ids) taskMapper.selectTaskForUpdate(id);
+    }
+
+    private void lockTaskHierarchyForDelete(LabTask task) {
+        List<Long> ids = new ArrayList<Long>();
+        addHierarchyLockId(ids, task);
+        Collections.sort(ids);
+        for (Long id : ids) taskMapper.selectTaskForUpdate(id);
+    }
+
+    private void addHierarchyLockId(List<Long> ids, LabTask task) {
+        if (task == null) return;
+        Long id = LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel()) ? task.getParentId() : task.getId();
+        if (id != null && !ids.contains(id)) ids.add(id);
+    }
+
+    private void lockKeyTaskCollectionsForDelete(LabTask task) {
+        if (!isKeyMonth(task)) return;
+        LabGoal milestone = goalMapper.selectGoalForUpdate(task.getMilestoneId());
+        if (milestone == null || !"DRAFT".equals(milestone.getStatus())) {
+            throw new ServiceException("Key month membership is frozen after milestone activation");
+        }
+        lockMember(task.getOwnerId());
+        requirePlanCollectionDraft(task.getOwnerId(), task.getPeriod());
+    }
+
+    private void lockKeyTaskCollectionsForUpdate(LabTask stored, LabTask proposed) {
+        boolean storedKeyMonth = isKeyMonth(stored);
+        boolean proposedKeyMonth = isKeyMonth(proposed);
+        if (!storedKeyMonth && !proposedKeyMonth) return;
+        List<Long> milestoneIds = distinctSorted(stored.getMilestoneId(), proposed.getMilestoneId());
+        List<LabGoal> milestones = new ArrayList<LabGoal>();
+        for (Long milestoneId : milestoneIds) milestones.add(goalMapper.selectGoalForUpdate(milestoneId));
+        List<Long> ownerIds = distinctSorted(stored.getOwnerId(), proposed.getOwnerId());
+        for (Long ownerId : ownerIds) lockMember(ownerId);
+
+        boolean milestoneCollectionChanges = storedKeyMonth != proposedKeyMonth
+                || !same(stored.getMilestoneId(), proposed.getMilestoneId())
+                || !same(stored.getGoalWeight(), proposed.getGoalWeight());
+        if (milestoneCollectionChanges) {
+            for (LabGoal milestone : milestones) {
+                if (milestone == null || !"DRAFT".equals(milestone.getStatus())) {
+                    throw new ServiceException("Key month weights and membership are frozen after milestone activation");
+                }
+            }
+        }
+
+        boolean planCollectionChanges = storedKeyMonth != proposedKeyMonth
+                || !same(stored.getOwnerId(), proposed.getOwnerId()) || !same(stored.getPeriod(), proposed.getPeriod())
+                || !same(stored.getPerfWeight(), proposed.getPerfWeight());
+        if (planCollectionChanges) {
+            if (storedKeyMonth) requirePlanCollectionDraft(stored.getOwnerId(), stored.getPeriod());
+            if (proposedKeyMonth && (!storedKeyMonth || !same(stored.getOwnerId(), proposed.getOwnerId())
+                    || !same(stored.getPeriod(), proposed.getPeriod()))) {
+                requirePlanCollectionDraft(proposed.getOwnerId(), proposed.getPeriod());
+            }
+        }
+    }
+
+    private void requirePlanCollectionDraft(Long ownerId, String period) {
+        for (LabTask sibling : taskMapper.selectKeyMonthTasksByOwnerPeriodForUpdate(ownerId, period)) {
+            if (LabConstants.WORKFLOW_ACTIVE.equals(sibling.getWorkflowStatus())
+                    || LabConstants.WORKFLOW_PENDING_REVIEW.equals(sibling.getWorkflowStatus())
+                    || LabConstants.WORKFLOW_CONFIRMED.equals(sibling.getWorkflowStatus())) {
+                throw new ServiceException("Monthly key-task membership and weights are frozen after plan activation");
+            }
+        }
+    }
+
+    private void lockMember(Long ownerId) {
+        if (ownerId == null || taskMapper.lockMemberForUpdate(ownerId) == null) {
+            throw new ServiceException("Task owner is not an active lab member");
+        }
+    }
+
+    private List<Long> distinctSorted(Long first, Long second) {
+        List<Long> ids = new ArrayList<Long>();
+        if (first != null) ids.add(first);
+        if (second != null && !ids.contains(second)) ids.add(second);
+        Collections.sort(ids);
+        return ids;
+    }
+
+    private boolean isKeyMonth(LabTask task) {
+        return task != null && LabConstants.TASK_LEVEL_MONTH.equals(task.getTaskLevel()) && "key".equals(task.getTaskType());
+    }
+
+    private void requireWeight(String label, BigDecimal value) {
+        if (value != null && (value.signum() < 0 || value.compareTo(ONE_HUNDRED) > 0)) {
+            throw new ServiceException(label + " must be between 0 and 100");
         }
     }
 
@@ -416,10 +643,7 @@ public class LabTaskServiceImpl implements LabTaskService {
     }
 
     private Long member(Long userId) {
-        if (userId == null) throw new ServiceException("Authenticated actor is required");
-        Long memberId = taskMapper.selectMemberIdByUserId(userId);
-        if (memberId == null) throw new ServiceException("Authenticated user is not an active lab member");
-        return memberId;
+        return accessService.context(userId).getMemberId();
     }
 
     private void requireValid(List<FieldValidationError> errors) {

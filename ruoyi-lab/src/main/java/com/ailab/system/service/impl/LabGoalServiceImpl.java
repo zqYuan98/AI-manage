@@ -6,11 +6,12 @@ import com.ailab.system.domain.LabTask;
 import com.ailab.system.mapper.LabGoalMapper;
 import com.ailab.system.mapper.LabTaskMapper;
 import com.ailab.system.service.LabGoalService;
-import com.ruoyi.common.annotation.DataScope;
+import com.ailab.system.service.LabAccessService;
 import com.ruoyi.common.exception.ServiceException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,21 +23,23 @@ public class LabGoalServiceImpl implements LabGoalService {
     private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
     private final LabGoalMapper goalMapper;
     private final LabTaskMapper taskMapper;
+    private final LabAccessService accessService;
 
-    public LabGoalServiceImpl(LabGoalMapper goalMapper, LabTaskMapper taskMapper) {
+    public LabGoalServiceImpl(LabGoalMapper goalMapper, LabTaskMapper taskMapper, LabAccessService accessService) {
         this.goalMapper = goalMapper;
         this.taskMapper = taskMapper;
+        this.accessService = accessService;
     }
 
     @Override
-    @DataScope(deptAlias = "u", userAlias = "u", permission = "lab:goal:list")
-    public List<LabGoal> listGoals(LabGoal query) {
+    public List<LabGoal> listGoals(LabGoal query, Long actorId) {
+        accessService.requireGoalRead(actorId);
         return goalMapper.selectGoalList(query == null ? new LabGoal() : query);
     }
 
     @Override
-    @DataScope(deptAlias = "u", userAlias = "u", permission = "lab:goal:list")
-    public List<LabGoal> goalTree(LabGoal query) {
+    public List<LabGoal> goalTree(LabGoal query, Long actorId) {
+        accessService.requireGoalRead(actorId);
         List<LabGoal> flat = goalMapper.selectGoalList(query == null ? new LabGoal() : query);
         Map<Long, LabGoal> index = new LinkedHashMap<Long, LabGoal>();
         for (LabGoal goal : flat) {
@@ -56,7 +59,12 @@ public class LabGoalServiceImpl implements LabGoalService {
     }
 
     @Override
-    public LabGoal getGoal(Long id) {
+    public LabGoal getGoal(Long id, Long actorId) {
+        accessService.requireGoalRead(actorId);
+        return loadGoal(id);
+    }
+
+    private LabGoal loadGoal(Long id) {
         LabGoal goal = goalMapper.selectGoalById(id);
         if (goal == null) throw new ServiceException("Goal does not exist");
         return goal;
@@ -65,7 +73,12 @@ public class LabGoalServiceImpl implements LabGoalService {
     @Override
     @Transactional
     public int createGoal(LabGoal goal, Long actorId) {
+        LabGoal lockedParent = lockNewGoalParent(goal);
         validateGoal(goal);
+        if (lockedParent != null && !"DRAFT".equals(lockedParent.getStatus())) {
+            throw new ServiceException("Quarter membership is frozen after annual goal activation");
+        }
+        accessService.requireGoalWrite(goal, actorId);
         goal.setId(null);
         goal.setStatus("DRAFT");
         goal.setProgressRate(BigDecimal.ZERO);
@@ -81,7 +94,14 @@ public class LabGoalServiceImpl implements LabGoalService {
         if (goal == null || goal.getId() == null || goal.getVersion() == null) {
             throw new ServiceException("Goal id and version are required");
         }
-        LabGoal stored = getGoal(goal.getId());
+        LabGoal snapshot = loadGoal(goal.getId());
+        lockGoalParents(snapshot.getParentId(), goal.getParentId());
+        LabGoal stored = goalMapper.selectGoalForUpdate(goal.getId());
+        if (stored == null || !stored.getVersion().equals(goal.getVersion())) throw optimisticConflict();
+        accessService.requireGoalWrite(stored, actorId);
+        accessService.requireGoalWrite(goal, actorId);
+        requireStableStructure(stored, goal);
+        requireStableWeight(stored, goal);
         validateGoal(goal);
         goal.setStatus(stored.getStatus());
         goal.setProgressRate(stored.getProgressRate());
@@ -94,8 +114,22 @@ public class LabGoalServiceImpl implements LabGoalService {
     @Override
     @Transactional
     public int deleteGoal(Long id, Integer version, Long actorId) {
+        LabGoal snapshot = loadGoal(id);
+        lockGoalParents(snapshot.getParentId());
+        LabGoal stored = goalMapper.selectGoalForUpdate(id);
+        if (stored == null || !same(stored.getVersion(), version)) throw optimisticConflict();
+        accessService.requireGoalWrite(stored, actorId);
+        if (!"DRAFT".equals(stored.getStatus())) throw new ServiceException("Only draft goals can be deleted");
+        LabGoal parent = stored.getParentId() == null || stored.getParentId() == 0L
+                ? null : goalMapper.selectGoalById(stored.getParentId());
+        if (parent != null && !"DRAFT".equals(parent.getStatus())) {
+            throw new ServiceException("Quarter membership is frozen after annual goal activation");
+        }
         if (!goalMapper.selectChildrenByParentId(id).isEmpty()) {
             throw new ServiceException("Delete child milestones before deleting the goal");
+        }
+        if ("QUARTER".equals(stored.getGoalLevel()) && taskMapper.countTasksByMilestoneId(id) > 0) {
+            throw new ServiceException("Delete milestone tasks before deleting the goal");
         }
         if (goalMapper.deleteGoal(id, version, actor(actorId)) != 1) throw optimisticConflict();
         return 1;
@@ -104,12 +138,16 @@ public class LabGoalServiceImpl implements LabGoalService {
     @Override
     @Transactional
     public void activateGoal(Long id, Integer version, Long actorId) {
-        LabGoal goal = getGoal(id);
+        LabGoal snapshot = loadGoal(id);
+        lockGoalParents(snapshot.getParentId());
+        LabGoal goal = goalMapper.selectGoalForUpdate(id);
+        if (goal == null) throw new ServiceException("Goal does not exist");
+        accessService.requireGoalWrite(goal, actorId);
         if (!goal.getVersion().equals(version)) throw optimisticConflict();
         if ("YEAR".equals(goal.getGoalLevel())) {
-            requireWeightTotal(goalMapper.selectChildrenByParentId(id), "Quarter milestone weights must total 100 before annual goal activation");
+            requireWeightTotal(goalMapper.selectChildrenByParentIdForUpdate(id), "Quarter milestone weights must total 100 before annual goal activation");
         } else if ("QUARTER".equals(goal.getGoalLevel())) {
-            requireTaskWeightTotal(taskMapper.selectKeyMonthTasksByMilestoneId(id), "Monthly key-task goal weights must total 100 before milestone activation");
+            requireTaskWeightTotal(taskMapper.selectKeyMonthTasksByMilestoneIdForUpdate(id), "Monthly key-task goal weights must total 100 before milestone activation");
         } else {
             throw new ServiceException("Unsupported goal level");
         }
@@ -119,8 +157,13 @@ public class LabGoalServiceImpl implements LabGoalService {
     }
 
     @Override
-    public BigDecimal calculateMilestoneProgress(Long milestoneId) {
-        getGoal(milestoneId);
+    public BigDecimal calculateMilestoneProgress(Long milestoneId, Long actorId) {
+        accessService.requireGoalRead(actorId);
+        loadGoal(milestoneId);
+        return calculateMilestoneProgressInternal(milestoneId);
+    }
+
+    private BigDecimal calculateMilestoneProgressInternal(Long milestoneId) {
         BigDecimal total = BigDecimal.ZERO;
         for (LabTask task : taskMapper.selectKeyMonthTasksByMilestoneId(milestoneId)) {
             BigDecimal weight = zero(task.getGoalWeight());
@@ -136,12 +179,13 @@ public class LabGoalServiceImpl implements LabGoalService {
     }
 
     @Override
-    public BigDecimal calculateAnnualProgress(Long annualGoalId) {
-        LabGoal annual = getGoal(annualGoalId);
+    public BigDecimal calculateAnnualProgress(Long annualGoalId, Long actorId) {
+        accessService.requireGoalRead(actorId);
+        LabGoal annual = loadGoal(annualGoalId);
         if (!"YEAR".equals(annual.getGoalLevel())) throw new ServiceException("Annual progress requires a YEAR goal");
         BigDecimal total = BigDecimal.ZERO;
         for (LabGoal milestone : goalMapper.selectChildrenByParentId(annualGoalId)) {
-            total = total.add(zero(milestone.getWeight()).multiply(calculateMilestoneProgress(milestone.getId()))
+            total = total.add(zero(milestone.getWeight()).multiply(calculateMilestoneProgressInternal(milestone.getId()))
                     .divide(ONE_HUNDRED, 6, RoundingMode.HALF_UP));
         }
         return percent(total);
@@ -150,13 +194,16 @@ public class LabGoalServiceImpl implements LabGoalService {
     private BigDecimal calculateMonthProgress(Long monthId) {
         List<LabTask> weeks = taskMapper.selectTasksByParentId(monthId);
         if (weeks.isEmpty()) return BigDecimal.ZERO.setScale(2);
-        int completed = 0;
+        int confirmed = 0, completed = 0;
         for (LabTask week : weeks) {
-            if (LabConstants.WORKFLOW_CONFIRMED.equals(week.getWorkflowStatus())
-                    && completionCoefficient(week.getResultStatus()).compareTo(BigDecimal.ONE) == 0) completed++;
+            if (LabConstants.WORKFLOW_CONFIRMED.equals(week.getWorkflowStatus())) {
+                confirmed++;
+                if (completionCoefficient(week.getResultStatus()).compareTo(BigDecimal.ONE) == 0) completed++;
+            }
         }
+        if (confirmed == 0) return BigDecimal.ZERO.setScale(2);
         return new BigDecimal(completed).multiply(ONE_HUNDRED)
-                .divide(new BigDecimal(weeks.size()), 2, RoundingMode.HALF_UP);
+                .divide(new BigDecimal(confirmed), 2, RoundingMode.HALF_UP);
     }
 
     private void validateGoal(LabGoal goal) {
@@ -193,6 +240,49 @@ public class LabGoalServiceImpl implements LabGoalService {
         if (tasks.isEmpty() || sum.compareTo(ONE_HUNDRED) != 0) throw new ServiceException(message);
     }
 
+    private void requireStableWeight(LabGoal stored, LabGoal proposed) {
+        if (same(stored.getWeight(), proposed.getWeight())) return;
+        LabGoal parent = stored.getParentId() == null ? null : goalMapper.selectGoalById(stored.getParentId());
+        if (frozen(stored) || frozen(parent)) {
+            throw new ServiceException("Goal weight is immutable after the goal or annual parent is activated");
+        }
+    }
+
+    private void requireStableStructure(LabGoal stored, LabGoal proposed) {
+        boolean changed = !same(stored.getParentId(), proposed.getParentId()) || !same(stored.getGoalLevel(), proposed.getGoalLevel())
+                || !same(stored.getYear(), proposed.getYear()) || !same(stored.getPeriod(), proposed.getPeriod())
+                || !same(stored.getGoalNo(), proposed.getGoalNo()) || !same(stored.getOwnerId(), proposed.getOwnerId());
+        if (!changed) return;
+        if (frozen(stored) || frozenGoal(stored.getParentId()) || frozenGoal(proposed.getParentId())) {
+            throw new ServiceException("Activated goal hierarchy, period, number and owner are immutable");
+        }
+    }
+
+    private boolean frozenGoal(Long id) {
+        if (id == null || id == 0L) return false;
+        return frozen(goalMapper.selectGoalById(id));
+    }
+
+    private boolean frozen(LabGoal goal) { return goal != null && !"DRAFT".equals(goal.getStatus()); }
+
+    private LabGoal lockNewGoalParent(LabGoal goal) {
+        if (goal == null || !"QUARTER".equals(goal.getGoalLevel()) || goal.getParentId() == null || goal.getParentId() == 0L) {
+            return null;
+        }
+        return goalMapper.selectGoalForUpdate(goal.getParentId());
+    }
+
+    private void lockGoalParents(Long... parentIds) {
+        List<Long> ids = new ArrayList<Long>();
+        if (parentIds != null) {
+            for (Long parentId : parentIds) {
+                if (parentId != null && parentId != 0L && !ids.contains(parentId)) ids.add(parentId);
+            }
+        }
+        Collections.sort(ids);
+        for (Long parentId : ids) goalMapper.selectGoalForUpdate(parentId);
+    }
+
     private BigDecimal completionCoefficient(String result) {
         return LabConstants.RESULT_EXCEEDED.equals(result) || LabConstants.RESULT_ONTIME.equals(result)
                 || LabConstants.RESULT_DELAYED.equals(result) ? BigDecimal.ONE : BigDecimal.ZERO;
@@ -201,6 +291,8 @@ public class LabGoalServiceImpl implements LabGoalService {
     private boolean isQuarter(String period, Integer year) {
         return period != null && period.matches("\\d{4}Q[1-4]") && period.startsWith(String.valueOf(year));
     }
+
+    private boolean same(Object left, Object right) { return left == null ? right == null : left.equals(right); }
 
     private String actor(Long actorId) {
         if (actorId == null) throw new ServiceException("Authenticated actor is required");

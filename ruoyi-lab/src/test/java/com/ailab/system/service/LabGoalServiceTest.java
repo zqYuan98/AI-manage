@@ -2,14 +2,19 @@ package com.ailab.system.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.ailab.system.constant.LabConstants;
 import com.ailab.system.domain.LabGoal;
 import com.ailab.system.domain.LabTask;
+import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.mapper.LabAccessMapper;
 import com.ailab.system.mapper.LabGoalMapper;
 import com.ailab.system.mapper.LabTaskMapper;
 import com.ailab.system.service.impl.LabGoalServiceImpl;
+import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
+import com.ruoyi.common.annotation.DataScope;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -22,12 +27,17 @@ class LabGoalServiceTest {
     private MemoryGoalMapper goals;
     private MemoryTaskMapper tasks;
     private LabGoalService service;
+    private MemoryAccessMapper access;
 
     @BeforeEach
     void setUp() {
         goals = new MemoryGoalMapper();
         tasks = new MemoryTaskMapper();
-        service = new LabGoalServiceImpl(goals, tasks);
+        access = new MemoryAccessMapper();
+        access.put(99L, 99L, "lab_manager");
+        access.put(2L, 10L, "lab_lead");
+        access.put(3L, 11L, "lab_member");
+        service = new LabGoalServiceImpl(goals, tasks, new LabAccessServiceImpl(access));
     }
 
     @Test
@@ -81,9 +91,110 @@ class LabGoalServiceTest {
         tasks.put(month(12L, 2L, "2026-02", "75", "30", LabConstants.WORKFLOW_CONFIRMED, LabConstants.RESULT_UNDONE));
         tasks.put(month(13L, 3L, "2026-04", "100", "20", LabConstants.WORKFLOW_CONFIRMED, LabConstants.RESULT_DELAYED));
 
-        assertEquals(new BigDecimal("25.00"), service.calculateMilestoneProgress(2L));
-        assertEquals(new BigDecimal("70.00"), service.calculateAnnualProgress(1L));
+        assertEquals(new BigDecimal("25.00"), service.calculateMilestoneProgress(2L, 99L));
+        assertEquals(new BigDecimal("70.00"), service.calculateAnnualProgress(1L, 99L));
         assertEquals(new BigDecimal("20"), tasks.find(13L).getPerfWeight(), "performance weight must not drive goal progress");
+    }
+
+    @Test
+    void unconfirmedWeeklyTasksAreExcludedFromMonthMilestoneAndAnnualDenominators() {
+        LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 10L, "100");
+        LabGoal quarter = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100");
+        goals.put(annual); goals.put(quarter);
+        LabTask month = month(11L, 2L, "2026-08", "100", "100", LabConstants.WORKFLOW_ACTIVE, LabConstants.RESULT_DOING);
+        tasks.put(month);
+        LabTask confirmed = month(12L, 2L, "2026-08", "0", "0", LabConstants.WORKFLOW_CONFIRMED, LabConstants.RESULT_ONTIME);
+        confirmed.setTaskLevel("week"); confirmed.setTaskType("daily"); confirmed.setParentId(11L); tasks.put(confirmed);
+        LabTask pending = month(13L, 2L, "2026-08", "0", "0", LabConstants.WORKFLOW_PENDING_REVIEW, LabConstants.RESULT_ONTIME);
+        pending.setTaskLevel("week"); pending.setTaskType("daily"); pending.setParentId(11L); tasks.put(pending);
+
+        assertEquals(new BigDecimal("100.00"), service.calculateMilestoneProgress(2L, 99L));
+        assertEquals(new BigDecimal("100.00"), service.calculateAnnualProgress(1L, 99L));
+    }
+
+    @Test
+    void goalWritesAreEnforcedByTrustedActorRoleAndOwnership() {
+        LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 99L, "100"); goals.put(annual);
+        LabGoal ownQuarter = goal(null, 1L, "QUARTER", 2026, "2026Q3", 10L, "100");
+        service.createGoal(ownQuarter, 2L);
+
+        LabGoal annualAttempt = goal(null, 0L, "YEAR", 2027, null, 10L, "100");
+        assertThrows(ServiceException.class, () -> service.createGoal(annualAttempt, 2L));
+        LabGoal memberQuarter = goal(null, 1L, "QUARTER", 2026, "2026Q4", 11L, "100");
+        assertThrows(ServiceException.class, () -> service.createGoal(memberQuarter, 3L));
+    }
+
+    @Test
+    void goalReadsAreNotNarrowedByTaskDepartmentDataScope() throws Exception {
+        assertNull(LabGoalServiceImpl.class.getMethod("listGoals", LabGoal.class, Long.class)
+                .getAnnotation(DataScope.class));
+        assertNull(LabGoalServiceImpl.class.getMethod("goalTree", LabGoal.class, Long.class)
+                .getAnnotation(DataScope.class));
+    }
+
+    @Test
+    void activeGoalWeightsCannotBeChangedAndMilestoneWithTasksCannotBeDeleted() {
+        LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 99L, "100"); annual.setStatus("ACTIVE"); goals.put(annual);
+        LabGoal quarter = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100"); quarter.setStatus("ACTIVE"); goals.put(quarter);
+        LabGoal edit = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "90");
+
+        assertThrows(ServiceException.class, () -> service.updateGoal(edit, 99L));
+
+        quarter.setStatus("DRAFT");
+        LabTask linked = month(11L, 2L, "2026-08", "100", "100", LabConstants.WORKFLOW_DRAFT, LabConstants.RESULT_DOING);
+        linked.setTaskType("daily"); tasks.put(linked);
+        assertThrows(ServiceException.class, () -> service.deleteGoal(2L, 0, 99L));
+    }
+
+    @Test
+    void activeGoalCannotBeDeletedThroughGenericDelete() {
+        LabGoal quarter = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100");
+        quarter.setStatus("ACTIVE"); goals.put(quarter);
+
+        assertThrows(ServiceException.class, () -> service.deleteGoal(2L, 0, 99L));
+    }
+
+    @Test
+    void activatedGoalCannotChangeHierarchyPeriodOrOwnership() {
+        LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 99L, "100"); annual.setStatus("ACTIVE"); goals.put(annual);
+        LabGoal quarter = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100"); quarter.setStatus("ACTIVE"); goals.put(quarter);
+        LabGoal edit = goal(2L, 1L, "QUARTER", 2026, "2026Q4", 10L, "100");
+
+        assertThrows(ServiceException.class, () -> service.updateGoal(edit, 99L));
+    }
+
+    @Test
+    void activeAnnualGoalFreezesItsQuarterMilestoneMembership() {
+        LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 99L, "100");
+        annual.setStatus("ACTIVE");
+        goals.put(annual);
+
+        LabGoal newQuarter = goal(null, 1L, "QUARTER", 2026, "2026Q4", 99L, "0");
+        assertThrows(ServiceException.class, () -> service.createGoal(newQuarter, 99L));
+
+        LabGoal existingDraft = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 99L, "0");
+        goals.put(existingDraft);
+        assertThrows(ServiceException.class, () -> service.deleteGoal(2L, 0, 99L));
+
+        LabGoal otherAnnual = goal(3L, 0L, "YEAR", 2026, null, 99L, "100");
+        goals.put(otherAnnual);
+        LabGoal reparented = goal(2L, 3L, "QUARTER", 2026, "2026Q3", 99L, "0");
+        assertThrows(ServiceException.class, () -> service.updateGoal(reparented, 99L));
+    }
+
+    @Test
+    void completedAndTerminatedGoalsRemainFrozenLikeActiveGoals() {
+        LabGoal completedAnnual = goal(1L, 0L, "YEAR", 2026, null, 99L, "100");
+        completedAnnual.setStatus("COMPLETED"); goals.put(completedAnnual);
+        LabGoal draftQuarter = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 99L, "40"); goals.put(draftQuarter);
+        LabGoal changedChildWeight = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 99L, "50");
+        assertThrows(ServiceException.class, () -> service.updateGoal(changedChildWeight, 99L));
+
+        LabGoal draftAnnual = goal(3L, 0L, "YEAR", 2026, null, 99L, "100"); goals.put(draftAnnual);
+        LabGoal terminatedQuarter = goal(4L, 3L, "QUARTER", 2026, "2026Q4", 99L, "60");
+        terminatedQuarter.setStatus("TERMINATED"); goals.put(terminatedQuarter);
+        LabGoal changedClosedWeight = goal(4L, 3L, "QUARTER", 2026, "2026Q4", 99L, "70");
+        assertThrows(ServiceException.class, () -> service.updateGoal(changedClosedWeight, 99L));
     }
 
     @Test
@@ -125,11 +236,13 @@ class LabGoalServiceTest {
         LabGoal find(Long id) { return data.get(id); }
         @Override public List<LabGoal> selectGoalList(LabGoal query) { return new ArrayList<LabGoal>(data.values()); }
         @Override public LabGoal selectGoalById(Long id) { LabGoal value = data.get(id); return value == null || "2".equals(value.getDelFlag()) ? null : value; }
+        @Override public LabGoal selectGoalForUpdate(Long id) { return selectGoalById(id); }
         @Override public List<LabGoal> selectChildrenByParentId(Long parentId) {
             List<LabGoal> result = new ArrayList<LabGoal>();
             for (LabGoal value : data.values()) if (parentId.equals(value.getParentId()) && !"2".equals(value.getDelFlag())) result.add(value);
             return result;
         }
+        @Override public List<LabGoal> selectChildrenByParentIdForUpdate(Long parentId) { return selectChildrenByParentId(parentId); }
         @Override public int insertGoal(LabGoal goal) { if (goal.getId() == null) goal.setId(++sequence); data.put(goal.getId(), goal); return 1; }
         @Override public int updateGoal(LabGoal goal) {
             LabGoal stored = data.get(goal.getId());
@@ -150,13 +263,19 @@ class LabGoalServiceTest {
         @Override public String selectMemberBizLineById(Long memberId) { return "algorithm"; }
         @Override public List<LabTask> selectTaskList(LabTask query) { return new ArrayList<LabTask>(data.values()); }
         @Override public LabTask selectTaskById(Long id) { return data.get(id); }
-        @Override public List<LabTask> selectTasksByParentId(Long parentId) { return new ArrayList<LabTask>(); }
+        @Override public LabTask selectTaskForUpdate(Long id) { return selectTaskById(id); }
+        @Override public List<LabTask> selectTasksByParentId(Long parentId) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if (parentId.equals(task.getParentId()) && !"2".equals(task.getDelFlag())) result.add(task); return result; }
+        @Override public List<LabTask> selectTasksByParentIdForUpdate(Long parentId) { return selectTasksByParentId(parentId); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneId(Long milestoneId) {
             List<LabTask> result = new ArrayList<LabTask>();
             for (LabTask task : data.values()) if (milestoneId.equals(task.getMilestoneId()) && "month".equals(task.getTaskLevel()) && "key".equals(task.getTaskType()) && !"2".equals(task.getDelFlag())) result.add(task);
             return result;
         }
+        @Override public List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long milestoneId) { return selectKeyMonthTasksByMilestoneId(milestoneId); }
+        @Override public int countTasksByMilestoneId(Long milestoneId) { int count = 0; for (LabTask task : data.values()) if (milestoneId.equals(task.getMilestoneId()) && !"2".equals(task.getDelFlag())) count++; return count; }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriod(Long ownerId, String period) { return new ArrayList<LabTask>(); }
+        @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriodForUpdate(Long ownerId, String period) { return selectKeyMonthTasksByOwnerPeriod(ownerId, period); }
+        @Override public Long lockMemberForUpdate(Long memberId) { return memberId; }
         @Override public int insertTask(LabTask task) { return 1; }
         @Override public int updateTask(LabTask task) { return 1; }
         @Override public int deleteTask(Long id, Integer version, String updateBy) { return 1; }
@@ -165,10 +284,17 @@ class LabGoalServiceTest {
         @Override public int insertQualityGate(com.ailab.system.domain.LabTaskQualityGate gate) { return 1; }
         @Override public int updateQualityGate(com.ailab.system.domain.LabTaskQualityGate gate) { return 1; }
         @Override public int deleteQualityGate(Long id, String updateBy) { return 1; }
-        @Override public int markQualityGatePassed(Long id, Long checkerId, java.util.Date checkTime, String checkResult, String updateBy) { return 1; }
+        @Override public int markQualityGatePassed(Long id, Long evidenceId, Long checkerId, java.util.Date checkTime, String checkResult, String updateBy) { return 1; }
         @Override public com.ailab.system.domain.LabTaskBlockEvent selectOpenBlockEvent(Long taskId) { return null; }
         @Override public List<com.ailab.system.domain.LabTaskBlockEvent> selectBlockEvents(Long taskId) { return new ArrayList<com.ailab.system.domain.LabTaskBlockEvent>(); }
+        @Override public Integer selectNextBlockEpisodeNo(Long taskId) { return 1; }
         @Override public int insertBlockEvent(com.ailab.system.domain.LabTaskBlockEvent event) { return 1; }
         @Override public int closeBlockEvent(Long id, Long resolverId, java.util.Date endTime, String resolution, String updateBy) { return 1; }
+    }
+
+    static final class MemoryAccessMapper implements LabAccessMapper {
+        final Map<Long, LabAccessContext> contexts = new LinkedHashMap<Long, LabAccessContext>();
+        void put(Long userId, Long memberId, String roleKey) { LabAccessContext value = new LabAccessContext(); value.setUserId(userId); value.setMemberId(memberId); value.setRoleKey(roleKey); value.setBizLine("algorithm"); value.setDeptId(101L); contexts.put(userId, value); }
+        @Override public LabAccessContext selectAccessContext(Long userId) { return contexts.get(userId); }
     }
 }

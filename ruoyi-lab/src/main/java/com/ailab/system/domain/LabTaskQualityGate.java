@@ -12,6 +12,7 @@ public class LabTaskQualityGate extends BaseEntity {
     private String gateNo;
     private String gateName;
     private String gateStatus;
+    private Long evidenceId;
     private Long checkerId;
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date checkTime;
@@ -28,6 +29,8 @@ public class LabTaskQualityGate extends BaseEntity {
     public void setGateName(String gateName) { this.gateName = gateName; }
     public String getGateStatus() { return gateStatus; }
     public void setGateStatus(String gateStatus) { this.gateStatus = gateStatus; }
+    public Long getEvidenceId() { return evidenceId; }
+    public void setEvidenceId(Long evidenceId) { this.evidenceId = evidenceId; }
     public Long getCheckerId() { return checkerId; }
     public void setCheckerId(Long checkerId) { this.checkerId = checkerId; }
     public Date getCheckTime() { return checkTime; }

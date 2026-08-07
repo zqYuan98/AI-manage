@@ -31,6 +31,7 @@ class LabSqlContractTest {
     private static final Map<String, Set<String>> FIELDS = fields();
     private static final Set<String> LOOKUP_INDEXES = lookupIndexes();
     static { LOOKUP_INDEXES.remove("lab_member_skill|keyidx_lab_member_skill_member(member_id)"); LOOKUP_INDEXES.remove("lab_report_summary|keyidx_lab_report_summary_period(period,biz_line)"); }
+    static { FIELDS.get("lab_task_quality_gate").add("evidence_id"); FIELDS.get("lab_task_block_event").add("episode_no"); }
 
     @Test
     void ailabSqlMeetsTheApprovedSchemaAndSeedContract() throws IOException {
@@ -52,6 +53,8 @@ class LabSqlContractTest {
             assertTrue(Pattern.compile("(?is)primary\\s+key").matcher(statement).find(), "primary key missing: " + table);
         }
         String compactSql = sql.toLowerCase(Locale.ROOT).replace("`", "").replaceAll("\\s+", "");
+        assertTrue(columns(blocks.get("lab_task_quality_gate")).containsKey("evidence_id"), "quality gate evidence_id missing");
+        assertTrue(columns(blocks.get("lab_task_block_event")).containsKey("episode_no"), "block episode_no missing");
         assertLogicalUniqueContracts(sql, blocks);
         assertNoPostCreateActiveUniquenessMigration(sql);
         assertLookupIndexes(blocks);
@@ -65,6 +68,8 @@ class LabSqlContractTest {
         assertJobSeeds(sql);
         assertTemplateSeed(sql);
         assertMemberSeeds(sql);
+        assertLabRoleScopes(sql);
+        assertDemoTaskGoalLinks(sql);
         assertMenuArity(sql);
         assertAllInsertArities(sql);
         assertSqlLexicallyBalanced(sql);
@@ -108,6 +113,34 @@ class LabSqlContractTest {
         assertEquals(6, rows.size(), "six demo members required");
         Set<String> userIds = new HashSet<>(); for (List<String> row : rows) userIds.add(row.get(1));
         assertEquals(6, userIds.size(), "demo members must use distinct sys_user ids");
+    }
+
+    private static void assertLabRoleScopes(String sql) {
+        Map<String, String> scopes = new LinkedHashMap<>();
+        for (List<String> row : insertRows(sql, "sys_role")) scopes.put(unquote(row.get(2)), row.get(4));
+        assertEquals("1", scopes.get("lab_manager"), "manager must have all-data scope");
+        assertEquals("2", scopes.get("lab_lead"), "lead must have custom department scope");
+        assertEquals("5", scopes.get("lab_member"), "member must have self scope");
+        List<List<String>> departments = insertRows(sql, "sys_role_dept");
+        assertEquals(1, departments.size(), "lead custom scope must have one deterministic demo department");
+        assertEquals("30002", departments.get(0).get(0));
+        assertEquals("101", departments.get(0).get(1));
+        assertTrue(sql.contains("DELETE FROM `sys_role_dept` WHERE `role_id` IN (30001,30002,30003);"),
+                "role department cleanup must use exact lab role ids");
+    }
+
+    private static void assertDemoTaskGoalLinks(String sql) {
+        Map<String, List<String>> expected = new LinkedHashMap<>();
+        expected.put("30001", Arrays.asList("30001", "30002"));
+        expected.put("30002", Arrays.asList("30001", "30002"));
+        expected.put("30003", Arrays.asList("30001", "30003"));
+        expected.put("30004", Arrays.asList("30001", "30003"));
+        expected.put("30005", Arrays.asList("30001", "30004"));
+        Map<String, List<String>> actual = new LinkedHashMap<>();
+        for (List<String> row : insertRows(sql, "lab_task")) {
+            if (expected.containsKey(row.get(0))) actual.put(row.get(0), Arrays.asList(row.get(2), row.get(3)));
+        }
+        assertEquals(expected, actual, "demo tasks must reference the annual goal and their quarterly milestone");
     }
 
     private static void assertMenuArity(String sql) {
@@ -173,8 +206,8 @@ class LabSqlContractTest {
     private static List<String> splitValues(String value) { List<String> result = new ArrayList<>(); boolean quote = false; int depth = 0, start = 0; for (int i = 0; i < value.length(); i++) { char c = value.charAt(i); if (c == '\'' && (i == 0 || value.charAt(i - 1) != '\\')) quote = !quote; if (!quote && c == '(') depth++; else if (!quote && c == ')') depth--; else if (!quote && depth == 0 && c == ',') { result.add(value.substring(start, i).trim()); start = i + 1; } } result.add(value.substring(start).trim()); return result; }
     private static String unquote(String value) { return value.replaceAll("^'|'$", ""); }
     private static Set<String> set(String... items) { return new LinkedHashSet<>(Arrays.asList(items)); }
-    private static Set<String> uniqueContracts() { return set("uniquekeyuk_lab_goal_year_no(year,goal_no,active_unique_flag)","uniquekeyuk_lab_gate_task_no(task_id,gate_no,active_unique_flag)","uniquekeyuk_lab_reminder_idempotency(idempotency_key,active_unique_flag)","uniquekeyuk_lab_asset_no(asset_no,active_unique_flag)","uniquekeyuk_lab_member_user(user_id,active_unique_flag)","uniquekeyuk_lab_member_no(member_no,active_unique_flag)","uniquekeyuk_lab_skill_code(skill_code,active_unique_flag)","uniquekeyuk_lab_member_skill(member_id,skill_id,active_unique_flag)","uniquekeyuk_lab_ipr_no(ipr_no,active_unique_flag)","uniquekeyuk_lab_perf_member_period_rev(member_id,period,revision_no,active_unique_flag)","uniquekeyuk_lab_period_close_period(period,active_unique_flag)","uniquekeyuk_lab_report_tpl_code_rev(template_code,revision_no,active_unique_flag)","uniquekeyuk_lab_report_section(template_id,section_code,active_unique_flag)","uniquekeyuk_lab_report_summary(period,biz_line,section_code,active_unique_flag)","uniquekeyuk_lab_report_instance_no(report_no,active_unique_flag)","uniquekeyuk_lab_report_instance_period_rev(template_id,period,biz_line,revision_no,active_unique_flag)","uniquekeyuk_lab_report_job_no(job_no,active_unique_flag)","uniquekeyuk_lab_report_job_idempotency(idempotency_key,active_unique_flag)"); }
-    private static Set<String> lookupIndexes() { return set("lab_goal|keyidx_lab_goal_parent(parent_id)","lab_goal|keyidx_lab_goal_owner_status(owner_id,status)","lab_goal|keyidx_lab_goal_year_status(year,status)","lab_task|keyidx_lab_task_parent(parent_id)","lab_task|keyidx_lab_task_goal(goal_id)","lab_task|keyidx_lab_task_milestone(milestone_id)","lab_task|keyidx_lab_task_owner_period_workflow(owner_id,period,workflow_status)","lab_task|keyidx_lab_task_dept(dept_id)","lab_task_evidence|keyidx_lab_evidence_task(task_id)","lab_task_quality_gate|keyidx_lab_gate_task_status(task_id,gate_status)","lab_task_block_event|keyidx_lab_block_task_open(task_id,block_status,block_start_time)","lab_reminder|keyidx_lab_reminder_recipient_read(recipient_id,read_flag)","lab_asset|keyidx_lab_asset_primary_status(primary_owner_id,status)","lab_member|keyidx_lab_member_line_status(biz_line,member_status)","lab_member_skill|keyidx_lab_member_skill_member(member_id)","lab_one2one|keyidx_lab_one2one_member_date(member_id,meeting_date)","lab_ipr|keyidx_lab_ipr_owner_stage(owner_id,ipr_stage)","lab_collaboration_record|keyidx_lab_collab_member_period_status(to_member_id,period,review_status)","lab_perf_score|keyidx_lab_perf_member_period_current(member_id,period,current_flag)","lab_report_section|keyidx_lab_report_section_tpl_sort(template_id,sort_no)","lab_report_summary|keyidx_lab_report_summary_period(period,biz_line)","lab_report_instance|keyidx_lab_report_instance_tpl_period_lifecycle(template_id,period,lifecycle_status)","lab_report_job|keyidx_lab_report_job_instance_status(report_id,job_status)"); }
+    private static Set<String> uniqueContracts() { return set("uniquekeyuk_lab_goal_year_no(year,goal_no,active_unique_flag)","uniquekeyuk_lab_gate_task_no(task_id,gate_no,active_unique_flag)","uniquekeyuk_lab_block_task_episode(task_id,episode_no)","uniquekeyuk_lab_reminder_idempotency(idempotency_key,active_unique_flag)","uniquekeyuk_lab_asset_no(asset_no,active_unique_flag)","uniquekeyuk_lab_member_user(user_id,active_unique_flag)","uniquekeyuk_lab_member_no(member_no,active_unique_flag)","uniquekeyuk_lab_skill_code(skill_code,active_unique_flag)","uniquekeyuk_lab_member_skill(member_id,skill_id,active_unique_flag)","uniquekeyuk_lab_ipr_no(ipr_no,active_unique_flag)","uniquekeyuk_lab_perf_member_period_rev(member_id,period,revision_no,active_unique_flag)","uniquekeyuk_lab_period_close_period(period,active_unique_flag)","uniquekeyuk_lab_report_tpl_code_rev(template_code,revision_no,active_unique_flag)","uniquekeyuk_lab_report_section(template_id,section_code,active_unique_flag)","uniquekeyuk_lab_report_summary(period,biz_line,section_code,active_unique_flag)","uniquekeyuk_lab_report_instance_no(report_no,active_unique_flag)","uniquekeyuk_lab_report_instance_period_rev(template_id,period,biz_line,revision_no,active_unique_flag)","uniquekeyuk_lab_report_job_no(job_no,active_unique_flag)","uniquekeyuk_lab_report_job_idempotency(idempotency_key,active_unique_flag)"); }
+    private static Set<String> lookupIndexes() { return set("lab_goal|keyidx_lab_goal_parent(parent_id)","lab_goal|keyidx_lab_goal_owner_status(owner_id,status)","lab_goal|keyidx_lab_goal_year_status(year,status)","lab_task|keyidx_lab_task_parent(parent_id)","lab_task|keyidx_lab_task_goal(goal_id)","lab_task|keyidx_lab_task_milestone(milestone_id)","lab_task|keyidx_lab_task_owner_period_workflow(owner_id,period,workflow_status)","lab_task|keyidx_lab_task_dept(dept_id)","lab_task_evidence|keyidx_lab_evidence_task(task_id)","lab_task_quality_gate|keyidx_lab_gate_task_status(task_id,gate_status)","lab_task_quality_gate|keyidx_lab_gate_evidence(evidence_id)","lab_task_block_event|keyidx_lab_block_task_open(task_id,block_status,block_start_time)","lab_reminder|keyidx_lab_reminder_recipient_read(recipient_id,read_flag)","lab_asset|keyidx_lab_asset_primary_status(primary_owner_id,status)","lab_member|keyidx_lab_member_line_status(biz_line,member_status)","lab_member_skill|keyidx_lab_member_skill_member(member_id)","lab_one2one|keyidx_lab_one2one_member_date(member_id,meeting_date)","lab_ipr|keyidx_lab_ipr_owner_stage(owner_id,ipr_stage)","lab_collaboration_record|keyidx_lab_collab_member_period_status(to_member_id,period,review_status)","lab_perf_score|keyidx_lab_perf_member_period_current(member_id,period,current_flag)","lab_report_section|keyidx_lab_report_section_tpl_sort(template_id,sort_no)","lab_report_summary|keyidx_lab_report_summary_period(period,biz_line)","lab_report_instance|keyidx_lab_report_instance_tpl_period_lifecycle(template_id,period,lifecycle_status)","lab_report_job|keyidx_lab_report_job_instance_status(report_id,job_status)"); }
     private static Map<String, Set<String>> fields() { Map<String, Set<String>> map = new LinkedHashMap<>(); map.put("lab_goal",set("parent_id","goal_level","year","period","goal_no","owner_id","weight","progress_rate","status","version")); map.put("lab_task",set("parent_id","goal_id","milestone_id","task_level","period","biz_line","task_type","owner_id","perf_weight","goal_weight","workflow_status","result_status","asset_id","coordination_required","coordination_owner_id","coordination_dept_id","coordination_content","coordination_support","current_block_flag","period_lock_flag","version")); map.put("lab_task_evidence",set("task_id","evidence_json","submitter_id","audit_status")); map.put("lab_task_quality_gate",set("task_id","gate_no","gate_status")); map.put("lab_task_block_event",set("task_id","block_start_time","block_end_time","block_status")); map.put("lab_reminder",set("task_id","recipient_id","read_flag","idempotency_key")); map.put("lab_asset",set("primary_owner_id","backup_owner_id","resource_url")); map.put("lab_member",set("user_id","biz_line","leader_id")); map.put("lab_skill",set("skill_code","skill_category")); map.put("lab_member_skill",set("member_id","skill_id","proficiency_level")); map.put("lab_one2one",set("member_id","leader_id","meeting_date")); map.put("lab_ipr",set("ipr_type","ipr_stage","owner_id")); map.put("lab_collaboration_record",set("task_id","to_member_id","period","category","signed_score","evidence_url","reviewer_id","review_status")); map.put("lab_perf_score",set("member_id","period","revision_no","current_flag","detail_json","red_line_flag","revoked_flag","calibration_status")); map.put("lab_period_close",set("period","close_by","close_time","reopen_by","reopen_time","version")); map.put("lab_report_template",set("template_code","period_type","revision_no","latest_flag","default_flag","status","header_json","style_json","version")); map.put("lab_report_section",set("template_id","section_type","query_config_json","render_config_json","style_config_json","manual_flag","visible_flag","sensitive_flag","version")); map.put("lab_report_summary",set("period","biz_line","section_code","summary_json")); map.put("lab_report_instance",set("template_id","period","revision_no","lifecycle_status","current_flag","final_flag","sensitive_flag","source_data_json","source_perf_revision","content_json","content_markdown","json_status","json_path","json_error","markdown_status","markdown_path","markdown_error","word_status","word_path","word_error","pdf_status","pdf_path","pdf_error","version")); map.put("lab_report_job",set("report_id","job_type","job_status","progress_rate","attempt_count","error_message","idempotency_key","version")); return map; }
     private static Path findRoot() { for (Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath(); p != null; p = p.getParent()) if (Files.isRegularFile(p.resolve("pom.xml")) && Files.isDirectory(p.resolve("ruoyi-lab"))) return p; throw new IllegalStateException("Cannot locate repository root"); }
 }

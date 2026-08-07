@@ -9,6 +9,7 @@ public class LabTaskBlockEvent extends BaseEntity {
     private static final long serialVersionUID = 1L;
     private Long id;
     private Long taskId;
+    private Integer episodeNo;
     private String blockType;
     private String blockReason;
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -24,6 +25,8 @@ public class LabTaskBlockEvent extends BaseEntity {
     public void setId(Long id) { this.id = id; }
     public Long getTaskId() { return taskId; }
     public void setTaskId(Long taskId) { this.taskId = taskId; }
+    public Integer getEpisodeNo() { return episodeNo; }
+    public void setEpisodeNo(Integer episodeNo) { this.episodeNo = episodeNo; }
     public String getBlockType() { return blockType; }
     public void setBlockType(String blockType) { this.blockType = blockType; }
     public String getBlockReason() { return blockReason; }

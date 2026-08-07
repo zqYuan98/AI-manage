@@ -12,9 +12,15 @@ public interface LabTaskMapper {
     String selectMemberBizLineById(Long memberId);
     List<LabTask> selectTaskList(LabTask query);
     LabTask selectTaskById(Long id);
+    LabTask selectTaskForUpdate(Long id);
     List<LabTask> selectTasksByParentId(Long parentId);
+    List<LabTask> selectTasksByParentIdForUpdate(Long parentId);
     List<LabTask> selectKeyMonthTasksByMilestoneId(Long milestoneId);
+    List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long milestoneId);
+    int countTasksByMilestoneId(Long milestoneId);
     List<LabTask> selectKeyMonthTasksByOwnerPeriod(@Param("ownerId") Long ownerId, @Param("period") String period);
+    List<LabTask> selectKeyMonthTasksByOwnerPeriodForUpdate(@Param("ownerId") Long ownerId, @Param("period") String period);
+    Long lockMemberForUpdate(Long memberId);
     int insertTask(LabTask task);
     int updateTask(LabTask task);
     int deleteTask(@Param("id") Long id, @Param("version") Integer version, @Param("updateBy") String updateBy);
@@ -24,12 +30,14 @@ public interface LabTaskMapper {
     int insertQualityGate(LabTaskQualityGate gate);
     int updateQualityGate(LabTaskQualityGate gate);
     int deleteQualityGate(@Param("id") Long id, @Param("updateBy") String updateBy);
-    int markQualityGatePassed(@Param("id") Long id, @Param("checkerId") Long checkerId,
+    int markQualityGatePassed(@Param("id") Long id, @Param("evidenceId") Long evidenceId,
+            @Param("checkerId") Long checkerId,
             @Param("checkTime") Date checkTime, @Param("checkResult") String checkResult,
             @Param("updateBy") String updateBy);
 
     LabTaskBlockEvent selectOpenBlockEvent(Long taskId);
     List<LabTaskBlockEvent> selectBlockEvents(Long taskId);
+    Integer selectNextBlockEpisodeNo(Long taskId);
     int insertBlockEvent(LabTaskBlockEvent event);
     int closeBlockEvent(@Param("id") Long id, @Param("resolverId") Long resolverId,
             @Param("endTime") Date endTime, @Param("resolution") String resolution,

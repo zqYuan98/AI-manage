@@ -14,14 +14,21 @@ import com.ailab.system.domain.LabTaskBlockEvent;
 import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.domain.LabTaskQualityGate;
 import com.ailab.system.dto.TaskSubmitCommand;
+import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.exception.LabValidationException;
+import com.ailab.system.mapper.LabAccessMapper;
 import com.ailab.system.mapper.LabGoalMapper;
 import com.ailab.system.mapper.LabTaskEvidenceMapper;
 import com.ailab.system.mapper.LabTaskMapper;
 import com.ailab.system.service.impl.LabTaskServiceImpl;
+import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ailab.system.service.impl.TaskWorkflowServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -39,12 +46,21 @@ class LabTaskServiceTest {
     private MemoryTaskMapper tasks;
     private MemoryEvidenceMapper evidence;
     private MemoryGoalMapper goals;
+    private MemoryAccessMapper access;
     private LabTaskService service;
 
     @BeforeEach
     void setUp() {
         tasks = new MemoryTaskMapper(); evidence = new MemoryEvidenceMapper(); goals = new MemoryGoalMapper();
-        service = new LabTaskServiceImpl(tasks, evidence, goals, new TaskWorkflowServiceImpl(CLOCK), CLOCK);
+        access = new MemoryAccessMapper();
+        access.put(1L, 1L, "lab_manager", "manage");
+        access.put(2L, 12L, "lab_lead", "algorithm");
+        access.put(3L, 13L, "lab_member", "algorithm");
+        access.put(8L, 8L, "lab_member", "algorithm");
+        access.put(9L, 9L, "lab_manager", "manage");
+        access.put(900L, 8L, "lab_member", "algorithm");
+        service = new LabTaskServiceImpl(tasks, evidence, goals, new TaskWorkflowServiceImpl(CLOCK),
+                new LabAccessServiceImpl(access), CLOCK);
     }
 
     @Test
@@ -111,7 +127,39 @@ class LabTaskServiceTest {
         pending.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW); pending.setResultStatus(LabConstants.RESULT_ONTIME);
         tasks.put(confirmed); tasks.put(undone); tasks.put(pending);
 
-        assertEquals(new BigDecimal("33.33"), service.calculateMonthProgress(1L));
+        assertEquals(new BigDecimal("50.00"), service.calculateMonthProgress(1L, 9L));
+    }
+
+    @Test
+    void taskServiceEnforcesTrustedActorScopeForListDetailAndCreate() {
+        LabTask own = activeTask(1L, 13L); tasks.put(own);
+        LabTask sameLineOther = activeTask(2L, 14L); tasks.put(sameLineOther);
+        LabTask crossLine = activeTask(3L, 15L); crossLine.setBizLine("platform"); tasks.put(crossLine);
+
+        List<LabTask> memberRows = service.listTasks(new LabTask(), 3L);
+        assertEquals(1, memberRows.size());
+        assertEquals(Long.valueOf(13L), memberRows.get(0).getOwnerId());
+        assertThrows(ServiceException.class, () -> service.getTask(2L, 3L));
+
+        goals.put(goal(10L, 0L, "YEAR", 2026, null));
+        goals.put(goal(11L, 10L, "QUARTER", 2026, "2026Q3"));
+        tasks.memberLines.put(15L, "platform");
+        LabTask attempted = task(null, 0L, "month", "2026-08", 15L, "100", "100");
+        attempted.setGoalId(10L); attempted.setMilestoneId(11L); attempted.setBizLine("platform");
+        assertThrows(ServiceException.class, () -> service.createTask(attempted, 2L));
+    }
+
+    @Test
+    void leadCannotReviewOwnTaskButCanReviewTeammateInSameLine() {
+        LabTask self = activeTask(1L, 12L); self.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW); tasks.put(self);
+        TaskSubmitCommand review = new TaskSubmitCommand(); review.setReviewerComment("ok");
+        review.setEvidenceAuditComment("verified"); review.setApprovedEvidenceIds(new ArrayList<Long>());
+
+        assertThrows(ServiceException.class, () -> service.reviewPass(1L, 0, review, 2L));
+
+        LabTask teammate = activeTask(2L, 13L); teammate.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW); tasks.put(teammate);
+        service.reviewPass(2L, 0, review, 2L);
+        assertEquals(LabConstants.WORKFLOW_CONFIRMED, tasks.find(2L).getWorkflowStatus());
     }
 
     @Test
@@ -167,13 +215,19 @@ class LabTaskServiceTest {
         LabTask task = activeTask(1L, 8L); tasks.put(task);
         LabTaskQualityGate gate = new LabTaskQualityGate(); gate.setTaskId(1L); gate.setGateNo("Q1"); gate.setGateName("reproducible");
         service.addQualityGate(gate, 8L);
-        LabTaskEvidence pending = validEvidence(1L); pending.setId(21L); pending.setAuditStatus("PENDING"); evidence.put(pending);
-
+        TaskSubmitCommand submit = new TaskSubmitCommand(); submit.setResultDesc("done");
+        submit.setActualFinishTime(Date.from(Instant.parse("2026-08-07T08:00:00Z")));
+        submit.setEvidenceList(Arrays.asList(validEvidence(null)));
+        service.submitResult(1L, 0, submit, 8L);
+        LabTaskEvidence pending = evidence.forTask(1L).get(0);
         assertThrows(ServiceException.class, () -> service.passQualityGate(gate.getId(), pending.getId(), "ok", 9L));
-        pending.setAuditStatus("APPROVED");
+        TaskSubmitCommand review = new TaskSubmitCommand(); review.setReviewerComment("ok");
+        review.setEvidenceAuditComment("verified"); review.setApprovedEvidenceIds(Arrays.asList(pending.getId()));
+        service.reviewPass(1L, 1, review, 9L);
 
         service.passQualityGate(gate.getId(), pending.getId(), "ok", 9L);
         assertEquals("PASSED", tasks.gate(gate.getId()).getGateStatus());
+        assertEquals(pending.getId(), tasks.gate(gate.getId()).getEvidenceId());
     }
 
     @Test
@@ -187,6 +241,31 @@ class LabTaskServiceTest {
         service.updateQualityGate(edit, 8L);
 
         assertEquals(Long.valueOf(1L), tasks.gate(gate.getId()).getTaskId());
+    }
+
+    @Test
+    void zeroAffectedQualityGateWritesAreRejectedAsConcurrentStateChanges() {
+        tasks.put(activeTask(1L, 8L));
+        LabTaskQualityGate gate = new LabTaskQualityGate(); gate.setTaskId(1L); gate.setGateNo("Q1"); gate.setGateName("guarded");
+        tasks.rejectGateWrite = true;
+        assertThrows(ServiceException.class, () -> service.addQualityGate(gate, 8L));
+        tasks.rejectGateWrite = false; service.addQualityGate(gate, 8L);
+        tasks.rejectGateWrite = true;
+        assertThrows(ServiceException.class, () -> service.updateQualityGate(gate, 8L));
+        assertThrows(ServiceException.class, () -> service.deleteQualityGate(gate.getId(), 8L));
+    }
+
+    @Test
+    void qualityGateSqlGuardsTaskStateLockAndApprovedEvidence() throws Exception {
+        Path cursor = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
+        while (cursor != null && !Files.exists(cursor.resolve("ruoyi-lab/src/main/resources/mapper/lab/LabTaskMapper.xml"))) cursor = cursor.getParent();
+        String xml = new String(Files.readAllBytes(cursor.resolve("ruoyi-lab/src/main/resources/mapper/lab/LabTaskMapper.xml")), StandardCharsets.UTF_8)
+                .toLowerCase().replaceAll("\\s+", "");
+        assertTrue(xml.contains("insertintolab_task_quality_gate") && xml.contains("fromlab_tasktwhere")
+                && xml.contains("t.workflow_statusin('draft','active')") && xml.contains("t.period_lock_flag='0'"));
+        assertTrue(xml.contains("updatelab_task_quality_gategjoinlab_tasktont.id=g.task_id"));
+        assertTrue(xml.contains("joinlab_task_evidenceeone.id=#{evidenceid}")
+                && xml.contains("e.audit_status='approved'") && xml.contains("t.workflow_status='confirmed'"));
     }
 
     @Test
@@ -213,6 +292,7 @@ class LabTaskServiceTest {
         assertEquals("1", tasks.find(1L).getBlockFlag());
         assertNotNull(tasks.find(1L).getBlockStartTime());
         assertEquals("OPEN", opened.getBlockStatus());
+        assertEquals(Integer.valueOf(1), opened.getEpisodeNo());
         assertThrows(ServiceException.class, () -> service.blockTask(1L, 1, "DEPENDENCY", "again", 8L));
 
         service.unblockTask(1L, 1, "API ready", 8L);
@@ -220,6 +300,11 @@ class LabTaskServiceTest {
         assertNull(tasks.find(1L).getBlockStartTime());
         assertEquals("CLOSED", tasks.events.get(opened.getId()).getBlockStatus());
         assertFalse(tasks.selectBlockEvents(1L).isEmpty());
+
+        LabTaskBlockEvent second = service.blockTask(1L, 2, "DEPENDENCY", "second issue", 8L);
+        assertEquals(Integer.valueOf(2), second.getEpisodeNo());
+        service.unblockTask(1L, 3, "second issue resolved", 8L);
+        assertEquals(2, tasks.selectBlockEvents(1L).size());
     }
 
     @Test
@@ -241,6 +326,209 @@ class LabTaskServiceTest {
 
         confirmed.setWorkflowStatus(LabConstants.WORKFLOW_ACTIVE); confirmed.setPeriodLockFlag("1");
         assertThrows(ServiceException.class, () -> service.updateTask(edit, 8L));
+    }
+
+    @Test
+    void pendingReviewContentRejectsGenericUpdateEvidenceGateAndBlockWrites() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        for (long id = 1L; id <= 4L; id++) {
+            LabTask pending = activeTask(id, 8L); pending.setGoalId(1L); pending.setMilestoneId(2L);
+            pending.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW); tasks.put(pending);
+        }
+
+        LabTask edit = activeTask(1L, 8L); edit.setGoalId(1L); edit.setMilestoneId(2L);
+        assertThrows(ServiceException.class, () -> service.updateTask(edit, 8L));
+        assertThrows(ServiceException.class, () -> service.addEvidence(2L, validEvidence(null), 8L));
+        LabTaskQualityGate gate = new LabTaskQualityGate(); gate.setTaskId(3L); gate.setGateNo("Q1"); gate.setGateName("locked");
+        assertThrows(ServiceException.class, () -> service.addQualityGate(gate, 8L));
+        assertThrows(ServiceException.class, () -> service.blockTask(4L, 0, "DEPENDENCY", "locked", 8L));
+    }
+
+    @Test
+    void periodLockRejectsWorkflowTransitionsAndUnblock() {
+        LabTask active = activeTask(1L, 8L); active.setPeriodLockFlag("1"); tasks.put(active);
+        TaskSubmitCommand submit = new TaskSubmitCommand(); submit.setResultDesc("done");
+        submit.setActualFinishTime(Date.from(Instant.parse("2026-08-07T08:00:00Z")));
+        submit.setEvidenceList(Arrays.asList(validEvidence(null)));
+        assertThrows(ServiceException.class, () -> service.submitResult(1L, 0, submit, 8L));
+
+        LabTask pendingWithdraw = activeTask(2L, 8L); pendingWithdraw.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW);
+        pendingWithdraw.setPeriodLockFlag("1"); tasks.put(pendingWithdraw);
+        assertThrows(ServiceException.class, () -> service.withdrawResult(2L, 0, 8L));
+
+        LabTask pendingReview = activeTask(3L, 8L); pendingReview.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW);
+        pendingReview.setPeriodLockFlag("1"); tasks.put(pendingReview);
+        TaskSubmitCommand review = new TaskSubmitCommand(); review.setReviewerComment("return");
+        assertThrows(ServiceException.class, () -> service.reviewReturn(3L, 0, review, 9L));
+
+        LabTask confirmed = activeTask(4L, 8L); confirmed.setWorkflowStatus(LabConstants.WORKFLOW_CONFIRMED);
+        confirmed.setPeriodLockFlag("1"); tasks.put(confirmed);
+        assertThrows(ServiceException.class, () -> service.reopenTask(4L, 0, "correction", 9L));
+
+        LabTask blocked = activeTask(5L, 8L); blocked.setPeriodLockFlag("1"); blocked.setBlockFlag("1"); tasks.put(blocked);
+        LabTaskBlockEvent event = new LabTaskBlockEvent(); event.setId(91L); event.setTaskId(5L); event.setBlockStatus("OPEN"); tasks.events.put(91L, event);
+        assertThrows(ServiceException.class, () -> service.unblockTask(5L, 0, "done", 8L));
+
+        LabTask lockedGateTask = activeTask(6L, 8L); lockedGateTask.setWorkflowStatus(LabConstants.WORKFLOW_CONFIRMED);
+        lockedGateTask.setPeriodLockFlag("1"); tasks.put(lockedGateTask);
+        LabTaskQualityGate gate = new LabTaskQualityGate(); gate.setId(96L); gate.setTaskId(6L); gate.setGateStatus("PENDING"); tasks.gates.put(96L, gate);
+        LabTaskEvidence approved = validEvidence(6L); approved.setId(97L); approved.setAuditStatus("APPROVED"); evidence.put(approved);
+        assertThrows(ServiceException.class, () -> service.passQualityGate(96L, 97L, "locked", 9L));
+    }
+
+    @Test
+    void activatedTaskWeightsAndStructuralLinksAreImmutable() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask stored = activeTask(1L, 8L); stored.setGoalId(1L); stored.setMilestoneId(2L); tasks.put(stored);
+        LabTask edit = activeTask(1L, 8L); edit.setGoalId(1L); edit.setMilestoneId(2L);
+        edit.setPerfWeight(new BigDecimal("90"));
+
+        assertThrows(ServiceException.class, () -> service.updateTask(edit, 8L));
+        assertEquals(new BigDecimal("100"), tasks.find(1L).getPerfWeight());
+    }
+
+    @Test
+    void activatedTaskCannotChangeParentLevelBusinessScopeOrType() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask parent = activeTask(10L, 8L); parent.setGoalId(1L); parent.setMilestoneId(2L); tasks.put(parent);
+        LabTask alternateParent = activeTask(11L, 8L); alternateParent.setGoalId(1L); alternateParent.setMilestoneId(2L); tasks.put(alternateParent);
+        LabTask stored = task(1L, 10L, "week", "2026-W32", 8L, "0", "0");
+        stored.setGoalId(1L); stored.setMilestoneId(2L); stored.setWorkflowStatus(LabConstants.WORKFLOW_ACTIVE); tasks.put(stored);
+        LabTask edit = task(1L, 11L, "week", "2026-W32", 8L, "0", "0");
+        edit.setGoalId(1L); edit.setMilestoneId(2L); edit.setWorkflowStatus(LabConstants.WORKFLOW_ACTIVE);
+
+        assertThrows(ServiceException.class, () -> service.updateTask(edit, 8L));
+    }
+
+    @Test
+    void memberCannotAttachOwnWeekToAnotherOwnersMonthButLeadCanAssignIt() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask parent = activeTask(10L, 12L); parent.setGoalId(1L); parent.setMilestoneId(2L); tasks.put(parent);
+        LabTask week = task(null, 10L, "week", "2026-W32", 13L, "0", "0");
+        week.setGoalId(1L); week.setMilestoneId(2L);
+
+        assertThrows(ServiceException.class, () -> service.createTask(week, 3L));
+        service.createTask(week, 2L);
+        assertNotNull(week.getId());
+
+        LabTask crossLineParent = activeTask(11L, 15L); crossLineParent.setBizLine("platform");
+        crossLineParent.setGoalId(1L); crossLineParent.setMilestoneId(2L); tasks.put(crossLineParent);
+        LabTask crossLineWeek = task(null, 11L, "week", "2026-W32", 13L, "0", "0");
+        crossLineWeek.setGoalId(1L); crossLineWeek.setMilestoneId(2L);
+        assertThrows(ServiceException.class, () -> service.createTask(crossLineWeek, 2L));
+    }
+
+    @Test
+    void taskWeightsMustStayWithinZeroAndOneHundred() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask task = task(null, 0L, "month", "2026-08", 8L, "101", "100");
+        task.setGoalId(1L); task.setMilestoneId(2L);
+
+        assertThrows(ServiceException.class, () -> service.createTask(task, 8L));
+    }
+
+    @Test
+    void monthWithWeeklyChildrenCannotChangeInheritedLinks() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        goals.put(goal(3L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask month = task(1L, 0L, "month", "2026-08", 8L, "100", "100"); month.setGoalId(1L); month.setMilestoneId(2L); tasks.put(month);
+        LabTask week = task(2L, 1L, "week", "2026-W32", 8L, "0", "0"); week.setGoalId(1L); week.setMilestoneId(2L); tasks.put(week);
+        LabTask edit = task(1L, 0L, "month", "2026-08", 8L, "100", "100"); edit.setGoalId(1L); edit.setMilestoneId(3L);
+
+        assertThrows(ServiceException.class, () -> service.updateTask(edit, 8L));
+    }
+
+    @Test
+    void activeMilestoneFreezesKeyMonthMembershipAndOnlyDraftTasksCanBeDeleted() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        LabGoal milestone = goal(2L, 1L, "QUARTER", 2026, "2026Q3");
+        milestone.setStatus("ACTIVE");
+        goals.put(milestone);
+
+        LabTask newKeyMonth = task(null, 0L, "month", "2026-08", 8L, "0", "0");
+        newKeyMonth.setGoalId(1L); newKeyMonth.setMilestoneId(2L);
+        assertThrows(ServiceException.class, () -> service.createTask(newKeyMonth, 8L));
+
+        LabTask active = activeTask(10L, 8L); active.setGoalId(1L); active.setMilestoneId(2L); tasks.put(active);
+        assertThrows(ServiceException.class, () -> service.deleteTask(10L, 0, 8L));
+
+        LabTask draft = task(11L, 0L, "month", "2026-08", 8L, "0", "0");
+        draft.setGoalId(1L); draft.setMilestoneId(2L); tasks.put(draft);
+        assertThrows(ServiceException.class, () -> service.deleteTask(11L, 0, 8L));
+    }
+
+    @Test
+    void monthTasksCannotHaveTaskParentsAndWeeklyChildrenFreezeAllHierarchyFields() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask invalidMonth = task(null, 99L, "month", "2026-08", 8L, "0", "0");
+        invalidMonth.setGoalId(1L); invalidMonth.setMilestoneId(2L);
+        assertThrows(ServiceException.class, () -> service.createTask(invalidMonth, 8L));
+
+        LabTask month = task(10L, 0L, "month", "2026-08", 8L, "0", "0");
+        month.setGoalId(1L); month.setMilestoneId(2L); month.setTaskType("daily"); tasks.put(month);
+        LabTask child = task(11L, 10L, "week", "2026-W32", 8L, "0", "0");
+        child.setGoalId(1L); child.setMilestoneId(2L); tasks.put(child);
+        LabTask alternateParent = task(12L, 0L, "month", "2026-08", 8L, "0", "0");
+        alternateParent.setGoalId(1L); alternateParent.setMilestoneId(2L); alternateParent.setTaskType("daily"); tasks.put(alternateParent);
+        LabTask converted = task(10L, 12L, "week", "2026-W32", 8L, "0", "0");
+        converted.setGoalId(1L); converted.setMilestoneId(2L);
+
+        assertThrows(ServiceException.class, () -> service.updateTask(converted, 8L));
+    }
+
+    @Test
+    void managerCannotPassQualityGateForOwnTask() {
+        LabTask own = activeTask(10L, 9L); own.setWorkflowStatus(LabConstants.WORKFLOW_CONFIRMED); tasks.put(own);
+        LabTaskQualityGate gate = new LabTaskQualityGate(); gate.setId(80L); gate.setTaskId(10L); gate.setGateStatus("PENDING"); tasks.gates.put(80L, gate);
+        LabTaskEvidence approved = validEvidence(10L); approved.setId(81L); approved.setAuditStatus("APPROVED"); evidence.put(approved);
+
+        assertThrows(ServiceException.class, () -> service.passQualityGate(80L, 81L, "self review", 9L));
+    }
+
+    @Test
+    void activationMapperSqlUsesParentAndWeightCollectionLocks() throws Exception {
+        Path root = Paths.get("").toAbsolutePath();
+        while (root != null && !Files.exists(root.resolve("ruoyi-lab/src/main/resources/mapper/lab/LabTaskMapper.xml"))) root = root.getParent();
+        String goalXml = new String(Files.readAllBytes(root.resolve("ruoyi-lab/src/main/resources/mapper/lab/LabGoalMapper.xml")), StandardCharsets.UTF_8)
+                .replaceAll("\\s+", " ").toLowerCase();
+        String taskXml = new String(Files.readAllBytes(root.resolve("ruoyi-lab/src/main/resources/mapper/lab/LabTaskMapper.xml")), StandardCharsets.UTF_8)
+                .replaceAll("\\s+", " ").toLowerCase();
+
+        assertTrue(goalXml.contains("id=\"selectgoalforupdate\"") && goalXml.contains("for update"));
+        assertTrue(goalXml.contains("id=\"selectchildrenbyparentidforupdate\"") && goalXml.contains("for update"));
+        assertTrue(taskXml.contains("id=\"selectkeymonthtasksbymilestoneidforupdate\"") && taskXml.contains("for update"));
+        assertTrue(taskXml.contains("id=\"selectkeymonthtasksbyownerperiodforupdate\"") && taskXml.contains("for update"));
+        assertTrue(taskXml.contains("id=\"lockmemberforupdate\"") && taskXml.contains("for update"));
+        assertTrue(taskXml.contains("id=\"selecttaskforupdate\"") && taskXml.contains("for update"));
+        assertTrue(taskXml.contains("id=\"selecttasksbyparentidforupdate\"") && taskXml.contains("for update"));
+    }
+
+    @Test
+    void weeklyMembershipAndMonthWritesUseTheCommonMonthParentLock() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask month = task(10L, 0L, "month", "2026-08", 8L, "0", "0");
+        month.setGoalId(1L); month.setMilestoneId(2L); month.setTaskType("daily"); tasks.put(month);
+        LabTask week = task(null, 10L, "week", "2026-W32", 8L, "0", "0");
+        week.setGoalId(1L); week.setMilestoneId(2L);
+
+        service.createTask(week, 8L);
+        assertTrue(tasks.lockedTaskIds.contains(10L));
+
+        tasks.lockedTaskIds.clear();
+        tasks.lockedChildrenParentIds.clear();
+        LabTask edit = task(10L, 0L, "month", "2026-08", 8L, "0", "0");
+        edit.setGoalId(1L); edit.setMilestoneId(2L); edit.setTaskType("daily"); edit.setTitle("content-only edit");
+        service.updateTask(edit, 8L);
+        assertTrue(tasks.lockedTaskIds.contains(10L));
+        assertTrue(tasks.lockedChildrenParentIds.contains(10L));
     }
 
     private static LabGoal goal(Long id, Long parent, String level, int year, String period) {
@@ -277,7 +565,9 @@ class LabTaskServiceTest {
         void put(LabGoal goal) { data.put(goal.getId(), goal); }
         @Override public List<LabGoal> selectGoalList(LabGoal q) { return new ArrayList<LabGoal>(data.values()); }
         @Override public LabGoal selectGoalById(Long id) { return data.get(id); }
+        @Override public LabGoal selectGoalForUpdate(Long id) { return selectGoalById(id); }
         @Override public List<LabGoal> selectChildrenByParentId(Long id) { return new ArrayList<LabGoal>(); }
+        @Override public List<LabGoal> selectChildrenByParentIdForUpdate(Long id) { return selectChildrenByParentId(id); }
         @Override public int insertGoal(LabGoal goal) { return 1; }
         @Override public int updateGoal(LabGoal goal) { return 1; }
         @Override public int deleteGoal(Long id, Integer version, String actor) { return 1; }
@@ -300,31 +590,47 @@ class LabTaskServiceTest {
         final Map<Long, LabTask> data = new LinkedHashMap<Long, LabTask>();
         final Map<Long, LabTaskQualityGate> gates = new LinkedHashMap<Long, LabTaskQualityGate>();
         final Map<Long, LabTaskBlockEvent> events = new LinkedHashMap<Long, LabTaskBlockEvent>();
+        final List<Long> lockedTaskIds = new ArrayList<Long>();
+        final List<Long> lockedChildrenParentIds = new ArrayList<Long>();
         final Map<Long, Long> memberIds = new LinkedHashMap<Long, Long>();
         final Map<Long, String> memberLines = new LinkedHashMap<Long, String>();
         long seq = 50L, gateSeq = 70L, eventSeq = 90L;
+        boolean rejectGateWrite;
         void put(LabTask task) { data.put(task.getId(), task); }
         LabTask find(Long id) { return data.get(id); }
         LabTaskQualityGate gate(Long id) { return gates.get(id); }
         @Override public Long selectMemberIdByUserId(Long userId) { Long memberId = memberIds.get(userId); return memberId == null ? userId : memberId; }
         @Override public String selectMemberBizLineById(Long memberId) { String line = memberLines.get(memberId); return line == null ? "algorithm" : line; }
-        @Override public List<LabTask> selectTaskList(LabTask query) { return new ArrayList<LabTask>(data.values()); }
+        @Override public List<LabTask> selectTaskList(LabTask query) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if (!"2".equals(task.getDelFlag()) && (query.getOwnerId() == null || query.getOwnerId().equals(task.getOwnerId())) && (query.getBizLine() == null || query.getBizLine().equals(task.getBizLine()))) result.add(task); return result; }
         @Override public LabTask selectTaskById(Long id) { LabTask t = data.get(id); return t == null || "2".equals(t.getDelFlag()) ? null : t; }
+        @Override public LabTask selectTaskForUpdate(Long id) { lockedTaskIds.add(id); return selectTaskById(id); }
         @Override public List<LabTask> selectTasksByParentId(Long parentId) { List<LabTask> r = new ArrayList<LabTask>(); for (LabTask t : data.values()) if (parentId.equals(t.getParentId()) && !"2".equals(t.getDelFlag())) r.add(t); return r; }
+        @Override public List<LabTask> selectTasksByParentIdForUpdate(Long parentId) { lockedChildrenParentIds.add(parentId); return selectTasksByParentId(parentId); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneId(Long id) { return new ArrayList<LabTask>(); }
+        @Override public List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long id) { return selectKeyMonthTasksByMilestoneId(id); }
+        @Override public int countTasksByMilestoneId(Long id) { int count = 0; for (LabTask task : data.values()) if (id.equals(task.getMilestoneId()) && !"2".equals(task.getDelFlag())) count++; return count; }
         @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriod(Long ownerId, String period) { List<LabTask> r = new ArrayList<LabTask>(); for (LabTask t : data.values()) if (ownerId.equals(t.getOwnerId()) && period.equals(t.getPeriod()) && "month".equals(t.getTaskLevel()) && "key".equals(t.getTaskType()) && !"2".equals(t.getDelFlag())) r.add(t); return r; }
+        @Override public List<LabTask> selectKeyMonthTasksByOwnerPeriodForUpdate(Long ownerId, String period) { return selectKeyMonthTasksByOwnerPeriod(ownerId, period); }
+        @Override public Long lockMemberForUpdate(Long memberId) { return memberId; }
         @Override public int insertTask(LabTask task) { if (task.getId() == null) task.setId(++seq); data.put(task.getId(), task); return 1; }
         @Override public int updateTask(LabTask task) { LabTask stored = data.get(task.getId()); if (stored == null || !stored.getVersion().equals(task.getVersion())) return 0; task.setVersion(task.getVersion() + 1); data.put(task.getId(), task); return 1; }
         @Override public int deleteTask(Long id, Integer version, String actor) { LabTask t = data.get(id); if (t == null || !t.getVersion().equals(version)) return 0; t.setDelFlag("2"); t.setVersion(version + 1); return 1; }
         @Override public List<LabTaskQualityGate> selectQualityGates(Long taskId) { List<LabTaskQualityGate> r = new ArrayList<LabTaskQualityGate>(); for (LabTaskQualityGate g : gates.values()) if (taskId.equals(g.getTaskId()) && !"2".equals(g.getDelFlag())) r.add(g); return r; }
         @Override public LabTaskQualityGate selectQualityGateById(Long id) { return gates.get(id); }
-        @Override public int insertQualityGate(LabTaskQualityGate gate) { if (gate.getId() == null) gate.setId(++gateSeq); gates.put(gate.getId(), gate); return 1; }
-        @Override public int updateQualityGate(LabTaskQualityGate gate) { gates.put(gate.getId(), gate); return 1; }
-        @Override public int deleteQualityGate(Long id, String actor) { LabTaskQualityGate g = gates.get(id); if (g == null) return 0; g.setDelFlag("2"); return 1; }
-        @Override public int markQualityGatePassed(Long id, Long checker, Date at, String result, String actor) { LabTaskQualityGate g = gates.get(id); if (g == null || !"PENDING".equals(g.getGateStatus())) return 0; g.setGateStatus("PASSED"); g.setCheckerId(checker); g.setCheckTime(at); g.setCheckResult(result); return 1; }
+        @Override public int insertQualityGate(LabTaskQualityGate gate) { if (rejectGateWrite) return 0; if (gate.getId() == null) gate.setId(++gateSeq); gates.put(gate.getId(), gate); return 1; }
+        @Override public int updateQualityGate(LabTaskQualityGate gate) { if (rejectGateWrite) return 0; gates.put(gate.getId(), gate); return 1; }
+        @Override public int deleteQualityGate(Long id, String actor) { if (rejectGateWrite) return 0; LabTaskQualityGate g = gates.get(id); if (g == null) return 0; g.setDelFlag("2"); return 1; }
+        @Override public int markQualityGatePassed(Long id, Long evidenceId, Long checker, Date at, String result, String actor) { if (rejectGateWrite) return 0; LabTaskQualityGate g = gates.get(id); if (g == null || !"PENDING".equals(g.getGateStatus())) return 0; g.setGateStatus("PASSED"); g.setEvidenceId(evidenceId); g.setCheckerId(checker); g.setCheckTime(at); g.setCheckResult(result); return 1; }
         @Override public LabTaskBlockEvent selectOpenBlockEvent(Long taskId) { for (LabTaskBlockEvent e : events.values()) if (taskId.equals(e.getTaskId()) && "OPEN".equals(e.getBlockStatus())) return e; return null; }
         @Override public List<LabTaskBlockEvent> selectBlockEvents(Long taskId) { List<LabTaskBlockEvent> r = new ArrayList<LabTaskBlockEvent>(); for (LabTaskBlockEvent e : events.values()) if (taskId.equals(e.getTaskId())) r.add(e); return r; }
+        @Override public Integer selectNextBlockEpisodeNo(Long taskId) { int next = 1; for (LabTaskBlockEvent e : events.values()) if (taskId.equals(e.getTaskId()) && e.getEpisodeNo() != null) next = Math.max(next, e.getEpisodeNo() + 1); return next; }
         @Override public int insertBlockEvent(LabTaskBlockEvent event) { if (event.getId() == null) event.setId(++eventSeq); events.put(event.getId(), event); return 1; }
         @Override public int closeBlockEvent(Long id, Long resolver, Date at, String resolution, String actor) { LabTaskBlockEvent e = events.get(id); if (e == null || !"OPEN".equals(e.getBlockStatus())) return 0; e.setBlockStatus("CLOSED"); e.setResolverId(resolver); e.setBlockEndTime(at); e.setResolution(resolution); return 1; }
+    }
+
+    static final class MemoryAccessMapper implements LabAccessMapper {
+        final Map<Long, LabAccessContext> contexts = new LinkedHashMap<Long, LabAccessContext>();
+        void put(Long userId, Long memberId, String roleKey, String bizLine) { LabAccessContext value = new LabAccessContext(); value.setUserId(userId); value.setMemberId(memberId); value.setRoleKey(roleKey); value.setBizLine(bizLine); value.setDeptId(101L); contexts.put(userId, value); }
+        @Override public LabAccessContext selectAccessContext(Long userId) { return contexts.get(userId); }
     }
 }

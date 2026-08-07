@@ -7,7 +7,6 @@ import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
-import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.SecurityUtils;
 import java.util.List;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -32,23 +31,23 @@ public class LabGoalController extends BaseController {
     @GetMapping("/list")
     public TableDataInfo list(LabGoal query) {
         startPage();
-        List<LabGoal> rows = goalService.listGoals(query);
+        List<LabGoal> rows = goalService.listGoals(query, SecurityUtils.getUserId());
         return getDataTable(rows);
     }
 
     @PreAuthorize("@ss.hasPermi('lab:goal:list')")
     @GetMapping("/tree")
-    public AjaxResult tree(LabGoal query) { return success(goalService.goalTree(query)); }
+    public AjaxResult tree(LabGoal query) { return success(goalService.goalTree(query, SecurityUtils.getUserId())); }
 
     @PreAuthorize("@ss.hasPermi('lab:goal:list')")
     @GetMapping("/{id}")
-    public AjaxResult detail(@PathVariable Long id) { requireVisible(id); return success(goalService.getGoal(id)); }
+    public AjaxResult detail(@PathVariable Long id) { return success(goalService.getGoal(id, SecurityUtils.getUserId())); }
 
     @PreAuthorize("@ss.hasPermi('lab:goal:list')")
     @GetMapping("/{id}/progress")
     public AjaxResult progress(@PathVariable Long id, @RequestParam String level) {
-        requireVisible(id);
-        return success("YEAR".equals(level) ? goalService.calculateAnnualProgress(id) : goalService.calculateMilestoneProgress(id));
+        Long actorId = SecurityUtils.getUserId();
+        return success("YEAR".equals(level) ? goalService.calculateAnnualProgress(id, actorId) : goalService.calculateMilestoneProgress(id, actorId));
     }
 
     @PreAuthorize("@ss.hasPermi('lab:goal:add')")
@@ -62,7 +61,6 @@ public class LabGoalController extends BaseController {
     @Log(title = "AI lab goal", businessType = BusinessType.UPDATE)
     @PutMapping
     public AjaxResult update(@RequestBody LabGoal goal) {
-        requireVisible(goal.getId());
         return toAjax(goalService.updateGoal(goal, SecurityUtils.getUserId()));
     }
 
@@ -70,7 +68,6 @@ public class LabGoalController extends BaseController {
     @Log(title = "AI lab goal activation", businessType = BusinessType.UPDATE)
     @PutMapping("/{id}/activate")
     public AjaxResult activate(@PathVariable Long id, @RequestParam Integer version) {
-        requireVisible(id);
         goalService.activateGoal(id, version, SecurityUtils.getUserId());
         return success();
     }
@@ -79,12 +76,6 @@ public class LabGoalController extends BaseController {
     @Log(title = "AI lab goal", businessType = BusinessType.DELETE)
     @DeleteMapping("/{id}")
     public AjaxResult delete(@PathVariable Long id, @RequestParam Integer version) {
-        requireVisible(id);
         return toAjax(goalService.deleteGoal(id, version, SecurityUtils.getUserId()));
-    }
-
-    private void requireVisible(Long id) {
-        LabGoal query = new LabGoal(); query.setId(id);
-        if (goalService.listGoals(query).isEmpty()) throw new ServiceException("Goal is outside the current data scope");
     }
 }
