@@ -22,6 +22,6 @@ public class LabOne2OneController extends BaseController {
     private final LabLedgerService service; public LabOne2OneController(LabLedgerService service){this.service=service;}
     @PreAuthorize("@ss.hasPermi('lab:one2one:list')") @GetMapping("/list") public TableDataInfo list(LabOne2One q){startPage();return getDataTable(service.listOne2Ones(q,SecurityUtils.getUserId()));}
     @PreAuthorize("@ss.hasPermi('lab:one2one:list')") @GetMapping("/{id}") public AjaxResult detail(@PathVariable Long id){return success(service.getOne2One(id,SecurityUtils.getUserId()));}
-    @PreAuthorize("@ss.hasPermi('lab:one2one:add')") @Log(title="AI lab one-to-one",businessType=BusinessType.INSERT) @PostMapping public AjaxResult create(@RequestBody LabOne2One r){return toAjax(service.createOne2One(r,SecurityUtils.getUserId()));}
-    @PreAuthorize("@ss.hasPermi('lab:one2one:edit')") @Log(title="AI lab one-to-one",businessType=BusinessType.UPDATE) @PutMapping public AjaxResult update(@RequestBody LabOne2One r){return toAjax(service.updateOne2One(r,SecurityUtils.getUserId()));}
+    @PreAuthorize("@ss.hasPermi('lab:one2one:add')") @Log(title="AI lab one-to-one",businessType=BusinessType.INSERT,isSaveRequestData=false,isSaveResponseData=false) @PostMapping public AjaxResult create(@RequestBody LabOne2One r){return toAjax(service.createOne2One(r,SecurityUtils.getUserId()));}
+    @PreAuthorize("@ss.hasPermi('lab:one2one:edit')") @Log(title="AI lab one-to-one",businessType=BusinessType.UPDATE,isSaveRequestData=false,isSaveResponseData=false) @PutMapping public AjaxResult update(@RequestBody LabOne2One r){return toAjax(service.updateOne2One(r,SecurityUtils.getUserId()));}
 }

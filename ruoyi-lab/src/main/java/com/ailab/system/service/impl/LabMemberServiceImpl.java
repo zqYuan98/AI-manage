@@ -181,12 +181,14 @@ public class LabMemberServiceImpl implements LabMemberService {
         }
         if (!"ACTIVE".equals(member.getMemberStatus())) throw new ServiceException("Inactive member skill matrix cannot be edited");
 
-        List<Long> skillIds = new ArrayList<Long>();
-        for (LabMemberSkill item : requested) skillIds.add(item.getSkillId());
+        List<LabMemberSkill> existing = memberMapper.selectMemberSkillsForUpdate(memberId);
+        Set<Long> allSkillIds = new HashSet<Long>();
+        for (LabMemberSkill item : requested) allSkillIds.add(item.getSkillId());
+        for (LabMemberSkill item : existing) allSkillIds.add(item.getSkillId());
+        List<Long> skillIds = new ArrayList<Long>(allSkillIds);
         Collections.sort(skillIds);
         List<LabSkill> lockedSkills = skillIds.isEmpty() ? Collections.<LabSkill>emptyList() : memberMapper.lockSkillsForUpdate(skillIds);
         if (lockedSkills.size() != skillIds.size()) throw new ServiceException("All selected skills must exist");
-        List<LabMemberSkill> existing = memberMapper.selectMemberSkillsForUpdate(memberId);
         Map<Long, LabMemberSkill> bySkill = new HashMap<Long, LabMemberSkill>();
         for (LabMemberSkill item : existing) bySkill.put(item.getSkillId(), item);
         for (LabSkill skill : lockedSkills) {

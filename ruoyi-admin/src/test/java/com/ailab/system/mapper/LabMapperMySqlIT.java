@@ -121,15 +121,39 @@ class LabMapperMySqlIT {
         assertEquals(Arrays.asList(1, 2), jdbcTemplate.queryForList(
                 "select episode_no from lab_task_block_event where task_id=39990 order by block_start_time,id",
                 Integer.class));
-        assertEquals(1, jdbcTemplate.queryForObject(
-                "select count(1) from information_schema.statistics where table_schema=database() and table_name='lab_task_block_event' and index_name='uk_lab_block_task_episode'",
-                Integer.class));
+        assertEquals(Arrays.asList("task_id", "episode_no"), jdbcTemplate.queryForList(
+                "select column_name from information_schema.statistics where table_schema=database() and table_name='lab_task_block_event' and index_name='uk_lab_block_task_episode' and non_unique=0 order by seq_in_index",
+                String.class));
+        assertEquals(2, jdbcTemplate.queryForObject("select count(1) from lab_asset where id in (39993,39994)", Integer.class));
+        List<String> migratedAssetVersions = jdbcTemplate.queryForList(
+                "select asset_version from lab_asset where id in (39993,39994) order by id", String.class);
+        assertEquals(Arrays.asList("LEGACY-ASSET-A", "LEGACY-ASSET-B"), migratedAssetVersions);
+        assertEquals(Arrays.asList("asset_name", "asset_version", "asset_type", "active_unique_flag"),
+                jdbcTemplate.queryForList(
+                        "select column_name from information_schema.statistics where table_schema=database() and table_name='lab_asset' and index_name='uk_lab_asset_business' and non_unique=0 order by seq_in_index",
+                        String.class));
+        assertEquals(3, jdbcTemplate.queryForObject("select count(1) from lab_skill where id in (39993,39994,39995)", Integer.class));
+        List<String> migratedSkillNames = jdbcTemplate.queryForList(
+                "select skill_name from lab_skill where id in (39993,39994,39995) order by id", String.class);
+        assertEquals("Legacy Duplicate Skill", migratedSkillNames.get(0));
+        assertEquals("Legacy Duplicate Skill [LEGACY-SKILL-B:39994]", migratedSkillNames.get(1));
+        assertTrue(migratedSkillNames.get(2).contains("LEGACY-SKILL-C") && migratedSkillNames.get(2).contains("39995"),
+                "the pre-existing generated-name collision must receive its own stable code/id suffix");
+        assertEquals(3L, migratedSkillNames.stream().distinct().count());
+        assertTrue(migratedSkillNames.stream().allMatch(name -> name.length() <= 100));
+        assertEquals(Arrays.asList("skill_name", "active_unique_flag"), jdbcTemplate.queryForList(
+                "select column_name from information_schema.statistics where table_schema=database() and table_name='lab_skill' and index_name='uk_lab_skill_name' and non_unique=0 order by seq_in_index",
+                String.class));
         LabOne2One legacyConversation = ledgerMapper.selectOne2OneById(39991L);
         LabIpr legacyIpr = ledgerMapper.selectIprById(39991L);
         assertEquals("Legacy one-to-one feedback", legacyConversation.getFactsEvidence());
         assertEquals("Legacy action item", legacyConversation.getNextAction());
         assertEquals("LEGACY-APPLICATION-39991", legacyIpr.getAcceptanceNo());
         assertEquals("2026-06-15", new java.sql.Date(legacyIpr.getActualSubmitDate().getTime()).toString());
+        assertEquals("DRAFT", ledgerMapper.selectIprById(39992L).getIprStage());
+        assertEquals("DRAFT", jdbcTemplate.queryForObject(
+                "select column_default from information_schema.columns where table_schema=database() and table_name='lab_ipr' and column_name='ipr_stage'",
+                String.class));
         assertEquals(1, jdbcTemplate.update("update lab_one2one set facts_evidence='Curated current facts',next_action='Curated current action' where id=39991"));
         assertEquals(1, jdbcTemplate.update("update lab_ipr set acceptance_no='CURATED-CURRENT-APPLICATION',actual_submit_date='2026-06-14' where id=39991"));
 
@@ -149,6 +173,16 @@ class LabMapperMySqlIT {
         assertEquals("Curated current action", ledgerMapper.selectOne2OneById(39991L).getNextAction());
         assertEquals("CURATED-CURRENT-APPLICATION", ledgerMapper.selectIprById(39991L).getAcceptanceNo());
         assertEquals("2026-06-14", new java.sql.Date(ledgerMapper.selectIprById(39991L).getActualSubmitDate().getTime()).toString());
+        assertEquals("DRAFT", ledgerMapper.selectIprById(39992L).getIprStage());
+        assertEquals("DRAFT", jdbcTemplate.queryForObject(
+                "select column_default from information_schema.columns where table_schema=database() and table_name='lab_ipr' and column_name='ipr_stage'",
+                String.class));
+        assertEquals(migratedAssetVersions, jdbcTemplate.queryForList(
+                "select asset_version from lab_asset where id in (39993,39994) order by id", String.class));
+        assertEquals(migratedSkillNames, jdbcTemplate.queryForList(
+                "select skill_name from lab_skill where id in (39993,39994,39995) order by id", String.class));
+        assertEquals(2, jdbcTemplate.queryForObject("select count(1) from lab_asset where id in (39993,39994)", Integer.class));
+        assertEquals(3, jdbcTemplate.queryForObject("select count(1) from lab_skill where id in (39993,39994,39995)", Integer.class));
     }
 
     @Test

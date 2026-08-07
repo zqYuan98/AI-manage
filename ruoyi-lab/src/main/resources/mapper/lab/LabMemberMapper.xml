@@ -127,8 +127,8 @@
     </select>
     <select id="selectMemberSkillsForUpdate" parameterType="long" resultMap="MemberSkillResult">
         select ms.id,ms.member_id,ms.skill_id,ms.skill_level,ms.last_verified_date,ms.evidence_url,ms.version,ms.del_flag,
-               ms.create_by,ms.create_time,ms.update_by,ms.update_time,ms.remark,s.skill_code,s.skill_name,s.skill_category
-        from lab_member_skill ms join lab_skill s on s.id=ms.skill_id where ms.member_id=#{memberId} and ms.del_flag='0' order by ms.skill_id for update
+               ms.create_by,ms.create_time,ms.update_by,ms.update_time,ms.remark
+        from lab_member_skill ms where ms.member_id=#{memberId} and ms.del_flag='0' order by ms.skill_id for update
     </select>
     <insert id="insertMemberSkill" parameterType="com.ailab.system.domain.LabMemberSkill" useGeneratedKeys="true" keyProperty="id">
         insert into lab_member_skill(member_id,skill_id,skill_level,last_verified_date,evidence_url,version,del_flag,create_by,create_time,remark)

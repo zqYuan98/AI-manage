@@ -14,18 +14,25 @@ import com.ailab.system.domain.LabAsset;
 import com.ailab.system.domain.LabIpr;
 import com.ailab.system.domain.LabMember;
 import com.ailab.system.domain.LabOne2One;
+import com.ailab.system.controller.LabOne2OneController;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.mapper.LabLedgerMapper;
 import com.ailab.system.mapper.LabMemberMapper;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ailab.system.service.impl.LabLedgerServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
+import com.ruoyi.common.annotation.Log;
+import com.ruoyi.common.enums.BusinessType;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -187,6 +194,21 @@ class LabLedgerServiceTest {
     }
 
     @Test
+    void oneToOneWriteLogsNeverPersistSensitiveRequestOrResponseBodies() throws Exception {
+        Method create = LabOne2OneController.class.getMethod("create", LabOne2One.class);
+        Method update = LabOne2OneController.class.getMethod("update", LabOne2One.class);
+        Log createLog = create.getAnnotation(Log.class);
+        Log updateLog = update.getAnnotation(Log.class);
+
+        assertEquals(BusinessType.INSERT, createLog.businessType());
+        assertEquals(BusinessType.UPDATE, updateLog.businessType());
+        assertFalse(createLog.isSaveRequestData());
+        assertFalse(createLog.isSaveResponseData());
+        assertFalse(updateLog.isSaveRequestData());
+        assertFalse(updateLog.isSaveResponseData());
+    }
+
+    @Test
     void iprValidatesStageConditionalFieldsAndFutureFacts() {
         manager(1L);
         when(memberMapper.lockMembersForUpdate(Collections.singletonList(20L)))
@@ -204,6 +226,39 @@ class LabLedgerServiceTest {
     }
 
     @Test
+    void iprAcceptsDraftAndPreparingButRejectsUnconfiguredAliases() {
+        manager(1L);
+        when(memberMapper.lockMembersForUpdate(Collections.singletonList(20L)))
+                .thenReturn(Collections.singletonList(member(20L, "algorithm", "ACTIVE")));
+        when(ledgerMapper.insertIpr(any(LabIpr.class))).thenReturn(1);
+
+        assertEquals(1, service.createIpr(ipr(null, 20L, "DRAFT", 0), 1L));
+        assertEquals(1, service.createIpr(ipr(null, 20L, "PREPARING", 0), 1L));
+        assertThrows(ServiceException.class, () -> service.createIpr(ipr(null, 20L, "DRAFTING", 0), 1L));
+
+        LabIpr completed = ipr(null, 20L, "COMPLETED", 0);
+        completed.setActualSubmitDate(date("2026-07-01")); completed.setAcceptanceNo("A-1"); completed.setCertificateNo("C-1");
+        assertThrows(ServiceException.class, () -> service.createIpr(completed, 1L));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void iprStageOrderUsesEachConfiguredDictionaryStageExactlyOnce() throws Exception {
+        Field field = LabLedgerServiceImpl.class.getDeclaredField("IPR_STAGE_ORDER");
+        field.setAccessible(true);
+        Map<String, Integer> order = (Map<String, Integer>) field.get(null);
+
+        assertEquals(new HashSet<String>(Arrays.asList("DRAFT", "PREPARING", "SUBMITTED", "ACCEPTED", "AUTHORIZED")),
+                order.keySet());
+        assertEquals(new HashSet<Integer>(Arrays.asList(0, 1, 2, 3, 4)), new HashSet<Integer>(order.values()));
+        assertEquals(Integer.valueOf(0), order.get("DRAFT"));
+        assertEquals(Integer.valueOf(1), order.get("PREPARING"));
+        assertEquals(Integer.valueOf(2), order.get("SUBMITTED"));
+        assertEquals(Integer.valueOf(3), order.get("ACCEPTED"));
+        assertEquals(Integer.valueOf(4), order.get("AUTHORIZED"));
+    }
+
+    @Test
     void iprStageMayAdvanceButRollbackRequiresManagerReason() {
         lead(2L, 21L, "algorithm");
         LabIpr stored = ipr(1L, 20L, "ACCEPTED", 2);
@@ -211,7 +266,7 @@ class LabLedgerServiceTest {
         when(memberMapper.selectMemberForUpdate(20L)).thenReturn(member(20L, "algorithm", "ACTIVE"));
         when(memberMapper.lockMembersForUpdate(Collections.singletonList(20L)))
                 .thenReturn(Collections.singletonList(member(20L, "algorithm", "ACTIVE")));
-        LabIpr rollback = ipr(1L, 20L, "DRAFTING", 2);
+        LabIpr rollback = ipr(1L, 20L, "DRAFT", 2);
         assertThrows(ServiceException.class, () -> service.updateIpr(rollback, "correction", 2L));
 
         manager(1L);
@@ -226,17 +281,17 @@ class LabLedgerServiceTest {
         manager(1L);
         when(memberMapper.lockMembersForUpdate(Collections.singletonList(20L)))
                 .thenReturn(Collections.singletonList(member(20L, "algorithm", "ACTIVE")));
-        LabIpr created = ipr(null, 20L, "DRAFTING", null);
+        LabIpr created = ipr(null, 20L, "DRAFT", null);
         created.setStageChangeReason("client-forged rollback");
         when(ledgerMapper.insertIpr(created)).thenReturn(1);
         assertEquals(1, service.createIpr(created, 1L));
         assertNull(created.getStageChangeReason());
 
-        LabIpr stored = ipr(1L, 20L, "DRAFTING", 3);
+        LabIpr stored = ipr(1L, 20L, "DRAFT", 3);
         stored.setStageChangeReason("filing office returned application");
         when(ledgerMapper.selectIprForUpdate(1L)).thenReturn(stored);
         when(memberMapper.selectMemberForUpdate(20L)).thenReturn(member(20L, "algorithm", "ACTIVE"));
-        LabIpr ordinaryUpdate = ipr(1L, 20L, "DRAFTING", 3);
+        LabIpr ordinaryUpdate = ipr(1L, 20L, "DRAFT", 3);
         ordinaryUpdate.setStageChangeReason("client-overwrite");
         when(ledgerMapper.updateIpr(ordinaryUpdate)).thenReturn(1);
         assertEquals(1, service.updateIpr(ordinaryUpdate, null, 1L));
@@ -246,7 +301,7 @@ class LabLedgerServiceTest {
     @Test
     void memberAndLeadCanEditOnlyOwnedOrSameLineIprAndStaleWritesFail() {
         memberActor(3L, 20L, "algorithm");
-        LabIpr stored = ipr(1L, 30L, "DRAFTING", 0);
+        LabIpr stored = ipr(1L, 30L, "DRAFT", 0);
         when(ledgerMapper.selectIprForUpdate(1L)).thenReturn(stored);
         assertThrows(ServiceException.class, () -> service.updateIpr(stored, null, 3L));
 
@@ -261,12 +316,12 @@ class LabLedgerServiceTest {
     @Test
     void iprOwnerTransferLocksOldAndNewOwnersInStableOrder() {
         manager(1L);
-        LabIpr stored = ipr(1L, 30L, "DRAFTING", 2);
+        LabIpr stored = ipr(1L, 30L, "DRAFT", 2);
         when(ledgerMapper.selectIprForUpdate(1L)).thenReturn(stored);
         when(memberMapper.lockMembersForUpdate(Arrays.asList(20L, 30L))).thenReturn(Arrays.asList(
                 member(20L, "algorithm", "ACTIVE"), member(30L, "platform", "INACTIVE")));
         when(ledgerMapper.updateIpr(any(LabIpr.class))).thenReturn(1);
-        LabIpr transfer = ipr(1L, 20L, "DRAFTING", 2);
+        LabIpr transfer = ipr(1L, 20L, "DRAFT", 2);
 
         assertEquals(1, service.updateIpr(transfer, null, 1L));
 

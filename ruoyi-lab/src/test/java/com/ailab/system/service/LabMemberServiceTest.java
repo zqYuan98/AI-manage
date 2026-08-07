@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,6 +38,7 @@ import java.util.Date;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
+import org.mockito.InOrder;
 import org.mockito.MockitoAnnotations;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -275,11 +279,12 @@ class LabMemberServiceTest {
     void batchMatrixLocksInStableSkillOrderAndLogicallyDeletesMissingRows() {
         memberActor(3L, 20L, "algorithm");
         when(memberMapper.selectMemberForUpdate(20L)).thenReturn(member(20L, 90L, "algorithm"));
-        when(memberMapper.lockSkillsForUpdate(Arrays.asList(40L, 50L)))
-                .thenReturn(Arrays.asList(skill(40L, "Java", "ACTIVE", 0), skill(50L, "MLOps", "ACTIVE", 0)));
         LabMemberSkill retained = memberSkill(100L, 20L, 40L, 2, 1);
         LabMemberSkill removed = memberSkill(101L, 20L, 60L, 4, 2);
         when(memberMapper.selectMemberSkillsForUpdate(20L)).thenReturn(Arrays.asList(retained, removed));
+        when(memberMapper.lockSkillsForUpdate(Arrays.asList(40L, 50L, 60L)))
+                .thenReturn(Arrays.asList(skill(40L, "Java", "ACTIVE", 0), skill(50L, "MLOps", "ACTIVE", 0),
+                        skill(60L, "Legacy", "INACTIVE", 0)));
         when(memberMapper.updateMemberSkill(any(LabMemberSkill.class))).thenReturn(1);
         when(memberMapper.deleteMemberSkill(101L, 2, "3")).thenReturn(1);
         when(memberMapper.insertMemberSkill(any(LabMemberSkill.class))).thenReturn(1);
@@ -288,8 +293,57 @@ class LabMemberServiceTest {
         LabMemberSkill add = memberSkill(null, 20L, 50L, 5, null);
         assertEquals(3, service.saveSkillMatrix(20L, Arrays.asList(add, update), 3L));
 
-        verify(memberMapper).lockSkillsForUpdate(Arrays.asList(40L, 50L));
+        InOrder lockingOrder = inOrder(memberMapper);
+        lockingOrder.verify(memberMapper).selectMemberForUpdate(20L);
+        lockingOrder.verify(memberMapper).selectMemberSkillsForUpdate(20L);
+        lockingOrder.verify(memberMapper).lockSkillsForUpdate(Arrays.asList(40L, 50L, 60L));
         verify(memberMapper).deleteMemberSkill(101L, 2, "3");
+    }
+
+    @Test
+    void symmetricMemberMatrixChangesLockTheSameSkillUnionOrder() {
+        manager(1L);
+        when(memberMapper.selectMemberForUpdate(20L)).thenReturn(member(20L, 90L, "algorithm"));
+        when(memberMapper.selectMemberForUpdate(30L)).thenReturn(member(30L, 91L, "platform"));
+        when(memberMapper.selectMemberSkillsForUpdate(20L))
+                .thenReturn(Collections.singletonList(memberSkill(100L, 20L, 40L, 2, 0)));
+        when(memberMapper.selectMemberSkillsForUpdate(30L))
+                .thenReturn(Collections.singletonList(memberSkill(101L, 30L, 50L, 2, 0)));
+        when(memberMapper.lockSkillsForUpdate(Arrays.asList(40L, 50L)))
+                .thenReturn(Arrays.asList(skill(40L, "Java", "ACTIVE", 0), skill(50L, "MLOps", "ACTIVE", 0)));
+        when(memberMapper.insertMemberSkill(any(LabMemberSkill.class))).thenReturn(1);
+        when(memberMapper.deleteMemberSkill(anyLong(), any(Integer.class), any(String.class))).thenReturn(1);
+
+        assertEquals(2, service.saveSkillMatrix(20L,
+                Collections.singletonList(memberSkill(null, 20L, 50L, 4, null)), 1L));
+        assertEquals(2, service.saveSkillMatrix(30L,
+                Collections.singletonList(memberSkill(null, 30L, 40L, 4, null)), 1L));
+
+        verify(memberMapper, times(2)).lockSkillsForUpdate(Arrays.asList(40L, 50L));
+    }
+
+    @Test
+    void existingInactiveSkillMayBeRetainedButInactiveSkillCannotBeNewlyAssigned() {
+        manager(1L);
+        when(memberMapper.selectMemberForUpdate(20L)).thenReturn(member(20L, 90L, "algorithm"));
+        LabMemberSkill historical = memberSkill(100L, 20L, 60L, 2, 3);
+        when(memberMapper.selectMemberSkillsForUpdate(20L)).thenReturn(Collections.singletonList(historical));
+        when(memberMapper.lockSkillsForUpdate(Collections.singletonList(60L)))
+                .thenReturn(Collections.singletonList(skill(60L, "Legacy", "INACTIVE", 0)));
+        when(memberMapper.updateMemberSkill(any(LabMemberSkill.class))).thenReturn(1);
+
+        assertEquals(1, service.saveSkillMatrix(20L,
+                Collections.singletonList(memberSkill(100L, 20L, 60L, 3, 3)), 1L));
+
+        reset(memberMapper);
+        when(memberMapper.selectMemberForUpdate(20L)).thenReturn(member(20L, 90L, "algorithm"));
+        when(memberMapper.selectMemberSkillsForUpdate(20L)).thenReturn(Collections.<LabMemberSkill>emptyList());
+        when(memberMapper.lockSkillsForUpdate(Collections.singletonList(60L)))
+                .thenReturn(Collections.singletonList(skill(60L, "Legacy", "INACTIVE", 0)));
+
+        assertThrows(ServiceException.class, () -> service.saveSkillMatrix(20L,
+                Collections.singletonList(memberSkill(null, 20L, 60L, 3, null)), 1L));
+        verify(memberMapper, never()).insertMemberSkill(any(LabMemberSkill.class));
     }
 
     @Test

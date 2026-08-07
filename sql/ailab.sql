@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS `lab_one2one` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='one to one record';
 
 CREATE TABLE IF NOT EXISTS `lab_ipr` (
- `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `ipr_no` varchar(64) NOT NULL COMMENT 'IPR number', `ipr_name` varchar(300) NOT NULL COMMENT 'IPR name', `ipr_type` varchar(32) NOT NULL COMMENT 'IPR type', `ipr_stage` varchar(32) DEFAULT 'DRAFTING' COMMENT 'IPR stage', `owner_id` bigint NOT NULL COMMENT 'member owner', `planned_submit_date` date DEFAULT NULL COMMENT 'planned submit date', `actual_submit_date` date DEFAULT NULL COMMENT 'actual submit date', `acceptance_no` varchar(128) DEFAULT NULL COMMENT 'acceptance number', `certificate_no` varchar(128) DEFAULT NULL COMMENT 'certificate number', `authorized_date` date DEFAULT NULL COMMENT 'authorized date', `evidence_url` varchar(1000) DEFAULT NULL COMMENT 'evidence URL', `status` varchar(16) DEFAULT 'ACTIVE' COMMENT 'record status', `stage_change_reason` varchar(1000) DEFAULT NULL COMMENT 'audited stage change reason', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
+ `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `ipr_no` varchar(64) NOT NULL COMMENT 'IPR number', `ipr_name` varchar(300) NOT NULL COMMENT 'IPR name', `ipr_type` varchar(32) NOT NULL COMMENT 'IPR type', `ipr_stage` varchar(32) DEFAULT 'DRAFT' COMMENT 'IPR stage', `owner_id` bigint NOT NULL COMMENT 'member owner', `planned_submit_date` date DEFAULT NULL COMMENT 'planned submit date', `actual_submit_date` date DEFAULT NULL COMMENT 'actual submit date', `acceptance_no` varchar(128) DEFAULT NULL COMMENT 'acceptance number', `certificate_no` varchar(128) DEFAULT NULL COMMENT 'certificate number', `authorized_date` date DEFAULT NULL COMMENT 'authorized date', `evidence_url` varchar(1000) DEFAULT NULL COMMENT 'evidence URL', `status` varchar(16) DEFAULT 'ACTIVE' COMMENT 'record status', `stage_change_reason` varchar(1000) DEFAULT NULL COMMENT 'audited stage change reason', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
  `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker',
  PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_ipr_no` (`ipr_no`,`active_unique_flag`), KEY `idx_lab_ipr_owner_stage` (`owner_id`,`ipr_stage`), KEY `idx_lab_ipr_type` (`ipr_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='intellectual property right';
@@ -193,6 +193,40 @@ SET @ailab_ddl = (SELECT IF(
  'UPDATE `lab_ipr` SET `actual_submit_date`=COALESCE(`actual_submit_date`,`submit_date`)',
  'SELECT 1'));
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+UPDATE `lab_ipr` SET `ipr_stage`='DRAFT' WHERE `ipr_stage`='DRAFTING';
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 1,
+ 'ALTER TABLE `lab_ipr` ALTER COLUMN `ipr_stage` SET DEFAULT ''DRAFT''',
+ 'SELECT 1') FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_ipr' AND column_name='ipr_stage' AND column_default='DRAFTING');
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+
+SET @ailab_asset_business_index_missing = (SELECT IF(COUNT(*) = 0,1,0) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_asset' AND index_name='uk_lab_asset_business');
+UPDATE `lab_asset` SET `asset_version`=`asset_no`
+WHERE (`asset_version` IS NULL OR TRIM(`asset_version`)='') AND @ailab_asset_business_index_missing=1;
+
+SET @ailab_skill_name_index_missing = (SELECT IF(COUNT(*) = 0,1,0) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_skill' AND index_name='uk_lab_skill_name');
+UPDATE `lab_skill` target
+JOIN (
+ SELECT ranked.id AS duplicate_skill_id
+ FROM (
+  SELECT id,ROW_NUMBER() OVER(PARTITION BY skill_name ORDER BY id) AS duplicate_rank
+  FROM `lab_skill` WHERE del_flag='0' AND status='ACTIVE'
+ ) ranked
+ WHERE ranked.duplicate_rank>1
+) duplicates ON duplicates.duplicate_skill_id=target.id
+SET target.skill_name=CONCAT(LEFT(skill_name,35),' [',LEFT(skill_code,40),':',id,']')
+WHERE @ailab_skill_name_index_missing=1;
+
+UPDATE `lab_skill` target
+JOIN (
+ SELECT ranked.id AS duplicate_skill_id
+ FROM (
+  SELECT id,ROW_NUMBER() OVER(PARTITION BY skill_name ORDER BY id) AS duplicate_rank
+  FROM `lab_skill` WHERE del_flag='0' AND status='ACTIVE'
+ ) ranked
+ WHERE ranked.duplicate_rank>1
+) collisions ON collisions.duplicate_skill_id=target.id
+SET target.skill_name=CONCAT('[ailab-legacy:',id,':',LEFT(skill_code,32),'] ',LEFT(skill_name,30))
+WHERE @ailab_skill_name_index_missing=1;
 
 SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,'ALTER TABLE `lab_asset` ADD UNIQUE INDEX `uk_lab_asset_business` (`asset_name`,`asset_version`,`asset_type`,`active_unique_flag`)','SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_asset' AND index_name='uk_lab_asset_business');
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
@@ -260,7 +294,7 @@ INSERT INTO `sys_dict_data` (`dict_code`,`dict_sort`,`dict_label`,`dict_value`,`
 (30150,1,'Hardware','hardware','lab_asset_type','N','0','admin',NOW()),(30151,2,'Algorithm','algorithm','lab_asset_type','N','0','admin',NOW()),(30152,3,'Platform','platform','lab_asset_type','N','0','admin',NOW()),
 (30160,1,'Verifying','VERIFYING','lab_asset_stage','N','0','admin',NOW()),(30161,2,'Deployed','DEPLOYED','lab_asset_stage','N','0','admin',NOW()),(30162,3,'Accepted','ACCEPTED','lab_asset_stage','N','0','admin',NOW()),
 (30170,1,'Software copyright','SOFTWARE_COPYRIGHT','lab_ipr_type','N','0','admin',NOW()),(30171,2,'Patent','PATENT','lab_ipr_type','N','0','admin',NOW()),(30172,3,'Certification','CERTIFICATION','lab_ipr_type','N','0','admin',NOW()),
-(30180,1,'Drafting','DRAFTING','lab_ipr_stage','N','0','admin',NOW()),(30181,2,'Submitted','SUBMITTED','lab_ipr_stage','N','0','admin',NOW()),(30182,3,'Accepted','ACCEPTED','lab_ipr_stage','N','0','admin',NOW()),(30183,4,'Authorized','AUTHORIZED','lab_ipr_stage','N','0','admin',NOW()),
+(30180,1,'Draft','DRAFT','lab_ipr_stage','N','0','admin',NOW()),(30181,2,'Preparing','PREPARING','lab_ipr_stage','N','0','admin',NOW()),(30182,3,'Submitted','SUBMITTED','lab_ipr_stage','N','0','admin',NOW()),(30183,4,'Accepted','ACCEPTED','lab_ipr_stage','N','0','admin',NOW()),(30184,5,'Authorized','AUTHORIZED','lab_ipr_stage','N','0','admin',NOW()),
 (30190,1,'Table','TABLE','lab_section_type','N','0','admin',NOW()),(30191,2,'Statistic','STAT','lab_section_type','N','0','admin',NOW()),(30192,3,'Text','TEXT','lab_section_type','N','0','admin',NOW()),(30193,4,'Manual','MANUAL','lab_section_type','N','0','admin',NOW()),(30194,5,'Grouped text','GROUP_TEXT','lab_section_type','N','0','admin',NOW()),(30195,6,'Chart','CHART','lab_section_type','N','0','admin',NOW()),
 (30200,1,'Active','ACTIVE','lab_goal_status','N','0','admin',NOW()),(30201,2,'Completed','COMPLETED','lab_goal_status','N','0','admin',NOW()),(30202,3,'Terminated','TERMINATED','lab_goal_status','N','0','admin',NOW()),
 (30210,1,'Draft','DRAFT','lab_report_status','N','0','admin',NOW()),(30211,2,'Generated','GENERATED','lab_report_status','N','0','admin',NOW()),(30212,3,'Final','FINAL','lab_report_status','N','0','admin',NOW()),(30220,1,'Pending','PENDING','lab_report_job_status','N','0','admin',NOW()),(30221,2,'Running','RUNNING','lab_report_job_status','N','0','admin',NOW()),(30222,3,'Success','SUCCESS','lab_report_job_status','N','0','admin',NOW()),(30223,4,'Failed','FAILED','lab_report_job_status','N','0','admin',NOW()),(30230,1,'Pending','PENDING','lab_artifact_status','N','0','admin',NOW()),(30231,2,'Ready','READY','lab_artifact_status','N','0','admin',NOW()),(30232,3,'Failed','FAILED','lab_artifact_status','N','0','admin',NOW()),(30240,1,'Pending','PENDING','lab_review_status','N','0','admin',NOW()),(30241,2,'Approved','APPROVED','lab_review_status','N','0','admin',NOW()),(30242,3,'Rejected','REJECTED','lab_review_status','N','0','admin',NOW());
@@ -338,7 +372,7 @@ INSERT INTO `lab_task_quality_gate` (`id`,`task_id`,`gate_no`,`gate_name`,`gate_
 INSERT INTO `lab_task_block_event` (`id`,`task_id`,`episode_no`,`block_type`,`block_reason`,`block_start_time`,`block_end_time`,`block_status`,`resolver_id`,`resolution`,`create_by`,`create_time`) VALUES (30001,30003,1,'DEPENDENCY','Observability metrics not finalized','2026-08-06 09:00:00',NULL,'OPEN',NULL,NULL,'admin',NOW()),(30002,30004,1,'DEPENDENCY','Metric labels pending','2026-08-05 10:00:00',NULL,'OPEN',NULL,NULL,'admin',NOW());
 INSERT INTO `lab_reminder` (`id`,`task_id`,`recipient_id`,`reminder_type`,`reminder_content`,`read_flag`,`send_time`,`idempotency_key`,`create_by`,`create_time`) VALUES (30001,30003,30003,'BLOCK','Release is blocked by metrics','0',NOW(),'block-30003-20260806','admin',NOW()),(30002,30001,30001,'REVIEW','Benchmark requires review','0',NOW(),'review-30001-20260807','admin',NOW());
 INSERT INTO `lab_one2one` (`id`,`member_id`,`leader_id`,`meeting_date`,`topic`,`facts_evidence`,`difficulties`,`next_action`,`manager_comment`,`status`,`create_by`,`create_time`) VALUES (30001,30006,30002,'2026-08-07','Evaluation growth','Experiment records are complete','Cross-team dataset access is slow','Document prompt methodology','Keep the evidence trail and request dataset access','OPEN','admin',NOW());
-INSERT INTO `lab_ipr` (`id`,`ipr_no`,`ipr_name`,`ipr_type`,`ipr_stage`,`owner_id`,`planned_submit_date`,`actual_submit_date`,`acceptance_no`,`certificate_no`,`authorized_date`,`evidence_url`,`status`,`create_by`,`create_time`) VALUES (30001,'IPR-2026-01','Evaluation pipeline software','SOFTWARE_COPYRIGHT','SUBMITTED',30002,'2026-07-31','2026-07-25',NULL,NULL,NULL,'https://example.invalid/ipr/1','ACTIVE','admin',NOW()),(30002,'IPR-2026-02','Inference routing patent','PATENT','DRAFTING',30003,'2026-10-31',NULL,NULL,NULL,NULL,NULL,'ACTIVE','admin',NOW());
+INSERT INTO `lab_ipr` (`id`,`ipr_no`,`ipr_name`,`ipr_type`,`ipr_stage`,`owner_id`,`planned_submit_date`,`actual_submit_date`,`acceptance_no`,`certificate_no`,`authorized_date`,`evidence_url`,`status`,`create_by`,`create_time`) VALUES (30001,'IPR-2026-01','Evaluation pipeline software','SOFTWARE_COPYRIGHT','SUBMITTED',30002,'2026-07-31','2026-07-25',NULL,NULL,NULL,'https://example.invalid/ipr/1','ACTIVE','admin',NOW()),(30002,'IPR-2026-02','Inference routing patent','PATENT','DRAFT',30003,'2026-10-31',NULL,NULL,NULL,NULL,NULL,'ACTIVE','admin',NOW());
 INSERT INTO `lab_collaboration_record` (`id`,`task_id`,`period`,`from_member_id`,`to_member_id`,`category`,`signed_score`,`evidence_url`,`reviewer_id`,`review_status`,`review_time`,`review_comment`,`create_by`,`create_time`) VALUES (30001,30003,'2026-08',30005,30003,'TECHNICAL',8,'https://example.invalid/collab/1',30001,'APPROVED',NOW(),'Latency dashboard support','admin',NOW());
 INSERT INTO `lab_perf_score` (`id`,`member_id`,`period`,`revision_no`,`current_flag`,`score`,`detail_json`,`red_line_flag`,`revoked_flag`,`calibration_status`,`calibrator_id`,`calibration_note`,`create_by`,`create_time`) VALUES (30001,30002,'2026-07',1,'1',92.50,JSON_OBJECT('delivery',45,'collaboration',47),'0','0','CALIBRATED',30001,'Validated at calibration','admin',NOW()),(30002,30003,'2026-07',1,'1',88.00,JSON_OBJECT('delivery',40,'collaboration',48),'0','0','CALIBRATED',30001,'Validated at calibration','admin',NOW()),(30003,30005,'2026-07',1,'1',76.00,JSON_OBJECT('delivery',35,'collaboration',41),'0','0','PENDING',NULL,NULL,'admin',NOW());
 INSERT INTO `lab_period_close` (`id`,`period`,`close_status`,`close_by`,`close_time`,`close_reason`,`version`,`create_by`,`create_time`) VALUES (30001,'2026-07','CLOSED','lab_manager','2026-08-03 18:00:00','Monthly assessment closed',1,'admin',NOW());

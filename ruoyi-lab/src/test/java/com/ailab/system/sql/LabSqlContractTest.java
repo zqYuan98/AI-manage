@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 class LabSqlContractTest {
     private static final Set<String> TABLES = set("lab_goal", "lab_task", "lab_task_evidence", "lab_task_quality_gate", "lab_task_block_event", "lab_reminder", "lab_asset", "lab_member", "lab_skill", "lab_member_skill", "lab_one2one", "lab_ipr", "lab_collaboration_record", "lab_perf_score", "lab_period_close", "lab_report_template", "lab_report_section", "lab_report_summary", "lab_report_instance", "lab_report_job");
     private static final Set<String> AUDIT = set("id", "del_flag", "create_by", "create_time", "update_by", "update_time", "remark");
-    private static final Set<String> DICTS = set("lab_biz_line|hardware", "lab_biz_line|platform", "lab_biz_line|algorithm", "lab_biz_line|manage", "lab_task_workflow_status|DRAFT", "lab_task_workflow_status|ACTIVE", "lab_task_workflow_status|PENDING_REVIEW", "lab_task_workflow_status|CONFIRMED", "lab_task_result_status|DOING", "lab_task_result_status|EXCEEDED", "lab_task_result_status|ONTIME", "lab_task_result_status|DELAYED", "lab_task_result_status|UNDONE", "lab_task_type|key", "lab_task_type|daily", "lab_task_level|month", "lab_task_level|week", "lab_asset_type|hardware", "lab_asset_type|algorithm", "lab_asset_type|platform", "lab_asset_stage|VERIFYING", "lab_asset_stage|DEPLOYED", "lab_asset_stage|ACCEPTED", "lab_ipr_type|SOFTWARE_COPYRIGHT", "lab_ipr_type|PATENT", "lab_ipr_type|CERTIFICATION", "lab_ipr_stage|DRAFTING", "lab_ipr_stage|SUBMITTED", "lab_ipr_stage|ACCEPTED", "lab_ipr_stage|AUTHORIZED", "lab_section_type|TABLE", "lab_section_type|STAT", "lab_section_type|TEXT", "lab_section_type|MANUAL", "lab_section_type|GROUP_TEXT", "lab_section_type|CHART", "lab_goal_status|ACTIVE", "lab_goal_status|COMPLETED", "lab_goal_status|TERMINATED");
+    private static final Set<String> DICTS = set("lab_biz_line|hardware", "lab_biz_line|platform", "lab_biz_line|algorithm", "lab_biz_line|manage", "lab_task_workflow_status|DRAFT", "lab_task_workflow_status|ACTIVE", "lab_task_workflow_status|PENDING_REVIEW", "lab_task_workflow_status|CONFIRMED", "lab_task_result_status|DOING", "lab_task_result_status|EXCEEDED", "lab_task_result_status|ONTIME", "lab_task_result_status|DELAYED", "lab_task_result_status|UNDONE", "lab_task_type|key", "lab_task_type|daily", "lab_task_level|month", "lab_task_level|week", "lab_asset_type|hardware", "lab_asset_type|algorithm", "lab_asset_type|platform", "lab_asset_stage|VERIFYING", "lab_asset_stage|DEPLOYED", "lab_asset_stage|ACCEPTED", "lab_ipr_type|SOFTWARE_COPYRIGHT", "lab_ipr_type|PATENT", "lab_ipr_type|CERTIFICATION", "lab_ipr_stage|DRAFT", "lab_ipr_stage|PREPARING", "lab_ipr_stage|SUBMITTED", "lab_ipr_stage|ACCEPTED", "lab_ipr_stage|AUTHORIZED", "lab_section_type|TABLE", "lab_section_type|STAT", "lab_section_type|TEXT", "lab_section_type|MANUAL", "lab_section_type|GROUP_TEXT", "lab_section_type|CHART", "lab_goal_status|ACTIVE", "lab_goal_status|COMPLETED", "lab_goal_status|TERMINATED");
     private static final Set<String> PERMISSIONS = set("lab:dashboard:view", "lab:goal:list", "lab:goal:add", "lab:goal:edit", "lab:goal:remove", "lab:goal:activate", "lab:task:list", "lab:task:add", "lab:task:edit", "lab:task:remove", "lab:task:evidence", "lab:task:review", "lab:member:list", "lab:member:add", "lab:member:edit", "lab:member:remove", "lab:skill:list", "lab:skill:config", "lab:one2one:list", "lab:one2one:add", "lab:one2one:edit", "lab:asset:list", "lab:asset:add", "lab:asset:edit", "lab:asset:remove", "lab:ipr:list", "lab:ipr:add", "lab:ipr:edit", "lab:ipr:remove", "lab:perf:list", "lab:perf:close", "lab:perf:reopen", "lab:perf:redline", "lab:perf:revoke", "lab:perf:calibrate", "lab:template:list", "lab:template:config", "lab:template:import", "lab:template:export", "lab:report:list", "lab:report:generate", "lab:report:retry", "lab:report:download", "lab:report:finalize", "lab:report:sensitive");
     private static final Map<String, Set<String>> FIELDS = fields();
     private static final Set<String> LOOKUP_INDEXES = lookupIndexes();
@@ -62,6 +62,11 @@ class LabSqlContractTest {
         assertDemoCredentials(sql);
         List<String> dictionaryPairs = dictPairList(sql);
         for (String pair : DICTS) assertTrue(dictionaryPairs.contains(pair.toLowerCase(Locale.ROOT)), "missing dict " + pair);
+        Set<String> iprStages = new LinkedHashSet<String>();
+        for (String pair : dictionaryPairs) if (pair.startsWith("lab_ipr_stage|")) iprStages.add(pair);
+        assertEquals(set("lab_ipr_stage|draft", "lab_ipr_stage|preparing", "lab_ipr_stage|submitted",
+                "lab_ipr_stage|accepted", "lab_ipr_stage|authorized"), iprStages,
+                "IPR service stages and SQL dictionary must have one exact vocabulary");
         assertEquals(dictionaryPairs.size(), new HashSet<>(dictionaryPairs).size(), "duplicate dictionary type/value tuple");
         for (String permission : PERMISSIONS) assertTrue(sql.contains("'" + permission + "'"), "missing permission " + permission);
         assertEquals(set("TABLE","STAT","TEXT","MANUAL","GROUP_TEXT","CHART"), sectionTypes(sql), "section renderer types");
@@ -106,6 +111,18 @@ class LabSqlContractTest {
         assertTrue(query.contains("left join lab_member m on m.user_id=u.user_id and m.del_flag='0'"),
                 "any existing member profile must be excluded so inactive history is explicitly reactivated");
         assertTrue(!query.contains("m.member_status='active'"), "inactive profiles must not reappear as add candidates");
+    }
+
+    @Test
+    void matrixLockingReadDoesNotJoinOrImplicitlyLockSkillRows() throws IOException {
+        String xml = new String(Files.readAllBytes(findRoot().resolve("ruoyi-lab/src/main/resources/mapper/lab/LabMemberMapper.xml")), StandardCharsets.UTF_8)
+                .toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        Matcher matcher = Pattern.compile("(?is)<select id=\"selectmemberskillsforupdate\".*?</select>").matcher(xml);
+        assertTrue(matcher.find(), "member-skill current locking read missing");
+        String query = matcher.group();
+        assertTrue(query.contains("from lab_member_skill ms"), "locking read must target member-skill rows");
+        assertTrue(query.contains("order by ms.skill_id for update"), "member-skill rows must lock in skill id order");
+        assertTrue(!query.contains(" join "), "locking current rows must not implicitly lock the skill table");
     }
 
     private static void assertJobSeeds(String sql) {
@@ -197,6 +214,28 @@ class LabSqlContractTest {
                 "legacy IPR application number must be independently detected and backfilled");
         assertTrue(compact.contains("column_name='submit_date') = 1, 'update lab_ipr set actual_submit_date=coalesce(actual_submit_date,submit_date)', 'select 1'"),
                 "legacy IPR submit date must be independently detected and backfilled");
+        assertTrue(compact.contains("update lab_ipr set ipr_stage='draft' where ipr_stage='drafting'"),
+                "legacy draft stage must migrate into the configured IPR vocabulary");
+        assertTrue(compact.contains("alter table lab_ipr alter column ipr_stage set default ''draft''"),
+                "upgraded IPR columns must not keep producing the removed DRAFTING alias");
+        String assetVersionBackfill = "update lab_asset set asset_version=asset_no where (asset_version is null or trim(asset_version)='')";
+        String assetBusinessIndex = "alter table lab_asset add unique index uk_lab_asset_business (asset_name,asset_version,asset_type,active_unique_flag)";
+        assertTrue(compact.contains(assetVersionBackfill),
+                "legacy empty asset versions must derive from the already unique asset number");
+        assertTrue(compact.indexOf(assetVersionBackfill) < compact.indexOf(assetBusinessIndex),
+                "legacy asset versions must be repaired before the business unique index is added");
+        assertTrue(compact.contains("row_number() over(partition by skill_name order by id)"),
+                "active duplicate legacy skill names require deterministic first-row ranking");
+        assertTrue(compact.contains("concat(left(skill_name,35),' [',left(skill_code,40),':',id,']')"),
+                "later duplicate skill names require a stable bounded display-name suffix");
+        assertTrue(compact.contains("concat('[ailab-legacy:',id,':',left(skill_code,32),'] ',left(skill_name,30))"),
+                "generated legacy names that collide globally require a second deterministic code/id suffix");
+        assertTrue(compact.indexOf("row_number() over(partition by skill_name order by id)")
+                        != compact.lastIndexOf("row_number() over(partition by skill_name order by id)"),
+                "legacy skill repair must rerank names after the initial rename to catch generated-name collisions");
+        String skillNameIndex = "alter table lab_skill add unique index uk_lab_skill_name (skill_name,active_unique_flag)";
+        assertTrue(compact.indexOf("row_number() over(partition by skill_name order by id)") < compact.indexOf(skillNameIndex),
+                "legacy skill names must be repaired before the active-name unique index is added");
         assertTrue(Files.isRegularFile(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")),
                 "legacy MySQL fixture is required");
         String legacy = new String(Files.readAllBytes(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")), StandardCharsets.UTF_8)
@@ -211,6 +250,15 @@ class LabSqlContractTest {
         assertTrue(legacy.contains("create table `lab_ipr`") && legacy.contains("`application_no`") && legacy.contains("`submit_date`")
                         && !legacy.contains("`acceptance_no`"),
                 "legacy IPR fixture must contain the preceding filing columns");
+        assertTrue(legacy.contains("create table `lab_asset`") && !legacy.contains("`asset_version`"),
+                "legacy asset fixture must predate business versions");
+        assertTrue(legacy.indexOf("legacy shared asset") != legacy.lastIndexOf("legacy shared asset")
+                        && legacy.contains("legacy-asset-a") && legacy.contains("legacy-asset-b"),
+                "legacy asset fixture must contain a real business-key collision");
+        assertTrue(legacy.contains("create table `lab_skill`") && legacy.indexOf("legacy duplicate skill") != legacy.lastIndexOf("legacy duplicate skill")
+                        && legacy.contains("legacy-skill-a") && legacy.contains("legacy-skill-b") && legacy.contains("legacy-skill-c")
+                        && legacy.contains("legacy duplicate skill [legacy-skill-b:39994]"),
+                "legacy skill fixture must contain duplicate names and a pre-existing generated-name collision");
         assertTrue(legacy.contains("legacy one-to-one feedback") && legacy.contains("legacy action item")
                         && legacy.contains("legacy-application-39991") && legacy.contains("2026-06-15"),
                 "legacy Task 5 fixture must seed history for real MySQL upgrade assertions");

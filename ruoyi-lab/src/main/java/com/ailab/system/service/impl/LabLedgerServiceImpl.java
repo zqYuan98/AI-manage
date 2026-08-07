@@ -197,10 +197,10 @@ public class LabLedgerServiceImpl implements LabLedgerService {
 
     private void validateIpr(LabIpr ipr){
         int stage=stage(ipr.getIprStage());
-        if(stage>=1&&ipr.getActualSubmitDate()==null)throw new ServiceException("Submitted or later IPR requires actual submit date");
+        if(stage>=stage("SUBMITTED")&&ipr.getActualSubmitDate()==null)throw new ServiceException("Submitted or later IPR requires actual submit date");
         if(ipr.getActualSubmitDate()!=null&&toLocalDate(ipr.getActualSubmitDate()).isAfter(LocalDate.now(clock)))throw new ServiceException("Actual submit date cannot be in the future");
-        if(stage>=2&&blank(ipr.getAcceptanceNo()))throw new ServiceException("Accepted or later IPR requires an acceptance number");
-        if(stage>=3&&blank(ipr.getCertificateNo()))throw new ServiceException("Authorized or completed IPR requires a certificate number");
+        if(stage>=stage("ACCEPTED")&&blank(ipr.getAcceptanceNo()))throw new ServiceException("Accepted or later IPR requires an acceptance number");
+        if(stage>=stage("AUTHORIZED")&&blank(ipr.getCertificateNo()))throw new ServiceException("Authorized IPR requires a certificate number");
     }
 
     private List<LabMember> lockActiveMembers(Long...ids){
@@ -232,7 +232,7 @@ public class LabLedgerServiceImpl implements LabLedgerService {
     private void requireOne2OneInput(LabOne2One r){if(r==null||r.getMemberId()==null||r.getLeaderId()==null||r.getMeetingDate()==null)throw new ServiceException("Member, manager and meeting date are required");if(same(r.getMemberId(),r.getLeaderId()))throw new ServiceException("Talk subject and manager must differ");}
     private void requireIprInput(LabIpr i){if(i==null||blank(i.getIprNo())||blank(i.getIprName())||blank(i.getIprType())||blank(i.getIprStage())||i.getOwnerId()==null)throw new ServiceException("IPR number, name, type, stage and owner are required");stage(i.getIprStage());}
     private int stage(String name){Integer value=IPR_STAGE_ORDER.get(name);if(value==null)throw new ServiceException("Unsupported IPR stage");return value;}
-    private static Map<String,Integer> stageOrder(){Map<String,Integer> m=new HashMap<String,Integer>();m.put("DRAFTING",0);m.put("SUBMITTED",1);m.put("ACCEPTED",2);m.put("AUTHORIZED",3);m.put("COMPLETED",3);return m;}
+    private static Map<String,Integer> stageOrder(){Map<String,Integer> m=new HashMap<String,Integer>();m.put("DRAFT",0);m.put("PREPARING",1);m.put("SUBMITTED",2);m.put("ACCEPTED",3);m.put("AUTHORIZED",4);return m;}
     private LocalDate toLocalDate(Date date){return date.toInstant().atZone(clock.getZone()).toLocalDate();}
     private LabAsset requireAsset(LabAsset v){if(v==null)throw new ServiceException("Asset does not exist");return v;}
     private LabMember requireMember(LabMember v){if(v==null)throw new ServiceException("Member does not exist");return v;}

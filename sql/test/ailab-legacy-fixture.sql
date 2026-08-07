@@ -3,6 +3,8 @@ DROP TABLE IF EXISTS `lab_task_quality_gate`;
 DROP TABLE IF EXISTS `lab_task_block_event`;
 DROP TABLE IF EXISTS `lab_one2one`;
 DROP TABLE IF EXISTS `lab_ipr`;
+DROP TABLE IF EXISTS `lab_asset`;
+DROP TABLE IF EXISTS `lab_skill`;
 
 CREATE TABLE `lab_task_quality_gate` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key',
@@ -46,6 +48,51 @@ CREATE TABLE `lab_task_block_event` (
  KEY `idx_lab_block_task_open` (`task_id`,`block_status`,`block_start_time`),
  KEY `idx_lab_block_start` (`block_start_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='legacy task blocking episode';
+
+CREATE TABLE `lab_asset` (
+ `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+ `asset_no` varchar(64) NOT NULL COMMENT 'asset number',
+ `asset_name` varchar(200) NOT NULL COMMENT 'asset name',
+ `asset_type` varchar(32) NOT NULL COMMENT 'asset type',
+ `asset_stage` varchar(32) DEFAULT 'VERIFYING' COMMENT 'asset stage',
+ `primary_owner_id` bigint NOT NULL COMMENT 'primary owner',
+ `backup_owner_id` bigint DEFAULT NULL COMMENT 'backup owner',
+ `resource_url` varchar(1000) DEFAULT NULL COMMENT 'resource URL',
+ `repository_url` varchar(1000) DEFAULT NULL COMMENT 'repository URL',
+ `capacity_desc` varchar(1000) DEFAULT NULL COMMENT 'capacity description',
+ `status` varchar(16) DEFAULT 'ACTIVE' COMMENT 'asset status',
+ `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag',
+ `create_by` varchar(64) DEFAULT '' COMMENT 'creator',
+ `create_time` datetime DEFAULT NULL COMMENT 'created time',
+ `update_by` varchar(64) DEFAULT '' COMMENT 'updater',
+ `update_time` datetime DEFAULT NULL COMMENT 'updated time',
+ `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
+ `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker',
+ PRIMARY KEY (`id`),
+ UNIQUE KEY `uk_lab_asset_no` (`asset_no`,`active_unique_flag`),
+ KEY `idx_lab_asset_primary_status` (`primary_owner_id`,`status`),
+ KEY `idx_lab_asset_backup` (`backup_owner_id`),
+ KEY `idx_lab_asset_type_stage` (`asset_type`,`asset_stage`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='legacy laboratory asset';
+
+CREATE TABLE `lab_skill` (
+ `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+ `skill_code` varchar(64) NOT NULL COMMENT 'skill code',
+ `skill_name` varchar(100) NOT NULL COMMENT 'skill name',
+ `skill_category` varchar(64) DEFAULT NULL COMMENT 'skill category',
+ `skill_desc` varchar(1000) DEFAULT NULL COMMENT 'skill description',
+ `status` varchar(16) DEFAULT 'ACTIVE' COMMENT 'status',
+ `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag',
+ `create_by` varchar(64) DEFAULT '' COMMENT 'creator',
+ `create_time` datetime DEFAULT NULL COMMENT 'created time',
+ `update_by` varchar(64) DEFAULT '' COMMENT 'updater',
+ `update_time` datetime DEFAULT NULL COMMENT 'updated time',
+ `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
+ `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag` = '0' THEN 1 ELSE NULL END) STORED COMMENT 'active record unique marker',
+ PRIMARY KEY (`id`),
+ UNIQUE KEY `uk_lab_skill_code` (`skill_code`,`active_unique_flag`),
+ KEY `idx_lab_skill_category` (`skill_category`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='legacy skill dictionary';
 
 CREATE TABLE `lab_one2one` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key',
@@ -101,10 +148,25 @@ VALUES
  (39991,39990,'DEPENDENCY','Legacy first episode','2026-07-01 09:00:00','CLOSED','it','2026-07-01 09:00:00'),
  (39992,39990,'DEPENDENCY','Legacy second episode','2026-07-02 09:00:00','OPEN','it','2026-07-02 09:00:00');
 
+INSERT INTO `lab_asset`
+ (`id`,`asset_no`,`asset_name`,`asset_type`,`asset_stage`,`primary_owner_id`,`status`,`create_by`,`create_time`)
+VALUES
+ (39993,'LEGACY-ASSET-A','Legacy shared asset','algorithm','DEPLOYED',39203,'ACTIVE','it',NOW()),
+ (39994,'LEGACY-ASSET-B','Legacy shared asset','algorithm','DEPLOYED',39203,'ACTIVE','it',NOW());
+
+INSERT INTO `lab_skill`
+ (`id`,`skill_code`,`skill_name`,`skill_category`,`status`,`create_by`,`create_time`)
+VALUES
+ (39993,'LEGACY-SKILL-A','Legacy Duplicate Skill','algorithm','ACTIVE','it',NOW()),
+ (39994,'LEGACY-SKILL-B','Legacy Duplicate Skill','algorithm','ACTIVE','it',NOW()),
+ (39995,'LEGACY-SKILL-C','Legacy Duplicate Skill [LEGACY-SKILL-B:39994]','algorithm','ACTIVE','it',NOW());
+
 INSERT INTO `lab_one2one`
  (`id`,`member_id`,`leader_id`,`meeting_date`,`topic`,`feedback`,`action_items`,`status`,`create_by`,`create_time`)
 VALUES (39991,39203,39202,'2026-06-16','Legacy discussion','Legacy one-to-one feedback','Legacy action item','OPEN','it',NOW());
 
 INSERT INTO `lab_ipr`
  (`id`,`ipr_no`,`ipr_name`,`ipr_type`,`ipr_stage`,`owner_id`,`application_no`,`submit_date`,`evidence_url`,`create_by`,`create_time`)
-VALUES (39991,'IPR-LEGACY-39991','Legacy filing','PATENT','ACCEPTED',39203,'LEGACY-APPLICATION-39991','2026-06-15','https://example.invalid/legacy/ipr','it',NOW());
+VALUES
+ (39991,'IPR-LEGACY-39991','Legacy filing','PATENT','ACCEPTED',39203,'LEGACY-APPLICATION-39991','2026-06-15','https://example.invalid/legacy/ipr','it',NOW()),
+ (39992,'IPR-LEGACY-39992','Legacy draft filing','PATENT','DRAFTING',39203,NULL,NULL,'https://example.invalid/legacy/ipr-draft','it',NOW());
