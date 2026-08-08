@@ -46,6 +46,57 @@ class WordReportExporterTest {
     }
 
     @Test
+    void tableGeometryAndCellMarginsAreValidSiblingOoxmlElements() throws Exception {
+        ReportSectionData table = new ReportSectionData("table", "TABLE", "table",
+                Collections.singletonList(map("a", "A", "b", "B", "c", "C")),
+                map("fields", Arrays.asList("a", "b", "c"),
+                        "headers", Arrays.asList("甲", "乙", "丙"),
+                        "widths", Arrays.asList("20%", "30%", "50%")));
+        ReportData value = new ReportData(report().getContext(), "t", 1,
+                Collections.singletonList(table), Collections.<String,Object>emptyMap());
+
+        org.w3c.dom.Document document = xml(xmlEntries(new WordReportExporter().export(value))
+                .get("word/document.xml"));
+        String namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        org.w3c.dom.NodeList gridColumns = document.getElementsByTagNameNS(namespace, "gridCol");
+        org.w3c.dom.NodeList cellWidths = document.getElementsByTagNameNS(namespace, "tcW");
+        org.w3c.dom.NodeList margins = document.getElementsByTagNameNS(namespace, "tcMar");
+
+        assertEquals(3, gridColumns.getLength());
+        assertEquals(6, cellWidths.getLength());
+        assertEquals(6, margins.getLength());
+        assertEquals(1, document.getElementsByTagNameNS(namespace, "sectPr").getLength());
+        assertEquals(1, document.getElementsByTagNameNS(namespace, "pgSz").getLength());
+        assertEquals(1, document.getElementsByTagNameNS(namespace, "pgMar").getLength());
+        assertEquals(0, document.getElementsByTagNameNS(namespace, "pStyle").getLength(),
+                "direct run formatting keeps LibreOffice from flattening tables on unresolved custom pStyle");
+        org.w3c.dom.Element firstCellProperties = (org.w3c.dom.Element) document
+                .getElementsByTagNameNS(namespace, "tcPr").item(0);
+        java.util.List<String> propertyOrder = new java.util.ArrayList<String>();
+        for (int child = 0; child < firstCellProperties.getChildNodes().getLength(); child++) {
+            org.w3c.dom.Node node = firstCellProperties.getChildNodes().item(child);
+            if (node.getNodeType() == org.w3c.dom.Node.ELEMENT_NODE) propertyOrder.add(node.getLocalName());
+        }
+        assertEquals(Arrays.asList("tcW", "shd", "tcMar", "vAlign"), propertyOrder);
+        for (int index = 0; index < margins.getLength(); index++) {
+            org.w3c.dom.NodeList children = margins.item(index).getChildNodes();
+            java.util.List<String> names = new java.util.ArrayList<String>();
+            for (int child = 0; child < children.getLength(); child++)
+                if (children.item(child).getNodeType() == org.w3c.dom.Node.ELEMENT_NODE)
+                    names.add(children.item(child).getLocalName());
+            assertEquals(Arrays.asList("top", "left", "bottom", "right"), names);
+        }
+        org.w3c.dom.NodeList paragraphs = document.getElementsByTagNameNS(namespace, "p");
+        for (int index = 0; index < paragraphs.getLength(); index++) {
+            int propertyBlocks = 0; org.w3c.dom.NodeList children = paragraphs.item(index).getChildNodes();
+            for (int child = 0; child < children.getLength(); child++)
+                if (children.item(child).getNodeType() == org.w3c.dom.Node.ELEMENT_NODE
+                        && "pPr".equals(children.item(child).getLocalName())) propertyBlocks++;
+            assertTrue(propertyBlocks <= 1, "a paragraph must have at most one pPr block");
+        }
+    }
+
+    @Test
     void writesAStableSafeOoxmlPackageForEveryCanonicalSectionType() throws Exception {
         WordReportExporter exporter = new WordReportExporter();
         ReportData report = report();
@@ -84,6 +135,12 @@ class WordReportExporterTest {
             tableSize |= "17".equals(size); bodySize |= "21".equals(size);
         }
         assertTrue(tableSize && bodySize);
+        org.w3c.dom.NodeList extents = xml(document).getElementsByTagNameNS(
+                "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing", "extent");
+        assertEquals(1, extents.getLength());
+        long contentWidthEmu = 9360L * 635L;
+        assertTrue(Long.parseLong(((org.w3c.dom.Element) extents.item(0)).getAttribute("cx")) <= contentWidthEmu,
+                "embedded chart must fit inside the Letter page content width");
     }
 
     @Test

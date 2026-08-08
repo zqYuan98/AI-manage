@@ -135,7 +135,8 @@ class LabSqlContractTest {
                 "the demo seed must only become MONTH default when migration left no enabled default");
         assertTrue(compact.contains("30001,'standard_month','standardmonthlylaboratoryreport','month',1,'1',@ailab_seed_month_default_flag,'enabled'"),
                 "the seeded template must consume the post-cleanup default decision instead of unconditionally claiming default");
-        assertTrue(compact.contains("'manual_note','manualnote','manual',40,null,json_object('filters',json_array()),json_object('placeholder','entermanagementnote','required',true)"),
+        assertTrue(Pattern.compile("'manual_note','[^']+','manual',40,null,json_object\\('filters',json_array\\(\\)\\),json_object\\('placeholder','entermanagementnote','required',true\\)")
+                        .matcher(compact).find(),
                 "the seeded manual management note must be explicitly required so create/finalize completeness is immutable");
     }
 

@@ -36,10 +36,13 @@ import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTFonts;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTHpsMeasure;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTShd;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTStyle;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblGrid;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblWidth;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTcPr;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTVerticalJc;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.STShd;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.STStyleType;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.STTblWidth;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.STVerticalJc;
 import org.springframework.stereotype.Component;
 import org.apache.xmlbeans.XmlCursor;
@@ -49,6 +52,7 @@ import javax.xml.namespace.QName;
 @Component
 public final class WordReportExporter implements ReportExporter {
     private static final String FONT = "Microsoft YaHei";
+    private static final int TABLE_WIDTH_DXA = 9360;
     private static final int MAX_SECTIONS = 200, MAX_ROWS = 10000, MAX_CELLS = 100000, MAX_TEXT = 1024 * 1024;
     private static final int MAX_GROUPS = 5000, MAX_PARAGRAPHS = 10000;
     private static final int MAX_IMAGE = 512 * 1024, MAX_OUTPUT = 8 * 1024 * 1024;
@@ -72,6 +76,7 @@ public final class WordReportExporter implements ReportExporter {
             paragraph(document, title, "ReportTitle", ParagraphAlignment.CENTER, true, limits);
             paragraph(document, data.getContext().getPeriod() + " · " + data.getContext().getBizLine(), "ReportBody", ParagraphAlignment.CENTER, false, limits);
             for (ReportSectionData section : data.getSections()) render(document, section, limits);
+            sectionProperties(document);
             ByteArrayOutputStream raw = new ByteArrayOutputStream(); document.write(new BoundedOutputStream(raw, MAX_OUTPUT));
             byte[] stable = normalizeZip(raw.toByteArray());
             if (stable.length > MAX_OUTPUT) throw new ReportExportException("DOCX output byte limit exceeded", false);
@@ -95,8 +100,8 @@ public final class WordReportExporter implements ReportExporter {
     private XWPFParagraph paragraph(XWPFDocument document, String value, String style,
             ParagraphAlignment alignment, boolean keepNext, Limits limits) throws IOException {
         paragraphs(limits, 1);
-        XWPFParagraph paragraph = document.createParagraph(); paragraph.setStyle(style); paragraph.setAlignment(alignment);
-        if (keepNext) paragraph.getCTP().addNewPPr().addNewKeepNext();
+        XWPFParagraph paragraph = document.createParagraph(); paragraph.setAlignment(alignment);
+        if (keepNext) keepNext(paragraph);
         run(paragraph, safe(value, limits), style.equals("ReportTable") ? 8.5 : style.equals("ReportBody") ? 10.5 : style.equals("ReportSection") ? 12 : 15, false);
         return paragraph;
     }
@@ -119,14 +124,39 @@ public final class WordReportExporter implements ReportExporter {
         if (headers.isEmpty() || section.getRows().isEmpty()) { paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false, limits); return; }
         tableGrid(limits, headers.size(), section.getRows().size());
         List<String> fields = strings(section.getSummary().get("fields"));
-        List<String> aligns = strings(section.getSummary().get("alignments")); XWPFTable table = document.createTable();
+        List<String> aligns = strings(section.getSummary().get("alignments"));
+        List<Integer> widths = tableWidths(section.getSummary().get("widths"), headers.size());
+        XWPFTable table = document.createTable(); applyTableGeometry(table, widths);
         XWPFTableRow header = table.getRow(0); header.getCtRow().addNewTrPr().addNewTblHeader();
-        for (int i = 0; i < headers.size(); i++) { XWPFTableCell cell = i == 0 ? header.getCell(0) : header.addNewTableCell(); formatCell(cell, "D9EAF7"); writeCell(cell, headers.get(i), alignment(aligns, i), true, limits); }
+        for (int i = 0; i < headers.size(); i++) { XWPFTableCell cell = i == 0 ? header.getCell(0) : header.addNewTableCell(); cellWidth(cell, widths.get(i)); formatCell(cell, "D9EAF7"); writeCell(cell, headers.get(i), alignment(aligns, i), true, limits); }
         for (Map<String, Object> row : section.getRows()) {
             List<Object> values = valuesFor(row, fields, headers.size());
             XWPFTableRow target = table.createRow();
-            for (int i = 0; i < headers.size(); i++) { Object value = values.get(i); formatCell(target.getCell(i), null); writeCell(target.getCell(i), text(value), alignment(aligns, i), false, limits); }
+            for (int i = 0; i < headers.size(); i++) { Object value = values.get(i); cellWidth(target.getCell(i), widths.get(i)); formatCell(target.getCell(i), null); writeCell(target.getCell(i), text(value), alignment(aligns, i), false, limits); }
         }
+    }
+    private List<Integer> tableWidths(Object raw, int columns) {
+        List<String> configured = strings(raw); List<Long> weights = new ArrayList<Long>(columns); long total = 0L;
+        for (int index = 0; index < columns; index++) {
+            String value = index < configured.size() ? configured.get(index) : ""; long weight = 100L;
+            try { if (value.endsWith("%")) weight = Long.parseLong(value.substring(0, value.length() - 1)); else if (value.endsWith("px")) weight = Long.parseLong(value.substring(0, value.length() - 2)); }
+            catch (NumberFormatException ignored) { weight = 100L; }
+            weight = Math.max(1L, weight); weights.add(Long.valueOf(weight)); total += weight;
+        }
+        List<Integer> result = new ArrayList<Integer>(columns); int assigned = 0;
+        for (int index = 0; index < columns; index++) { int width = index + 1 == columns ? Math.max(1, TABLE_WIDTH_DXA - assigned) : Math.max(1, (int)(TABLE_WIDTH_DXA * weights.get(index).longValue() / total)); result.add(Integer.valueOf(width)); assigned += width; }
+        return result;
+    }
+    private void applyTableGeometry(XWPFTable table, List<Integer> widths) {
+        CTTblWidth tableWidth = table.getCTTbl().getTblPr().getTblW(); tableWidth.setType(STTblWidth.DXA); tableWidth.setW(BigInteger.valueOf(TABLE_WIDTH_DXA));
+        CTTblGrid grid = table.getCTTbl().getTblGrid(); if (grid == null) grid = table.getCTTbl().addNewTblGrid();
+        while (grid.sizeOfGridColArray() > 0) grid.removeGridCol(0);
+        for (Integer width : widths) grid.addNewGridCol().setW(BigInteger.valueOf(width.intValue()));
+    }
+    private void cellWidth(XWPFTableCell cell, int value) {
+        CTTcPr properties = cell.getCTTc().getTcPr(); if (properties == null) properties = cell.getCTTc().addNewTcPr();
+        CTTblWidth width = properties.isSetTcW() ? properties.getTcW() : properties.addNewTcW();
+        width.setType(STTblWidth.DXA); width.setW(BigInteger.valueOf(value));
     }
     private List<Object> valuesFor(Map<String,Object> row, List<String> fields, int columns) {
         List<Object> positional = new ArrayList<Object>(row.values());
@@ -139,12 +169,12 @@ public final class WordReportExporter implements ReportExporter {
         return resolved;
     }
     private void formatCell(XWPFTableCell cell, String color) {
-        cell.setVerticalAlignment(XWPFTableCell.XWPFVertAlign.CENTER); if (cell.getCTTc().getTcPr() == null) cell.getCTTc().addNewTcPr();
-        margins(cell);
+        if (cell.getCTTc().getTcPr() == null) cell.getCTTc().addNewTcPr();
         if (color != null) { CTShd shade = cell.getCTTc().getTcPr().addNewShd(); shade.setFill(color); shade.setVal(STShd.CLEAR); }
+        margins(cell); cell.setVerticalAlignment(XWPFTableCell.XWPFVertAlign.CENTER);
     }
     private void writeCell(XWPFTableCell cell, String value, ParagraphAlignment alignment, boolean bold, Limits limits) throws IOException {
-        XWPFParagraph paragraph = cell.getParagraphs().get(0); paragraph.setStyle("ReportTable"); paragraph.setAlignment(alignment); run(paragraph, safe(value, limits), 8.5, bold); if (bold) paragraph.getCTP().addNewPPr().addNewKeepNext();
+        XWPFParagraph paragraph = cell.getParagraphs().get(0); paragraph.setAlignment(alignment); run(paragraph, safe(value, limits), 8.5, bold); if (bold) keepNext(paragraph);
     }
     private void groups(XWPFDocument document, Object raw, Limits limits) throws IOException {
         if (!(raw instanceof List) || ((List<?>) raw).isEmpty()) { paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false, limits); return; }
@@ -154,7 +184,8 @@ public final class WordReportExporter implements ReportExporter {
     private void chart(XWPFDocument document, ReportSectionData section, Limits limits) throws IOException {
         byte[] png = png(section.getSummary().get("pngBase64")); if (png == null) { chartTable(document, section, limits); return; }
         paragraphs(limits, 1); XWPFParagraph p = document.createParagraph(); p.setAlignment(ParagraphAlignment.CENTER); XWPFRun run = p.createRun(); fonts(run, 10.5, false);
-        try (InputStream image = new ByteArrayInputStream(png)) { run.addPicture(image, Document.PICTURE_TYPE_PNG, "chart.png", Units.toEMU(640), Units.toEMU(320)); }
+        double widthPoints = TABLE_WIDTH_DXA / 20.0;
+        try (InputStream image = new ByteArrayInputStream(png)) { run.addPicture(image, Document.PICTURE_TYPE_PNG, "chart.png", Units.toEMU(widthPoints), Units.toEMU(widthPoints / 2.0)); }
         catch (Exception ex) { throw new ReportExportException("Cannot embed trusted chart PNG", false, ex); }
     }
     private void chartTable(XWPFDocument document, ReportSectionData section, Limits limits) throws IOException {
@@ -168,10 +199,20 @@ public final class WordReportExporter implements ReportExporter {
     private void margins(XWPFTableCell cell) {
         XmlCursor cursor = cell.getCTTc().getTcPr().newCursor(); try {
             cursor.toEndToken(); cursor.beginElement(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "tcMar", "w"));
-            margin(cursor, "top", 80); margin(cursor, "bottom", 80); margin(cursor, "left", 100); margin(cursor, "right", 100);
+            margin(cursor, "right", 100); margin(cursor, "bottom", 80); margin(cursor, "left", 100); margin(cursor, "top", 80);
         } finally { cursor.dispose(); }
     }
-    private void margin(XmlCursor cursor, String edge, int value) { cursor.beginElement(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", edge, "w")); cursor.insertAttributeWithValue(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w", "w"), String.valueOf(value)); cursor.insertAttributeWithValue(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "type", "w"), "dxa"); cursor.toEndToken(); }
+    private void margin(XmlCursor cursor, String edge, int value) { cursor.beginElement(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", edge, "w")); cursor.insertAttributeWithValue(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w", "w"), String.valueOf(value)); cursor.insertAttributeWithValue(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "type", "w"), "dxa"); cursor.toParent(); }
+    private void keepNext(XWPFParagraph paragraph) { if (paragraph.getCTP().getPPr() == null) paragraph.getCTP().addNewPPr(); if (!paragraph.getCTP().getPPr().isSetKeepNext()) paragraph.getCTP().getPPr().addNewKeepNext(); }
+    private void sectionProperties(XWPFDocument document) {
+        XmlCursor cursor = document.getDocument().getBody().newCursor(); try {
+            cursor.toEndToken(); cursor.beginElement(word("sectPr"));
+            cursor.beginElement(word("pgMar")); attribute(cursor, "top", "1440"); attribute(cursor, "right", "1440"); attribute(cursor, "bottom", "1440"); attribute(cursor, "left", "1440"); attribute(cursor, "header", "720"); attribute(cursor, "footer", "720"); attribute(cursor, "gutter", "0"); cursor.toParent();
+            cursor.beginElement(word("pgSz")); attribute(cursor, "w", "12240"); attribute(cursor, "h", "15840"); cursor.toParent();
+        } finally { cursor.dispose(); }
+    }
+    private QName word(String name) { return new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", name, "w"); }
+    private void attribute(XmlCursor cursor, String name, String value) { cursor.insertAttributeWithValue(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", name, "w"), value); }
     private ParagraphAlignment alignment(List<String> aligns, int index) { String value = index < aligns.size() ? aligns.get(index) : "left"; return "right".equalsIgnoreCase(value) ? ParagraphAlignment.RIGHT : "center".equalsIgnoreCase(value) ? ParagraphAlignment.CENTER : ParagraphAlignment.LEFT; }
     private List<String> strings(Object raw) { if (!(raw instanceof List)) return Collections.emptyList(); List<String> output = new ArrayList<String>(); for (Object value : (List<?>) raw) output.add(text(value)); return output; }
     private String text(Object value) { return value == null ? "暂无数据" : String.valueOf(value); }
@@ -221,8 +262,26 @@ public final class WordReportExporter implements ReportExporter {
     private boolean pngStructure(byte[] bytes) { byte[] sig = {(byte)137,80,78,71,13,10,26,10}; if (bytes.length < 33) return false; for (int i=0;i<sig.length;i++) if(bytes[i]!=sig[i]) return false; int offset=8, chunks=0; boolean header=false,end=false; while(offset+12<=bytes.length && ++chunks<=1000) { int length=integer(bytes,offset); if(length<0||length>bytes.length-offset-12)return false; int type=integer(bytes,offset+4), data=offset+8; CRC32 crc=new CRC32();crc.update(bytes,offset+4,length+4);if(crc.getValue()!=unsigned(bytes,data+length))return false; if(!header){if(type!=0x49484452||length!=13||integer(bytes,data)!=640||integer(bytes,data+4)!=320)return false;header=true;} offset+=length+12;if(type==0x49454e44){end=length==0&&offset==bytes.length;break;} } return header&&end; }
     private int integer(byte[] bytes,int offset){return (bytes[offset]&255)<<24|(bytes[offset+1]&255)<<16|(bytes[offset+2]&255)<<8|bytes[offset+3]&255;} private long unsigned(byte[] bytes,int offset){return integer(bytes,offset)&0xffffffffL;}
     private byte[] normalizeZip(byte[] source) throws IOException {
-        List<Entry> entries = new ArrayList<Entry>(); try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(source))) { for (ZipEntry item; (item = zip.getNextEntry()) != null;) { ByteArrayOutputStream value = new ByteArrayOutputStream(); byte[] buffer = new byte[8192]; for (int count; (count=zip.read(buffer)) >= 0;) value.write(buffer,0,count); if (item.getName().contains("..") || item.getName().startsWith("/")) throw new ReportExportException("Unsafe DOCX package entry", false); entries.add(new Entry(item.getName(), value.toByteArray())); } }
-        Collections.sort(entries, new Comparator<Entry>() { public int compare(Entry a, Entry b) { return a.name.compareTo(b.name); } }); ByteArrayOutputStream result=new ByteArrayOutputStream(); try(ZipOutputStream zip=new ZipOutputStream(result)){for(Entry item:entries){ZipEntry target=new ZipEntry(item.name);target.setTime(0L);zip.putNextEntry(target);zip.write(item.value);zip.closeEntry();}} return result.toByteArray();
+        List<Entry> entries = new ArrayList<Entry>(); try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(source))) { for (ZipEntry item; (item = zip.getNextEntry()) != null;) { ByteArrayOutputStream value = new ByteArrayOutputStream(); byte[] buffer = new byte[8192]; for (int count; (count=zip.read(buffer)) >= 0;) value.write(buffer,0,count); if (item.getName().contains("..") || item.getName().startsWith("/")) throw new ReportExportException("Unsafe DOCX package entry", false); entries.add(new Entry(item.getName(), canonicalEntry(item.getName(), value.toByteArray()))); } }
+        Collections.sort(entries, new Comparator<Entry>() { public int compare(Entry a, Entry b) { return a.name.compareTo(b.name); } });
+        ByteArrayOutputStream result = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(result)) {
+            for (Entry item : entries) {
+                CRC32 crc = new CRC32(); crc.update(item.value);
+                ZipEntry target = new ZipEntry(item.name); target.setTime(0L);
+                // STORED avoids JDK/zlib-specific Deflate bytes while entry order and timestamps are canonical.
+                target.setMethod(ZipEntry.STORED); target.setSize(item.value.length);
+                target.setCompressedSize(item.value.length); target.setCrc(crc.getValue());
+                zip.putNextEntry(target); zip.write(item.value); zip.closeEntry();
+            }
+        }
+        return result.toByteArray();
+    }
+    private byte[] canonicalEntry(String name, byte[] value) {
+        if (!(name.endsWith(".xml") || name.endsWith(".rels"))) return value;
+        String xml = new String(value, java.nio.charset.StandardCharsets.UTF_8);
+        return xml.replace("\r\n", "\n").replace('\r', '\n')
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
     private static final class Entry { final String name; final byte[] value; Entry(String name, byte[] value){this.name=name;this.value=value;} }
 }

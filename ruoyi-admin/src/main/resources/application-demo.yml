@@ -1,0 +1,27 @@
+# Demo profile: start with --spring.profiles.active=demo. The base profile group also loads druid.
+# All credentials remain external; the seeded users are disabled until an administrator rotates passwords.
+ruoyi:
+  profile: ${DEMO_RUNTIME_ROOT:./runtime/demo}/upload
+
+logging:
+  level:
+    com.ailab: info
+    com.ruoyi: info
+
+spring:
+  redis:
+    host: ${REDIS_HOST:127.0.0.1}
+    port: ${REDIS_PORT:6379}
+    database: ${REDIS_DATABASE:0}
+    password: ${REDIS_PASSWORD:}
+
+swagger:
+  enabled: ${SWAGGER_ENABLED:false}
+
+lab:
+  report:
+    output-directory: ${DEMO_RUNTIME_ROOT:./runtime/demo}/reports
+    temp-directory: ${DEMO_RUNTIME_ROOT:./runtime/demo}/reports/tmp
+    libre-office-executable: ${LAB_LIBREOFFICE_EXECUTABLE:soffice}
+    conversion-timeout-seconds: ${LAB_REPORT_CONVERSION_TIMEOUT_SECONDS:120}
+    max-upload-size-bytes: ${LAB_REPORT_MAX_UPLOAD_SIZE_BYTES:52428800}
