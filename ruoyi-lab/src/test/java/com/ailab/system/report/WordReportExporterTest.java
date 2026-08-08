@@ -63,6 +63,13 @@ class WordReportExporterTest {
         assertThrows(java.io.IOException.class, () -> new WordReportExporter().export(value));
     }
 
+    @Test
+    void rejectsTheActualHeaderAndRowCellGridBeforePoiAllocatesIt() {
+        java.util.List<String> headers = new java.util.ArrayList<String>(); for (int i = 0; i < 50001; i++) headers.add("c" + i);
+        ReportData value = new ReportData(report().getContext(), "t", 1, Collections.singletonList(new ReportSectionData("x", "TABLE", "x", Collections.singletonList(map("c0", "v")), map("headers", headers))), Collections.<String,Object>emptyMap());
+        assertThrows(java.io.IOException.class, () -> new WordReportExporter().export(value));
+    }
+
     private Map<String, String> xmlEntries(byte[] bytes) throws Exception {
         Map<String, String> result = new LinkedHashMap<String, String>();
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
