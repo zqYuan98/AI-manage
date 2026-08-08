@@ -9,6 +9,8 @@ import java.util.Set;
 
 /** Public stable identifiers for the built-in report configuration contract. */
 public final class ReportConfigCatalog {
+    public static final String DEFAULT_SENSITIVE_PERMISSION = "lab:report:sensitive";
+
     public static final String TABLE = "TABLE";
     public static final String STAT = "STAT";
     public static final String TEXT = "TEXT";

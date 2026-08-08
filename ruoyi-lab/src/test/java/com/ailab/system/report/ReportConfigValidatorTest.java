@@ -2,6 +2,7 @@ package com.ailab.system.report;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -267,9 +268,56 @@ class ReportConfigValidatorTest {
         LabReportSection downgrade = section("TEXT", "GOAL_PROGRESS");
         downgrade.setSensitiveFlag("0");
         assertThrows(IllegalStateException.class, () -> validator.validateUpdate(persisted, downgrade));
+        LabReportSection customPermission = section("TEXT", "GOAL_PROGRESS");
+        customPermission.setSensitiveFlag("1");
+        customPermission.setSensitivePermission("lab:report:restricted");
         LabReportSection clearPermission = section("TEXT", "GOAL_PROGRESS");
         clearPermission.setSensitiveFlag("1");
-        assertThrows(IllegalStateException.class, () -> validator.validateUpdate(persisted, clearPermission));
+        assertThrows(IllegalStateException.class, () -> validator.validateUpdate(customPermission, clearPermission));
+
+        LabReportSection persistedPerf = section("STAT", "PERF_SUMMARY");
+        persistedPerf.setSensitiveFlag("0");
+        LabReportSection replacePerfWithOrdinary = section("TEXT", "GOAL_PROGRESS");
+        assertThrows(IllegalStateException.class,
+                () -> validator.validateUpdate(persistedPerf, replacePerfWithOrdinary));
+    }
+
+    @Test
+    void everySensitiveSectionReceivesTheCanonicalPermissionAcrossAllValidationPaths() {
+        String requiredPermission = ReportConfigCatalog.DEFAULT_SENSITIVE_PERMISSION;
+        LabReportSection perf = section("STAT", "PERF_SUMMARY");
+        validator.validateSection(perf);
+        assertTrue(perf.isSensitive());
+        assertEquals(requiredPermission, perf.getSensitivePermission());
+
+        LabReportSection explicitlyFlagged = section("TEXT", "GOAL_PROGRESS");
+        explicitlyFlagged.setSensitiveFlag("1");
+        validator.validateSection(explicitlyFlagged);
+        assertEquals(requiredPermission, explicitlyFlagged.getSensitivePermission());
+
+        LabReportSection ordinary = section("TEXT", "GOAL_PROGRESS");
+        validator.validateSection(ordinary);
+        assertFalse(ordinary.isSensitive());
+        assertNull(ordinary.getSensitivePermission());
+
+        LabReportSection persisted = section("TEXT", "GOAL_PROGRESS");
+        persisted.setSensitiveFlag("1");
+        persisted.setSensitivePermission(requiredPermission);
+        LabReportSection retained = section("TEXT", "GOAL_PROGRESS");
+        retained.setSensitiveFlag("1");
+        validator.validateUpdate(persisted, retained);
+        assertEquals(requiredPermission, retained.getSensitivePermission());
+
+        String perfJson = "{\"sectionType\":\"STAT\",\"dataSource\":\"PERF_SUMMARY\",\"queryConfig\":{},\"renderConfig\":{},\"styleConfig\":{}}";
+        String explicitJson = "{\"sectionType\":\"TEXT\",\"dataSource\":\"GOAL_PROGRESS\",\"queryConfig\":{},\"renderConfig\":{},\"styleConfig\":{},\"sensitivePermission\":\"lab:report:sensitive\"}";
+        ReportSectionConfig savedPerf = validator.validateForSave(perfJson);
+        ReportSectionConfig importedPerf = validator.validateForImport(perfJson);
+        ReportSectionConfig savedExplicit = validator.validateForSave(explicitJson);
+        ReportSectionConfig importedExplicit = validator.validateForImport(explicitJson);
+        for (ReportSectionConfig canonical : Arrays.asList(savedPerf, importedPerf, savedExplicit, importedExplicit)) {
+            assertTrue(canonical.isSensitive());
+            assertEquals(requiredPermission, canonical.getSensitivePermission());
+        }
     }
 
     @Test
@@ -308,8 +356,10 @@ class ReportConfigValidatorTest {
         int sectionSeed = compact.indexOf("insert into `lab_report_section`");
         assertTrue(sensitiveUpgrade > sectionTable && sensitiveUpgrade < sectionSeed,
                 "sensitive-permission upgrade must run after section table creation and before every section seed");
+        assertTrue(compact.contains("or (`sensitive_permission` is not null and trim(`sensitive_permission`)<>'')"),
+                "an existing permission must irreversibly promote the sensitive flag during bootstrap");
         String sectionSeedSql = compact.substring(sectionSeed, compact.indexOf(';', sectionSeed));
-        assertTrue(sectionSeedSql.contains("`sensitive_permission`") && sectionSeedSql.contains("'lab:report:sensitive'"),
+        assertTrue(sectionSeedSql.contains("`sensitive_permission`") && sectionSeedSql.contains("'" + ReportConfigCatalog.DEFAULT_SENSITIVE_PERMISSION + "'"),
                 "sensitive seed rows must persist their permission after the pre-seed backfill");
         assertTrue(compact.contains("information_schema.columns") && compact.contains("information_schema.statistics"));
         assertTrue(compact.contains("add column `template_code` varchar(64) null") && compact.contains("add column `template_revision` int null"));
@@ -323,6 +373,8 @@ class ReportConfigValidatorTest {
         assertTrue(legacy.contains("create table `lab_report_section`"));
         String legacySection = legacy.substring(legacy.indexOf("create table `lab_report_section`"), legacy.indexOf("create table `lab_report_template`"));
         assertFalse(legacySection.contains("sensitive_permission"), "legacy section fixture must predate sensitive permission");
+        assertTrue(legacy.contains("legacy_flagged") && legacy.contains("'task_stat'"),
+                "legacy fixture must include a flag-only sensitive row with no permission column");
         String mysqlIt = new String(Files.readAllBytes(root.resolve("ruoyi-admin/src/test/java/com/ailab/system/mapper/LabMapperMySqlIT.java")), StandardCharsets.UTF_8);
         assertTrue(mysqlIt.contains("insert into lab_report_instance(id,report_no,template_id,template_code,template_revision,period"),
                 "MySQL report fixtures must insert mandatory immutable template pins");
@@ -333,6 +385,9 @@ class ReportConfigValidatorTest {
         assertTrue(mysqlIt.indexOf(sensitiveAssertion) >= 0
                         && mysqlIt.indexOf(sensitiveAssertion) != mysqlIt.lastIndexOf(sensitiveAssertion),
                 "MySQL bootstrap must verify every sensitive section after both runs");
+        assertTrue(mysqlIt.contains("insertPermissionOnlySensitiveSection(connection)")
+                        && mysqlIt.contains("requirePermissionDrivenSensitiveUpgrade(connection)"),
+                "the second MySQL bootstrap must promote a permission-only legacy row");
     }
 
     @Test
@@ -478,6 +533,23 @@ class ReportConfigValidatorTest {
         LabReportTemplate revisionTwo = template("ordered", 2, 1, false, false, "ENABLED");
         LabReportTemplate revisionOne = template("ordered", 1, 1, true, true, "ENABLED");
         assertThrows(IllegalStateException.class, () -> new TemplateFamily(Arrays.asList(revisionTwo, revisionOne)));
+    }
+
+    @Test
+    void latestRevisionMustBeTheMaximumAndPublishingUsesItsVersion() {
+        LabReportTemplate staleLatest = template("monthly", 1, 7, true, true, "ENABLED");
+        LabReportTemplate newerNonLatest = template("monthly", 2, 8, false, false, "ENABLED");
+        assertThrows(IllegalStateException.class,
+                () -> new TemplateFamily(Arrays.asList(staleLatest, newerNonLatest)));
+
+        LabReportTemplate oldRevision = template("monthly", 1, 7, false, false, "ENABLED");
+        LabReportTemplate currentRevision = template("monthly", 2, 8, true, true, "ENABLED");
+        TemplateFamily family = new TemplateFamily(Arrays.asList(oldRevision, currentRevision));
+        assertThrows(IllegalStateException.class,
+                () -> family.publishAsDefault(template("monthly", 3, 0, false, false, "ENABLED"), 7));
+        family.publishAsDefault(template("monthly", 3, 0, false, false, "ENABLED"), 8);
+        assertEquals(Integer.valueOf(3), family.snapshot().get(2).getRevisionNo());
+        assertTrue(family.snapshot().get(2).isLatest());
     }
 
     @Test

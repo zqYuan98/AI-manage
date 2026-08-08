@@ -801,10 +801,12 @@ class LabMapperMySqlIT {
                 requireLegacyReportTemplatePin(connection);
                 requireLegacySensitivePermission(connection);
                 requireAllSensitiveSectionsPinned(connection);
+                insertPermissionOnlySensitiveSection(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ailab.sql")));
                 requireLegacyReportTemplatePin(connection);
                 requireLegacySensitivePermission(connection);
                 requireAllSensitiveSectionsPinned(connection);
+                requirePermissionDrivenSensitiveUpgrade(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-mapper-fixture.sql")));
             } catch (Exception exception) {
                 throw new IllegalStateException("Real MySQL 8 integration database is unavailable or could not be initialized. Configure LAB_IT_DB_URL/LAB_IT_DB_USERNAME/LAB_IT_DB_PASSWORD.", exception);
@@ -854,9 +856,26 @@ class LabMapperMySqlIT {
         private static void requireLegacySensitivePermission(Connection connection) throws Exception {
             try (java.sql.Statement statement = connection.createStatement();
                     java.sql.ResultSet result = statement.executeQuery(
-                            "select sensitive_flag, sensitive_permission from lab_report_section where id=39990")) {
-                if (!result.next() || !"1".equals(result.getString(1)) || !"lab:report:sensitive".equals(result.getString(2))) {
-                    throw new IllegalStateException("Legacy sensitive report section must receive an irreversible permission snapshot");
+                            "select count(1) from lab_report_section where id in (39990,39991) and sensitive_flag='1' and sensitive_permission='lab:report:sensitive'")) {
+                if (!result.next() || result.getInt(1) != 2) {
+                    throw new IllegalStateException("Legacy provider- and flag-sensitive sections must receive irreversible permission snapshots");
+                }
+            }
+        }
+
+        private static void insertPermissionOnlySensitiveSection(Connection connection) throws Exception {
+            try (java.sql.Statement statement = connection.createStatement()) {
+                statement.executeUpdate("insert into lab_report_section(id,template_id,section_code,section_name,section_type,sort_no,data_source,query_config_json,render_config_json,style_config_json,manual_flag,visible_flag,sensitive_flag,sensitive_permission,version,del_flag,create_by,create_time) values "
+                        + "(39992,39990,'LEGACY_PERMISSION','Legacy permission-only sensitive section','TEXT',30,'GOAL_PROGRESS',JSON_OBJECT(),JSON_OBJECT(),JSON_OBJECT(),'0','1','0','lab:report:restricted',0,'0','it',NOW())");
+            }
+        }
+
+        private static void requirePermissionDrivenSensitiveUpgrade(Connection connection) throws Exception {
+            try (java.sql.Statement statement = connection.createStatement();
+                    java.sql.ResultSet result = statement.executeQuery(
+                            "select sensitive_flag, sensitive_permission from lab_report_section where id=39992")) {
+                if (!result.next() || !"1".equals(result.getString(1)) || !"lab:report:restricted".equals(result.getString(2))) {
+                    throw new IllegalStateException("A persisted sensitive permission must irreversibly promote its section flag");
                 }
             }
         }

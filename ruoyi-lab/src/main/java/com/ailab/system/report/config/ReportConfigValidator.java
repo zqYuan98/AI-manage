@@ -40,20 +40,23 @@ public final class ReportConfigValidator {
         validateRender(parse(section.getRenderConfigJson(), "render configuration"));
         validateSectionStyle(parse(section.getStyleConfigJson(), "section style configuration"));
         if (section.getSensitivePermission() != null && section.getSensitivePermission().length() > 128) throw invalid("Invalid sensitive permission");
-        if (ReportConfigCatalog.PERF_SUMMARY.equals(provider) || nonBlank(section.getSensitivePermission())) section.setSensitiveFlag("1");
+        if (sensitive(section)) {
+            if (!nonBlank(section.getSensitivePermission())) section.setSensitivePermission(ReportConfigCatalog.DEFAULT_SENSITIVE_PERMISSION);
+            section.setSensitiveFlag("1");
+        }
     }
 
     /** Updates are checked against the persisted sensitive snapshot, never only against client input. */
     public void validateUpdate(LabReportSection existingPersisted, LabReportSection candidate) {
         if (existingPersisted == null) throw new IllegalArgumentException("Persisted section is required");
         validateSection(candidate);
-        if (existingPersisted.isSensitive() && !candidate.isSensitive()) throw new IllegalStateException("Sensitive sections cannot be downgraded");
+        if (sensitive(existingPersisted) && !candidate.isSensitive()) throw new IllegalStateException("Sensitive sections cannot be downgraded");
         if (nonBlank(existingPersisted.getSensitivePermission())
                 && !existingPersisted.getSensitivePermission().equals(candidate.getSensitivePermission())) throw new IllegalStateException("Sensitive permission cannot be cleared or changed");
     }
 
-    public void validateForSave(String serializedSection) { validateSerialized(serializedSection); }
-    public void validateForImport(String serializedSection) { validateSerialized(serializedSection); }
+    public ReportSectionConfig validateForSave(String serializedSection) { return validateSerialized(serializedSection); }
+    public ReportSectionConfig validateForImport(String serializedSection) { return validateSerialized(serializedSection); }
     public void validateTemplateForSave(String serializedTemplate) { validateSerializedTemplate(serializedTemplate); }
     public void validateTemplateForImport(String serializedTemplate) { validateSerializedTemplate(serializedTemplate); }
 
@@ -67,10 +70,11 @@ public final class ReportConfigValidator {
         validateTemplateStyle(parse(template.getStyleJson(), "template style configuration"));
     }
 
-    private void validateSerialized(String input) {
+    private ReportSectionConfig validateSerialized(String input) {
         JsonNode root = parse(input, "section"); requireObject(root, "section"); assertOnly(root, set("sectionType", "dataSource", "queryConfig", "renderConfig", "styleConfig", "sensitivePermission"), "section");
         LabReportSection section = new LabReportSection(); section.setSectionType(text(root, "sectionType", true)); section.setDataSource(text(root, "dataSource", false));
         section.setQueryConfigJson(root.has("queryConfig") ? root.get("queryConfig").toString() : "{}"); section.setRenderConfigJson(root.has("renderConfig") ? root.get("renderConfig").toString() : "{}"); section.setStyleConfigJson(root.has("styleConfig") ? root.get("styleConfig").toString() : "{}"); section.setSensitivePermission(text(root, "sensitivePermission", false)); validateSection(section);
+        return new ReportSectionConfig(section);
     }
 
     private void validateSerializedTemplate(String input) {
@@ -196,6 +200,7 @@ public final class ReportConfigValidator {
     private void assertOnly(JsonNode object, Set<String> allowed, String name) { Iterator<String> names = object.fieldNames(); while (names.hasNext()) if (!allowed.contains(names.next())) throw invalid("Unknown " + name + " field"); }
     private static Set<String> set(String... values) { return Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(values))); }
     private static boolean nonBlank(String value) { return value != null && !value.trim().isEmpty(); }
+    private static boolean sensitive(LabReportSection section) { return section != null && (section.isSensitive() || ReportConfigCatalog.PERF_SUMMARY.equals(section.getDataSource()) || nonBlank(section.getSensitivePermission())); }
     private static boolean validTemplateCode(String value) { return value != null && value.matches("[A-Za-z0-9_-]{1,64}"); }
     private static IllegalArgumentException invalid(String message) { return new IllegalArgumentException(message); }
     private static LabReportTemplate copy(LabReportTemplate source) {
@@ -218,12 +223,12 @@ public final class ReportConfigValidator {
         public void publishAsDefault(LabReportTemplate candidate, int expectedVersion) {
             if (candidate == null || !"ENABLED".equals(candidate.getStatus()) || !validTemplateCode(candidate.getTemplateCode()) || !ReportConfigCatalog.reportTypes().contains(candidate.getReportType())) throw new IllegalStateException("Default template must be enabled and named");
             if (candidate.getId() != null || candidate.getVersion() == null || candidate.getVersion().intValue() != 0) throw new IllegalStateException("Published revision must be an unsaved version-zero template");
-            int maximumRevision = 0; LabReportTemplate latest = null;
+            int maximumRevision = 0; LabReportTemplate currentRevision = null;
             for (LabReportTemplate item : revisions) if (candidate.getTemplateCode().equals(item.getTemplateCode())) {
                 if (!candidate.getReportType().equals(item.getReportType())) throw new IllegalStateException("A template family cannot change report type");
-                maximumRevision = Math.max(maximumRevision, item.getRevisionNo().intValue()); if (item.isLatest()) latest = item;
+                if (item.getRevisionNo().intValue() > maximumRevision) { maximumRevision = item.getRevisionNo().intValue(); currentRevision = item; }
             }
-            if ((latest == null && expectedVersion != 0) || (latest != null && (latest.getVersion() == null || latest.getVersion().intValue() != expectedVersion))) throw new IllegalStateException("Template has changed; reload before publishing");
+            if ((currentRevision == null && expectedVersion != 0) || (currentRevision != null && (currentRevision.getVersion() == null || currentRevision.getVersion().intValue() != expectedVersion))) throw new IllegalStateException("Template has changed; reload before publishing");
             if (candidate.getRevisionNo() == null || candidate.getRevisionNo().intValue() != maximumRevision + 1) throw new IllegalStateException("Published template revision must be consecutive");
             List<LabReportTemplate> proposed = new ArrayList<LabReportTemplate>();
             for (LabReportTemplate item : revisions) proposed.add(copy(item));
@@ -249,10 +254,13 @@ public final class ReportConfigValidator {
         }
         private static void assertInvariant(List<LabReportTemplate> values) {
             Map<String, Integer> defaults = new LinkedHashMap<String, Integer>(); Map<String, Integer> latest = new LinkedHashMap<String, Integer>();
+            Map<String, Integer> maximumRevision = new LinkedHashMap<String, Integer>(); Map<String, Integer> latestRevision = new LinkedHashMap<String, Integer>();
             for (LabReportTemplate item : values) {
                 String type = item.getReportType(); String code = item.getTemplateCode();
                 if (!defaults.containsKey(type)) defaults.put(type, 0); if (!latest.containsKey(code)) latest.put(code, 0);
-                if (item.isLatest()) latest.put(code, latest.get(code) + 1);
+                Integer maximum = maximumRevision.get(code);
+                if (maximum == null || item.getRevisionNo().intValue() > maximum.intValue()) maximumRevision.put(code, item.getRevisionNo());
+                if (item.isLatest()) { latest.put(code, latest.get(code) + 1); latestRevision.put(code, item.getRevisionNo()); }
                 if (item.isDefaultTemplate()) {
                     if (!item.isLatest() || !"ENABLED".equals(item.getStatus())) throw new IllegalStateException("Default must be latest and enabled");
                     defaults.put(type, defaults.get(type) + 1);
@@ -260,6 +268,7 @@ public final class ReportConfigValidator {
             }
             for (Integer count : defaults.values()) if (count.intValue() != 1) throw new IllegalStateException("Exactly one default latest enabled template is required per report type");
             for (Integer count : latest.values()) if (count.intValue() != 1) throw new IllegalStateException("Exactly one latest revision is required per template code");
+            for (String code : maximumRevision.keySet()) if (!maximumRevision.get(code).equals(latestRevision.get(code))) throw new IllegalStateException("Latest template must be the maximum revision");
         }
     }
 }
