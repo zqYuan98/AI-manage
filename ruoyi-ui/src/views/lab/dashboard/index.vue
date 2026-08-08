@@ -325,7 +325,7 @@ export default {
       else if (type.indexOf('report') >= 0) path = '/lab/report'
       else if (type.indexOf('perf') >= 0) path = '/lab/perf'
       const filters = Object.assign({}, item.drillDownFilters || {})
-      if (!filters.period) filters.period = item.period || this.selectedPeriod
+      if (!filters.period && !filters.periodTo) filters.period = item.period || this.selectedPeriod
       const query = {}
       Object.keys(filters).forEach(key => {
         const value = filters[key]
