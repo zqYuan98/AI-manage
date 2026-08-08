@@ -1,0 +1,3 @@
+package com.ailab.system.report.provider;
+import com.ailab.system.report.config.*; import com.ailab.system.report.model.*; import java.util.*; import org.springframework.stereotype.Component;
+@Component public final class TaskNextProvider extends AbstractLabDataSourceProvider { public TaskNextProvider(){super(ReportConfigCatalog.TASK_NEXT,TaskDetailProvider.fields());} protected ReportSectionData loadValidated(ReportQueryCriteria c,ReportSectionConfig s){List<Map<String,Object>> r=copyRows(mapper().selectNextTasks(c));Map<String,Object>x=summaryCount(r);x.put("nextPeriod",c.getNextPeriod());return section(c,s,r,x);}}
