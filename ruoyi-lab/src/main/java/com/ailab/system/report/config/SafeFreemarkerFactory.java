@@ -41,10 +41,13 @@ public final class SafeFreemarkerFactory {
     public static final int MAX_TEMPLATE_CHARS = 16 * 1024;
     public static final int MAX_OUTPUT_CHARS = 256 * 1024;
     public static final int MAX_MODEL_DEPTH = 12;
+    public static final int MAX_DIRECTIVE_DEPTH = 32;
     public static final long MAX_RENDER_MILLIS = 250L;
     private static final Set<String> SAFE_BUILTINS = Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
             "size", "has_content", "upper_case", "lower_case", "cap_first", "uncap_first", "trim", "string",
-            "join", "html", "xhtml", "xml", "json_string", "url", "c", "then", "if_exists", "default")));
+            "html", "xhtml", "xml", "json_string", "url", "c", "then", "if_exists", "default")));
+    private static final Set<String> SAFE_DIRECTIVES = Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
+            "if", "elseif", "else")));
     private final Configuration configuration;
 
     public SafeFreemarkerFactory() {
@@ -96,6 +99,7 @@ public final class SafeFreemarkerFactory {
 
     private void validateSource(String source) {
         if (source == null || source.length() > MAX_TEMPLATE_CHARS) throw validationFailure();
+        int directiveDepth = 0;
         for (int index = 0; index < source.length();) {
             if (source.startsWith("<#--", index)) {
                 int end = source.indexOf("-->", index + 4);
@@ -105,7 +109,11 @@ public final class SafeFreemarkerFactory {
                 index = validateExpression(source, index + 2);
             } else if (source.startsWith("<#", index)) {
                 int end = tagEnd(source, index + 2);
-                validateDirective(source.substring(index + 2, end));
+                if ("if".equals(validateDirective(source.substring(index + 2, end))) && ++directiveDepth > MAX_DIRECTIVE_DEPTH) throw validationFailure();
+                index = end + 1;
+            } else if (source.startsWith("</#", index)) {
+                int end = tagEnd(source, index + 3);
+                if (!"if".equals(source.substring(index + 3, end).trim().toLowerCase(java.util.Locale.ROOT)) || --directiveDepth < 0) throw validationFailure();
                 index = end + 1;
             } else if (source.startsWith("#{", index) || source.startsWith("<@", index) || source.startsWith("[#", index) || source.startsWith("[@", index)) {
                 throw validationFailure();
@@ -113,6 +121,7 @@ public final class SafeFreemarkerFactory {
                 index++;
             }
         }
+        if (directiveDepth != 0) throw validationFailure();
     }
 
     /** Small FTL-aware lexer: quotes, escapes, comments and directive boundaries are syntax, not substrings. */
@@ -151,13 +160,14 @@ public final class SafeFreemarkerFactory {
         throw validationFailure();
     }
 
-    private void validateDirective(String directive) {
+    private String validateDirective(String directive) {
         int start = skipWhitespace(directive, 0);
         int end = identifierEnd(directive, start);
         if (end == start) throw validationFailure();
         String name = directive.substring(start, end).toLowerCase(java.util.Locale.ROOT);
-        if ("include".equals(name) || "import".equals(name) || "list".equals(name) || "macro".equals(name) || "function".equals(name)) throw validationFailure();
+        if (!SAFE_DIRECTIVES.contains(name)) throw validationFailure();
         validateCode(directive, end, directive.length());
+        return name;
     }
 
     private void validateCode(String code, int start, int end) {

@@ -74,6 +74,46 @@ class SafeFreemarkerFactoryTest {
     }
 
     @Test
+    void rejectsJoinBecauseItCanMaterializeAnUnboundedFreemarkerRange() {
+        assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
+                () -> factory.render("${(1..2)?join(',')}", Collections.<String, Object>emptyMap())).getMessage());
+    }
+
+    @Test
+    void rejectsAssignmentsBecauseTheyCanMaterializeUnboundedIntermediateValues() {
+        for (String unsafe : Arrays.asList(
+                "<#assign s='x'><#assign s=s+s>${s}",
+                "<#global s='x'>${s}",
+                "<#local s='x'>${s}")) {
+            assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
+                    () -> factory.render(unsafe, Collections.<String, Object>emptyMap())).getMessage());
+        }
+    }
+
+    @Test
+    void allowsOnlyReadOnlyControlFlowDirectives() {
+        for (String unsafe : Arrays.asList(
+                "<#escape x as x + x>${'x'}</#escape>",
+                "<#noescape>${'x'}</#noescape>",
+                "<#compress>${'x'}</#compress>",
+                "<#setting locale='en_US'>${'x'}")) {
+            assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
+                    () -> factory.render(unsafe, Collections.<String, Object>emptyMap())).getMessage());
+        }
+        assertEquals("ok", factory.render("<#if true>ok<#else>no</#if>", Collections.<String, Object>emptyMap()));
+    }
+
+    @Test
+    void rejectsConditionalsThatExceedTheTemplateNestingLimit() {
+        StringBuilder source = new StringBuilder();
+        for (int i = 0; i < 33; i++) source.append("<#if true>");
+        source.append("ok");
+        for (int i = 0; i < 33; i++) source.append("</#if>");
+        assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
+                () -> factory.render(source.toString(), Collections.<String, Object>emptyMap())).getMessage());
+    }
+
+    @Test
     void rejectsObjectsAndBoundsInputOutputAndNestedData() {
         Map<String, Object> unsafe = new LinkedHashMap<String, Object>();
         unsafe.put("object", new Object());
