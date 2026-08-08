@@ -25,13 +25,22 @@ public final class ProcessTestSupport {
     }
 
     public static void writeCurrentPid(Path target) throws IOException {
+        writeAtomically(target, String.valueOf(currentPid()).getBytes(StandardCharsets.US_ASCII));
+    }
+
+    public static ChildObserver ownChildObserver() {
+        OperatingSystem os = new SystemInfo().getOperatingSystem();
+        return new ChildObserver(os, os.getProcessId());
+    }
+
+    private static void writeAtomically(Path target, byte[] value) throws IOException {
         Path absolute = target.toAbsolutePath();
         Path parent = absolute.getParent();
         String fileName = absolute.getFileName().toString();
         String prefix = fileName.length() >= 3 ? fileName : "pid" + fileName;
         Path temporary = Files.createTempFile(parent, prefix + ".", ".tmp");
         try {
-            Files.write(temporary, String.valueOf(currentPid()).getBytes(StandardCharsets.US_ASCII));
+            Files.write(temporary, value);
             try {
                 Files.move(temporary, absolute, StandardCopyOption.ATOMIC_MOVE,
                         StandardCopyOption.REPLACE_EXISTING);
@@ -40,6 +49,39 @@ public final class ProcessTestSupport {
             }
         } finally {
             Files.deleteIfExists(temporary);
+        }
+    }
+
+    /** Pre-warmed OSHI observer used by a fake parent that cannot obtain a child PID from Java 8 Process. */
+    public static final class ChildObserver {
+        private final OperatingSystem os;
+        private final int parentPid;
+
+        private ChildObserver(OperatingSystem os, int parentPid) {
+            this.os = os;
+            this.parentPid = parentPid;
+        }
+
+        public void awaitAndPublish(Process child, Path target, long timeoutSeconds)
+                throws IOException, InterruptedException {
+            long timeout = TimeUnit.SECONDS.toNanos(Math.max(0L, timeoutSeconds));
+            long started = System.nanoTime();
+            long deadline = started > Long.MAX_VALUE - timeout ? Long.MAX_VALUE : started + timeout;
+            do {
+                for (OSProcess process : os.getProcesses()) {
+                    if (process.getParentProcessID() == parentPid && process.getProcessID() > 0
+                            && process.getStartTime() > 0L) {
+                        String identity = process.getProcessID() + "," + process.getStartTime();
+                        writeAtomically(target, identity.getBytes(StandardCharsets.US_ASCII));
+                        return;
+                    }
+                }
+                if (!child.isAlive())
+                    throw new AssertionError("late child exited before its OS identity could be observed");
+                if (System.nanoTime() >= deadline) break;
+                Thread.sleep(5L);
+            } while (true);
+            throw new AssertionError("late child identity was not observed for parent " + parentPid);
         }
     }
 
@@ -98,6 +140,30 @@ public final class ProcessTestSupport {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
         while (isAlive(pid) && System.nanoTime() < deadline) Thread.sleep(20L);
         if (isAlive(pid)) throw new AssertionError("process is still alive: " + pid);
+    }
+
+    public static void awaitIdentityDead(long pid, long startTime, long timeoutSeconds)
+            throws InterruptedException {
+        if (pid <= 0L || pid > Integer.MAX_VALUE || startTime <= 0L) return;
+        OperatingSystem os = new SystemInfo().getOperatingSystem();
+        long timeout = TimeUnit.SECONDS.toNanos(Math.max(0L, timeoutSeconds));
+        long started = System.nanoTime();
+        long deadline = started > Long.MAX_VALUE - timeout ? Long.MAX_VALUE : started + timeout;
+        while (identityAlive(os, (int) pid, startTime) && System.nanoTime() < deadline)
+            Thread.sleep(20L);
+        if (identityAlive(os, (int) pid, startTime))
+            throw new AssertionError("process identity is still alive: " + pid + "," + startTime);
+    }
+
+    private static boolean identityAlive(OperatingSystem os, int pid, long startTime) {
+        OSProcess process = os.getProcess(pid);
+        if (process == null) return false;
+        if (!process.updateAttributes()) {
+            if (isAlive(pid))
+                throw new IllegalStateException("cannot refresh live process identity " + pid);
+            return false;
+        }
+        return process.getStartTime() == startTime && process.getState() != OSProcess.State.INVALID;
     }
 
     public static void awaitFile(Path target, long timeoutSeconds) throws InterruptedException {

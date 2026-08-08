@@ -149,13 +149,20 @@ public final class FakeLibreOfficeMain {
     }
 
     private static void lateBroker(Path base, String tag) throws Exception {
+        ProcessTestSupport.ChildObserver childObserver = ProcessTestSupport.ownChildObserver();
         Path rootPidFile = base.resolve(tag + ".root.pid");
         Path tokenFile = base.resolve(tag + ".token");
         ProcessTestSupport.awaitFile(tokenFile, 10L);
         long rootPid = ProcessTestSupport.awaitPid(rootPidFile, 10L);
         ProcessTestSupport.awaitDead(rootPid, 10L);
         String token = new String(Files.readAllBytes(tokenFile), StandardCharsets.UTF_8);
-        javaProcess("late-child", base.toString(), tag, token).start();
+        Process child = javaProcess("late-child", base.toString(), tag, token).start();
+        childObserver.awaitAndPublish(child, base.resolve(tag + ".spawned"), 10L);
+        if (!child.waitFor(10L, java.util.concurrent.TimeUnit.SECONDS)) {
+            child.destroyForcibly();
+            child.waitFor(5L, java.util.concurrent.TimeUnit.SECONDS);
+            throw new AssertionError("runner did not terminate the broker-observed late child");
+        }
     }
 
     private static void barrier(Path base, String tag) throws Exception {

@@ -154,13 +154,24 @@ class PdfReportExporterTest {
             assertRetryableFailure(conversion);
             assertTrue(broker.waitFor(10L, TimeUnit.SECONDS));
             assertTrue(broker.exitValue() == 0);
-            long late = ProcessTestSupport.awaitPid(temp.resolve("late-tree.late.pid"), 10L);
-            ProcessTestSupport.awaitDead(late, 10L);
+            Path spawned = temp.resolve("late-tree.spawned");
+            ProcessTestSupport.awaitFile(spawned, 10L);
+            String[] identity = new String(Files.readAllBytes(spawned), StandardCharsets.US_ASCII)
+                    .trim().split(",", -1);
+            assertTrue(identity.length == 2, "broker marker must contain pid,startTime");
+            long late = Long.parseLong(identity[0]);
+            long startTime = Long.parseLong(identity[1]);
+            assertTrue(late > 0L && startTime > 0L, "broker marker must contain a valid process identity");
+            ProcessTestSupport.awaitIdentityDead(late, startTime, 10L);
             removeTreeFiles(temp, "late-tree");
             assertEmpty(temp);
         } finally {
             pool.shutdownNow();
-            if (broker != null && broker.isAlive()) broker.destroyForcibly();
+            if (broker != null && broker.isAlive()) {
+                broker.destroyForcibly();
+                broker.waitFor(5L, TimeUnit.SECONDS);
+            }
+            if (Files.exists(temp)) deleteTree(temp);
         }
     }
 
@@ -254,7 +265,7 @@ class PdfReportExporterTest {
     }
 
     private void removeTreeFiles(Path base, String tag) throws Exception {
-        for (String suffix : Arrays.asList("root.pid", "child.pid", "grandchild.pid", "late.pid", "token", "ready"))
+        for (String suffix : Arrays.asList("root.pid", "child.pid", "grandchild.pid", "late.pid", "spawned", "token", "ready"))
             Files.deleteIfExists(base.resolve(tag + "." + suffix));
     }
 
