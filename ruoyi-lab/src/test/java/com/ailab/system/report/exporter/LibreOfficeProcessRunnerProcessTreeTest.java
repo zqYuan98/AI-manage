@@ -18,7 +18,7 @@ class LibreOfficeProcessRunnerProcessTreeTest {
     void firstSnapshotFailureStillReclaimsTheStartedRootProcess() throws Exception {
         Path temp = Files.createTempDirectory("snapshot fail "); LabProperties properties = new LabProperties(); properties.setTempDirectory(temp.toString());
         LibreOfficeProcessRunner.ProcessTreeController failing = new LibreOfficeProcessRunner.ProcessTreeController() {
-            @Override public void prepare() { }
+            @Override public void prepare(String token) { }
             @Override public List<Object> snapshot(Process process) throws ReportExportException { try { Thread.sleep(200L); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); } throw new ReportExportException("snapshot failed", true); }
             @Override public void terminate(Process process, List<Object> tracked) { throw new AssertionError("tracked termination must not run"); }
         };
