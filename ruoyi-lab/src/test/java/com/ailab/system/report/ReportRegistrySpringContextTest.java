@@ -14,12 +14,14 @@ import com.ailab.system.report.provider.DataSourceProvider;
 import com.ailab.system.report.provider.DataSourceProviderRegistry;
 import com.ailab.system.report.renderer.SectionRenderer;
 import com.ailab.system.report.renderer.SectionRendererRegistry;
+import com.ailab.system.config.LabProperties;
 import java.util.Collections;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 class ReportRegistrySpringContextTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
@@ -32,6 +34,8 @@ class ReportRegistrySpringContextTest {
             assertNotNull(context.getBean(DataSourceProviderRegistry.class));
             assertNotNull(context.getBean(SectionRendererRegistry.class));
             assertNotNull(context.getBean(ReportExporterRegistry.class));
+            assertNotNull(context.getBean(ReportExporterRegistry.class).require("WORD"));
+            assertNotNull(context.getBean(ReportExporterRegistry.class).require("PDF"));
         });
     }
 
@@ -83,6 +87,7 @@ class ReportRegistrySpringContextTest {
     }
 
     @Configuration
+    @EnableConfigurationProperties(LabProperties.class)
     @ComponentScan(basePackages = {
             "com.ailab.system.report.provider",
             "com.ailab.system.report.renderer",
