@@ -174,7 +174,9 @@ public final class SafeFreemarkerFactory {
         for (int index = start; index < end; index++) {
             char current = code.charAt(index);
             if (current == '\'' || current == '"') { validateQuotedInterpolations(code, index, quotedEnd(code, index)); index = quotedEnd(code, index); continue; }
-            if (current == '?') {
+            if (current == '.' && isSpecialVariableStart(code, index, start, end)) {
+                throw validationFailure();
+            } else if (current == '?') {
                 int builtinStart = skipWhitespace(code, index + 1);
                 int builtinEnd = identifierEnd(code, builtinStart);
                 if (builtinEnd == builtinStart || !SAFE_BUILTINS.contains(code.substring(builtinStart, builtinEnd))) throw validationFailure();
@@ -186,6 +188,13 @@ public final class SafeFreemarkerFactory {
                 index = identifierEnd - 1;
             }
         }
+    }
+
+    private boolean isSpecialVariableStart(String code, int index, int start, int end) {
+        if (index + 1 >= end || !(Character.isLetter(code.charAt(index + 1)) || code.charAt(index + 1) == '_')) return false;
+        int previous = index - 1;
+        while (previous >= start && Character.isWhitespace(code.charAt(previous))) previous--;
+        return previous < start || "([,{=:+-*/%!&|<>".indexOf(code.charAt(previous)) >= 0;
     }
 
     private void validateQuotedInterpolations(String source, int start, int end) {

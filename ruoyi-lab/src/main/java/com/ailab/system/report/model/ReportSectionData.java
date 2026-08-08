@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /** Immutable neutral section payload shared by all renderers and exporters. */
 public final class ReportSectionData {
@@ -18,5 +19,13 @@ public final class ReportSectionData {
     }
     public String getSectionCode() { return sectionCode; } public String getSectionType() { return sectionType; } public String getTitle() { return title; }
     public List<Map<String, Object>> getRows() { return rows; } public Map<String, Object> getSummary() { return summary; }
+    @Override public boolean equals(Object other) {
+        if (this == other) return true;
+        if (!(other instanceof ReportSectionData)) return false;
+        ReportSectionData that = (ReportSectionData) other;
+        return sectionCode.equals(that.sectionCode) && sectionType.equals(that.sectionType)
+                && title.equals(that.title) && rows.equals(that.rows) && summary.equals(that.summary);
+    }
+    @Override public int hashCode() { return Objects.hash(sectionCode, sectionType, title, rows, summary); }
     private static String required(String value, String field) { if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException(field + " is required"); return value; }
 }

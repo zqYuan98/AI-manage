@@ -1,15 +1,17 @@
 package com.ailab.system.report.exporter;
 
-import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.springframework.stereotype.Component;
 
 /** Startup-time registry for exact exporter capabilities. */
+@Component
 public final class ReportExporterRegistry {
     private final Map<String, ReportExporter> exporters; private final Map<String, ReportExporter> capabilities;
-    public ReportExporterRegistry(Collection<? extends ReportExporter> values) {
+    public ReportExporterRegistry(List<ReportExporter> values) {
         Map<String, ReportExporter> ids = new LinkedHashMap<String, ReportExporter>(); Map<String, ReportExporter> claimed = new LinkedHashMap<String, ReportExporter>();
         for (ReportExporter value : values) { if (value == null || blank(value.getId()) || !value.supports(value.getId())) throw new IllegalStateException("Report exporter must support its own id"); if (ids.put(value.getId(), value) != null) throw new IllegalStateException("Duplicate report exporter id: " + value.getId()); }
         for (ReportExporter value : ids.values()) index(ids, claimed, value, value.getSupportedIds());

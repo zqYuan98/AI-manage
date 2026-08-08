@@ -56,6 +56,8 @@ class SafeFreemarkerFactoryTest {
         // The first > is part of the string literal.  A truncated directive scanner would miss ?keys.
         assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
                 () -> factory.render("<#assign x=\">\" + map?keys?size>${x}", model)).getMessage());
+        assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
+                () -> factory.render("<#if \">\" + map?keys?has_content>bad<#else>ok</#if>", model)).getMessage());
         assertEquals("?literal", factory.render("${'?literal'}", model));
         assertEquals("ok", factory.render("<#-- ${map?keys} -->${value}", model));
         assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
@@ -71,6 +73,19 @@ class SafeFreemarkerFactoryTest {
                     () -> factory.render(unsafe, model)).getMessage());
         }
         assertEquals("#{literal}", factory.render("${'#{literal}'}", model));
+    }
+
+    @Test
+    void rejectsEveryFreemarkerSpecialVariableWithoutMisclassifyingStringsDecimalsOrMapAccess() {
+        Map<String, Object> model = new LinkedHashMap<String, Object>();
+        model.put("map", Collections.<String, Object>singletonMap("value", "ok"));
+        for (String unsafe : Arrays.asList(
+                "${.version}", "${.locale}", "${.time_zone}", "${.now}", "${.data_model}",
+                "${true?then(.version, 'x')}")) {
+            assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
+                    () -> factory.render(unsafe, model)).getMessage());
+        }
+        assertEquals(".version / 0.5 / ok", factory.render("${'.version'} / ${0.5} / ${map.value}", model));
     }
 
     @Test

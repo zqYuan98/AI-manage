@@ -1,15 +1,17 @@
 package com.ailab.system.report.renderer;
 
-import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.springframework.stereotype.Component;
 
 /** Startup-time registry for exact renderer capabilities. */
+@Component
 public final class SectionRendererRegistry {
     private final Map<String, SectionRenderer> renderers; private final Map<String, SectionRenderer> capabilities;
-    public SectionRendererRegistry(Collection<? extends SectionRenderer> values) {
+    public SectionRendererRegistry(List<SectionRenderer> values) {
         Map<String, SectionRenderer> ids = new LinkedHashMap<String, SectionRenderer>(); Map<String, SectionRenderer> claimed = new LinkedHashMap<String, SectionRenderer>();
         for (SectionRenderer value : values) { if (value == null || blank(value.getId()) || !value.supports(value.getId())) throw new IllegalStateException("Section renderer must support its own id"); if (ids.put(value.getId(), value) != null) throw new IllegalStateException("Duplicate section renderer id: " + value.getId()); }
         for (SectionRenderer value : ids.values()) index(ids, claimed, value, value.getSupportedIds());

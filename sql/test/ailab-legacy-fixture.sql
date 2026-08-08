@@ -180,7 +180,14 @@ VALUES
 
 -- Task 8 predecessor: instance layout is complete except for immutable template-code/revision pins.
 DROP TABLE IF EXISTS `lab_report_instance`;
+DROP TABLE IF EXISTS `lab_report_section`;
 DROP TABLE IF EXISTS `lab_report_template`;
+CREATE TABLE `lab_report_section` (
+ `id` bigint NOT NULL, `template_id` bigint NOT NULL, `section_code` varchar(64) NOT NULL, `section_name` varchar(200) NOT NULL,
+ `section_type` varchar(32) NOT NULL, `sort_no` int NOT NULL, `data_source` varchar(128), `query_config_json` json, `render_config_json` json,
+ `style_config_json` json, `manual_flag` char(1), `visible_flag` char(1), `sensitive_flag` char(1), `version` int, `del_flag` char(1) DEFAULT '0',
+ `create_by` varchar(64), `create_time` datetime, `update_by` varchar(64), `update_time` datetime, `remark` varchar(500), PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE `lab_report_template` (
  `id` bigint NOT NULL, `template_code` varchar(64) NOT NULL, `template_name` varchar(200) NOT NULL, `period_type` varchar(16) NOT NULL,
  `revision_no` int NOT NULL, `latest_flag` char(1), `default_flag` char(1), `status` varchar(16), `header_json` json, `style_json` json,
@@ -195,5 +202,7 @@ CREATE TABLE `lab_report_instance` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 INSERT INTO `lab_report_template` (`id`,`template_code`,`template_name`,`period_type`,`revision_no`,`latest_flag`,`default_flag`,`status`,`version`,`del_flag`,`create_by`,`create_time`) VALUES
  (39990,'legacy-report-template-39990','Legacy report template','MONTH',7,'1','1','ENABLED',0,'0','it',NOW());
+INSERT INTO `lab_report_section` (`id`,`template_id`,`section_code`,`section_name`,`section_type`,`sort_no`,`data_source`,`query_config_json`,`render_config_json`,`style_config_json`,`manual_flag`,`visible_flag`,`sensitive_flag`,`version`,`del_flag`,`create_by`,`create_time`) VALUES
+ (39990,39990,'LEGACY_PERF','Legacy performance','STAT',10,'PERF_SUMMARY',JSON_OBJECT(),JSON_OBJECT('metrics',JSON_ARRAY('average')),JSON_OBJECT(),'0','1','0',0,'0','it',NOW());
 INSERT INTO `lab_report_instance` (`id`,`report_no`,`template_id`,`period`,`biz_line`,`revision_no`,`lifecycle_status`,`current_flag`,`final_flag`,`sensitive_flag`,`version`,`del_flag`,`create_by`,`create_time`) VALUES
  (39990,'RPT-LEGACY-39990',39990,'2026-06','ALL',1,'FINAL','1','1','0',0,'0','it',NOW());

@@ -799,8 +799,12 @@ class LabMapperMySqlIT {
                 requireLegacySkillUniquenessState(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ailab.sql")));
                 requireLegacyReportTemplatePin(connection);
+                requireLegacySensitivePermission(connection);
+                requireAllSensitiveSectionsPinned(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ailab.sql")));
                 requireLegacyReportTemplatePin(connection);
+                requireLegacySensitivePermission(connection);
+                requireAllSensitiveSectionsPinned(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-mapper-fixture.sql")));
             } catch (Exception exception) {
                 throw new IllegalStateException("Real MySQL 8 integration database is unavailable or could not be initialized. Configure LAB_IT_DB_URL/LAB_IT_DB_USERNAME/LAB_IT_DB_PASSWORD.", exception);
@@ -844,6 +848,27 @@ class LabMapperMySqlIT {
                     java.sql.ResultSet result = statement.executeQuery(
                             "select count(1) from information_schema.statistics where table_schema=database() and table_name='lab_report_instance' and index_name='idx_lab_report_instance_template_pin'")) {
                 if (!result.next() || result.getInt(1) != 2) throw new IllegalStateException("Template pin index must have both columns");
+            }
+        }
+
+        private static void requireLegacySensitivePermission(Connection connection) throws Exception {
+            try (java.sql.Statement statement = connection.createStatement();
+                    java.sql.ResultSet result = statement.executeQuery(
+                            "select sensitive_flag, sensitive_permission from lab_report_section where id=39990")) {
+                if (!result.next() || !"1".equals(result.getString(1)) || !"lab:report:sensitive".equals(result.getString(2))) {
+                    throw new IllegalStateException("Legacy sensitive report section must receive an irreversible permission snapshot");
+                }
+            }
+        }
+
+        private static void requireAllSensitiveSectionsPinned(Connection connection) throws Exception {
+            try (java.sql.Statement statement = connection.createStatement();
+                    java.sql.ResultSet result = statement.executeQuery(
+                            "select count(1) from lab_report_section where sensitive_flag='1' "
+                                    + "and (sensitive_permission is null or trim(sensitive_permission)='')")) {
+                if (!result.next() || result.getInt(1) != 0) {
+                    throw new IllegalStateException("Every sensitive report section must retain a permission snapshot");
+                }
             }
         }
 

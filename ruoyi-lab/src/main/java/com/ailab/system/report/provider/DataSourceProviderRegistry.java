@@ -1,15 +1,17 @@
 package com.ailab.system.report.provider;
 
-import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.springframework.stereotype.Component;
 
 /** Startup-time registry: every declared capability has one supporting, non-shadowed owner. */
+@Component
 public final class DataSourceProviderRegistry {
     private final Map<String, DataSourceProvider> providers; private final Map<String, DataSourceProvider> capabilities;
-    public DataSourceProviderRegistry(Collection<? extends DataSourceProvider> values) {
+    public DataSourceProviderRegistry(List<DataSourceProvider> values) {
         Map<String, DataSourceProvider> ids = new LinkedHashMap<String, DataSourceProvider>();
         Map<String, DataSourceProvider> claimed = new LinkedHashMap<String, DataSourceProvider>();
         for (DataSourceProvider value : values) {

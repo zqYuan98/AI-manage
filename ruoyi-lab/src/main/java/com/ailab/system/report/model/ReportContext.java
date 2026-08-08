@@ -2,6 +2,7 @@ package com.ailab.system.report.model;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 
 /** Trusted report inputs. Values are copied so providers cannot mutate caller state. */
 public final class ReportContext {
@@ -18,5 +19,14 @@ public final class ReportContext {
     }
     public String getPeriod() { return period; } public String getBizLine() { return bizLine; } public Long getRequesterId() { return requesterId; }
     public Instant getGeneratedAt() { return generatedAt; } public Map<String, Object> getAttributes() { return attributes; }
+    @Override public boolean equals(Object other) {
+        if (this == other) return true;
+        if (!(other instanceof ReportContext)) return false;
+        ReportContext that = (ReportContext) other;
+        return period.equals(that.period) && bizLine.equals(that.bizLine)
+                && Objects.equals(requesterId, that.requesterId) && generatedAt.equals(that.generatedAt)
+                && attributes.equals(that.attributes);
+    }
+    @Override public int hashCode() { return Objects.hash(period, bizLine, requesterId, generatedAt, attributes); }
     private static String require(String value, String field) { if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException(field + " is required"); return value; }
 }

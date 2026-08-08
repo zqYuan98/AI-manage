@@ -14,6 +14,7 @@ import java.util.Map;
 /** Immutable renderer input. JSON is parsed once and recursively frozen at the persistence boundary. */
 public final class ReportSectionConfig {
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ReportConfigValidator VALIDATOR = new ReportConfigValidator();
     private final Long sectionId; private final String sectionCode; private final String sectionName; private final String title;
     private final String titleLevel; private final String sectionType; private final Integer sortNo; private final String dataSource;
     private final Map<String, Object> queryConfig; private final Map<String, Object> renderConfig; private final Map<String, Object> styleConfig;
@@ -21,6 +22,7 @@ public final class ReportSectionConfig {
 
     public ReportSectionConfig(LabReportSection source) {
         if (source == null) throw new IllegalArgumentException("section is required");
+        VALIDATOR.validateSection(source);
         sectionId = source.getId(); sectionCode = source.getSectionCode(); sectionName = source.getSectionName(); title = source.getSectionName();
         sectionType = source.getSectionType(); sortNo = source.getSortNo(); dataSource = source.getDataSource();
         queryConfig = jsonObject(source.getQueryConfigJson()); renderConfig = jsonObject(source.getRenderConfigJson()); styleConfig = jsonObject(source.getStyleConfigJson());
