@@ -38,5 +38,7 @@ class PdfReportExporterTest {
         Object optional = Class.forName("java.lang.ProcessHandle").getMethod("of", long.class).invoke(null, Long.valueOf(child));
         Object handle = optional.getClass().getMethod("orElse", Object.class).invoke(optional, new Object[] {null});
         assertTrue(handle == null || !((Boolean) Class.forName("java.lang.ProcessHandle").getMethod("isAlive").invoke(handle)).booleanValue());
+        Files.deleteIfExists(temp.resolve("child.pid"));
+        try (java.util.stream.Stream<Path> entries = Files.list(temp)) { java.util.List<Path> remaining = entries.collect(java.util.stream.Collectors.toList()); assertTrue(remaining.isEmpty(), String.valueOf(remaining)); }
     }
 }
