@@ -81,6 +81,14 @@ class WordReportExporterTest {
     }
 
     @Test
+    void rejectsChartFallbackGridBeforePoiAllocatesFiftyThousandCategories() throws Exception {
+        Class<?> limits = Class.forName("com.ailab.system.report.exporter.WordReportExporter$Limits"); java.lang.reflect.Constructor<?> constructor = limits.getDeclaredConstructor(); constructor.setAccessible(true);
+        java.lang.reflect.Method cells = WordReportExporter.class.getDeclaredMethod("cells", limits, int.class, int.class); cells.setAccessible(true);
+        java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class, () -> cells.invoke(new WordReportExporter(), constructor.newInstance(), 2, 50002));
+        assertTrue(error.getCause() instanceof java.io.IOException);
+    }
+
+    @Test
     void boundedSerializerRefusesBytesBeyondTheConfiguredCap() throws Exception {
         Class<?> type = Class.forName("com.ailab.system.report.exporter.WordReportExporter$BoundedOutputStream");
         java.lang.reflect.Constructor<?> constructor = type.getDeclaredConstructor(java.io.OutputStream.class, int.class); constructor.setAccessible(true);
