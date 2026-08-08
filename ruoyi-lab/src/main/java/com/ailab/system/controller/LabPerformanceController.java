@@ -34,6 +34,10 @@ public class LabPerformanceController extends BaseController {
     @GetMapping("/list")
     public AjaxResult list(@RequestParam String period){return success(service.listScores(period,SecurityUtils.getUserId()));}
 
+    @PreAuthorize("@ss.hasPermi('lab:perf:history')")
+    @GetMapping("/member/{memberId}/revisions")
+    public AjaxResult revisions(@PathVariable Long memberId,@RequestParam String period){return success(service.listScoreRevisions(memberId,period,SecurityUtils.getUserId()));}
+
     @PreAuthorize("@ss.hasPermi('lab:perf:close')")
     @GetMapping("/preview")
     public AjaxResult preview(@RequestParam Long memberId,@RequestParam String period){return success(service.preview(memberId,period,SecurityUtils.getUserId()));}

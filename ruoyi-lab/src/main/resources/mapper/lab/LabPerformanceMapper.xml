@@ -74,7 +74,7 @@
     <sql id="collaborationColumns">id,task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,idempotency_key,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
 
     <select id="selectPeriodForUpdate" parameterType="string" resultMap="PeriodResult">select * from lab_period_close where period=#{period} and del_flag='0' for update</select>
-    <insert id="ensureOpenPeriod">insert ignore into lab_period_close(period,close_status,version,del_flag,create_by,create_time) values(#{period},'OPEN',0,'0',#{actor},sysdate())</insert>
+    <insert id="ensureOpenPeriod">insert into lab_period_close(period,close_status,version,del_flag,create_by,create_time) values(#{period},'OPEN',0,'0',#{actor},sysdate()) on duplicate key update id=last_insert_id(id)</insert>
     <select id="selectPeriodTasks" parameterType="string" resultMap="TaskResult">select * from lab_task where period=#{period} and del_flag='0' order by id</select>
     <select id="selectPeriodTasksForUpdate" parameterType="string" resultMap="TaskResult">select * from lab_task where period=#{period} and del_flag='0' order by id for update</select>
     <select id="selectActiveMembersForUpdate" resultMap="MemberResult">
@@ -92,6 +92,7 @@
         order by task_id,id
     </select>
     <select id="selectCollaborationForPeriod" parameterType="string" resultMap="CollaborationResult">select <include refid="collaborationColumns"/> from lab_collaboration_record where period=#{period} and del_flag='0' order by id</select>
+    <select id="selectCollaborationsForPeriodForUpdate" parameterType="string" resultMap="CollaborationResult">select <include refid="collaborationColumns"/> from lab_collaboration_record where period=#{period} and del_flag='0' order by id for update</select>
     <select id="selectCriticalAssetFacts" resultMap="AssetFactResult">
         select a.id asset_id,a.asset_name,a.primary_owner_id,
                case when bm.id is not null and bm.member_status='ACTIVE' and bu.user_id is not null and bu.status='0' then 1 else 0 end active_backup,
@@ -132,7 +133,8 @@
     </update>
     <select id="selectCurrentScores" parameterType="string" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where period=#{period} and current_flag='1' and del_flag='0' order by member_id,id</select>
     <select id="selectCurrentScoresForUpdate" parameterType="string" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where period=#{period} and current_flag='1' and del_flag='0' order by member_id,id for update</select>
-    <select id="selectScoresForMember" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where member_id=#{memberId} and period=#{period} and del_flag='0' order by revision_no desc,id desc</select>
+    <select id="selectScoresForMember" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where member_id=#{memberId} and period=#{period} and current_flag='1' and del_flag='0' order by revision_no desc,id desc</select>
+    <select id="selectScoreRevisions" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where member_id=#{memberId} and period=#{period} and del_flag='0' order by revision_no desc,id desc</select>
 
     <select id="selectCollaborationList" resultMap="CollaborationResult">
         select c.* from lab_collaboration_record c join lab_member fm on fm.id=c.from_member_id and fm.del_flag='0' join lab_member tm on tm.id=c.to_member_id and tm.del_flag='0'
@@ -141,6 +143,7 @@
         <if test="roleKey == 'lab_member'">and (c.from_member_id=#{memberId} or c.to_member_id=#{memberId})</if>
         order by c.id desc
     </select>
+    <select id="selectCollaborationById" parameterType="long" resultMap="CollaborationResult">select <include refid="collaborationColumns"/> from lab_collaboration_record where id=#{id} and del_flag='0'</select>
     <select id="selectCollaborationForUpdate" parameterType="long" resultMap="CollaborationResult">select <include refid="collaborationColumns"/> from lab_collaboration_record where id=#{id} and del_flag='0' for update</select>
     <insert id="insertCollaboration" parameterType="com.ailab.system.domain.LabCollaborationRecord" useGeneratedKeys="true" keyProperty="id">
         insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,idempotency_key,version,del_flag,create_by,create_time,remark)

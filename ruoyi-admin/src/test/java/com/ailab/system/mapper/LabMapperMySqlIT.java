@@ -16,6 +16,8 @@ import com.ailab.system.domain.LabOne2One;
 import com.ailab.system.domain.LabTask;
 import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.domain.LabPerfScore;
+import com.ailab.system.domain.LabCollaborationRecord;
+import com.ailab.system.dto.CollaborationReviewCommand;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.RedLineRevokeCommand;
 import com.ailab.system.dto.TaskSubmitCommand;
@@ -253,6 +255,12 @@ class LabMapperMySqlIT {
         assertEquals(1, jdbcTemplate.queryForObject(
                 "select count(1) from sys_role_menu rm join sys_menu m on m.menu_id=rm.menu_id where rm.role_id=30001 and m.perms='lab:one2one:edit'",
                 Integer.class));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(1) from sys_role_menu rm join sys_menu m on m.menu_id=rm.menu_id where rm.role_id=30001 and m.perms='lab:perf:history'",
+                Integer.class));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "select count(1) from sys_role_menu rm join sys_menu m on m.menu_id=rm.menu_id where rm.role_id in (30002,30003) and m.perms='lab:perf:history'",
+                Integer.class));
 
         List<LabTask> managerRows = asUser(39101L, () -> taskService.listTasks(new LabTask(), 39101L));
         List<LabTask> leadRows = asUser(39102L, () -> taskService.listTasks(new LabTask(), 39102L));
@@ -408,6 +416,11 @@ class LabMapperMySqlIT {
         long taskId = 39880L;
         cleanupPerformanceFixture(period, taskId);
         jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,asset_id,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values(?,0,39001,39002,'month',?,'algorithm','key','IT concurrent close',39203,101,'2098-11-20','artifact',100,100,'ACTIVE','DOING',39301,'0','0','0',0,'0','it',now())", taskId, period);
+        assertThrows(ServiceException.class, () -> performanceService.closePeriod(period, "must roll back", 39101L));
+        assertEquals(0, jdbcTemplate.queryForObject("select count(1) from lab_period_close where period=?", Integer.class, period));
+        assertEquals(0, jdbcTemplate.queryForObject("select count(1) from lab_perf_score where period=?", Integer.class, period));
+        assertEquals("0", jdbcTemplate.queryForObject("select period_lock_flag from lab_task where id=?", String.class, taskId));
+        jdbcTemplate.update("insert into lab_task_quality_gate(id,task_id,gate_no,gate_name,gate_status,del_flag,create_by,create_time) values(39880,?,'IT-CLOSE-GATE','IT close gate','PENDING','0','it',now())", taskId);
         try {
             ExecutorService pool = Executors.newFixedThreadPool(2);
             CountDownLatch start = new CountDownLatch(1);
@@ -444,15 +457,30 @@ class LabMapperMySqlIT {
 
             jdbcTemplate.update("update lab_task set workflow_status='CONFIRMED',result_status='ONTIME',actual_finish_time='2098-11-19 10:00:00',result_desc='fixed',version=version+1 where id=?", taskId);
             jdbcTemplate.update("insert into lab_task_evidence(id,task_id,evidence_type,evidence_title,evidence_url,submitter_id,submit_time,audit_status,auditor_id,audit_time,audit_comment,del_flag,create_by,create_time) values(39880,?,'URL','IT corrected evidence','https://example.invalid/it/fixed',39203,now(),'APPROVED',39201,now(),'verified','0','it',now())", taskId);
-            jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?, ?,39202,39203,'BACKUP',4,'https://example.invalid/it/backup',39201,'APPROVED',now(),'trained',0,'0','it',now())", taskId, period);
+            jdbcTemplate.update("update lab_task_quality_gate set gate_status='PASSED',evidence_id=39880,checker_id=39201,check_time='2098-11-30 10:00:00',check_result='verified' where id=39880");
+            LabCollaborationRecord training = new LabCollaborationRecord(); training.setTaskId(taskId); training.setPeriod(period); training.setToMemberId(39203L);
+            training.setCategory("BACKUP"); training.setSignedScore(new BigDecimal("4")); training.setEvidenceUrl("https://example.invalid/it/backup");
+            performanceService.createCollaboration(training, 39102L);
 
-            List<LabPerfScore> revised = performanceService.closePeriod(period, "corrected close", 39101L);
+            ExecutorService reclosePool = Executors.newFixedThreadPool(2); CountDownLatch recloseStart = new CountDownLatch(1);
+            Future<List<LabPerfScore>> reclose = reclosePool.submit(() -> { recloseStart.await(); return performanceService.closePeriod(period, "corrected close", 39101L); });
+            Future<Boolean> review = reclosePool.submit(() -> { recloseStart.await(); try { performanceService.reviewCollaboration(training.getId(), new CollaborationReviewCommand(new BigDecimal("4"), "trained"), 39101L); return true; } catch (ServiceException closed) { if (!closed.getMessage().contains("open period")) throw closed; return false; } });
+            recloseStart.countDown(); List<LabPerfScore> revised = reclose.get(); boolean reviewedBeforeCutoff = review.get(); reclosePool.shutdownNow();
             assertEquals(3, revised.size());
             assertEquals(Arrays.asList(1, 2), jdbcTemplate.queryForList("select revision_no from lab_perf_score where member_id=39203 and period=? order by revision_no", Integer.class, period));
             assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_perf_score where member_id=39203 and period=? and current_flag='1' and revision_no=2", Integer.class, period));
             assertEquals(originalDetail, jdbcTemplate.queryForObject("select cast(detail_json as char) from lab_perf_score where id=?", String.class, old.getId()));
             assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_collaboration_record where idempotency_key=? and del_flag='0'", Integer.class, "PERIOD_OVERDUE:" + period + ":" + taskId));
             assertEquals("CONFIRMED", jdbcTemplate.queryForObject("select workflow_status from lab_task where id=?", String.class, taskId));
+            String revisedDetail = jdbcTemplate.queryForObject("select cast(detail_json as char) from lab_perf_score where member_id=39203 and period=? and current_flag='1'", String.class, period);
+            assertTrue(revisedDetail.contains("IT corrected evidence") && revisedDetail.contains("IT-CLOSE-GATE") && revisedDetail.contains("https://example.invalid/it/backup"));
+            com.alibaba.fastjson2.JSONArray facts = com.alibaba.fastjson2.JSON.parseObject(revisedDetail).getJSONObject("collaboration").getJSONArray("items");
+            com.alibaba.fastjson2.JSONObject trainingFact = null; for (int i = 0; i < facts.size(); i++) if (training.getId().equals(facts.getJSONObject(i).getLong("recordId"))) trainingFact = facts.getJSONObject(i);
+            assertNotNull(trainingFact); assertEquals(reviewedBeforeCutoff ? "APPROVED" : "PENDING", trainingFact.getString("reviewStatus"));
+            assertEquals(reviewedBeforeCutoff, trainingFact.getBooleanValue("included"));
+            assertEquals(reviewedBeforeCutoff ? "APPROVED" : "PENDING", jdbcTemplate.queryForObject("select review_status from lab_collaboration_record where id=?", String.class, training.getId()));
+            assertEquals(2, performanceService.listScoreRevisions(39203L, period, 39101L).size());
+            assertThrows(ServiceException.class, () -> performanceService.listScoreRevisions(39203L, period, 39103L));
             assertThrows(org.springframework.dao.DuplicateKeyException.class, () -> jdbcTemplate.update("insert into lab_perf_score(member_id,period,revision_no,current_flag,version,del_flag,create_by,create_time) values(39203,?,99,'1',0,'0','it',now())", period));
         } finally {
             cleanupPerformanceFixture(period, taskId);
@@ -462,6 +490,7 @@ class LabMapperMySqlIT {
     private void cleanupPerformanceFixture(String period, long taskId) {
         jdbcTemplate.update("delete from lab_perf_score where period=?", period);
         jdbcTemplate.update("delete from lab_collaboration_record where period=? or idempotency_key=?", period, "PERIOD_OVERDUE:" + period + ":" + taskId);
+        jdbcTemplate.update("delete from lab_task_quality_gate where task_id=?", taskId);
         jdbcTemplate.update("delete from lab_task_evidence where task_id=?", taskId);
         jdbcTemplate.update("delete from lab_task where id=?", taskId);
         jdbcTemplate.update("delete from lab_period_close where period=?", period);

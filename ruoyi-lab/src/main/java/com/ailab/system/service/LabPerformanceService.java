@@ -11,6 +11,7 @@ import java.util.List;
 public interface LabPerformanceService {
     List<LabPerfScore> listMyScores(String period,Long actorUserId);
     List<LabPerfScore> listScores(String period,Long actorUserId);
+    List<LabPerfScore> listScoreRevisions(Long memberId,String period,Long actorUserId);
     List<LabCollaborationRecord> listCollaboration(String period,Long actorUserId);
     PerformanceCalculationResult preview(Long memberId,String period,Long actorUserId);
     LabCollaborationRecord createCollaboration(LabCollaborationRecord record,Long actorUserId);

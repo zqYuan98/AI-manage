@@ -22,6 +22,7 @@ public interface LabPerformanceMapper {
     List<LabTaskEvidence> selectEvidenceForTaskIds(@Param("taskIds") List<Long> taskIds);
     List<LabTaskQualityGate> selectQualityGatesForTaskIds(@Param("taskIds") List<Long> taskIds);
     List<LabCollaborationRecord> selectCollaborationForPeriod(String period);
+    List<LabCollaborationRecord> selectCollaborationsForPeriodForUpdate(String period);
     List<PerformanceAssetFact> selectCriticalAssetFacts(@Param("quarterStart") String quarterStart,@Param("quarterEnd") String quarterEnd);
     List<PerformanceAssetFact> selectCriticalAssetFactsForUpdate(@Param("quarterStart") String quarterStart,@Param("quarterEnd") String quarterEnd);
     int insertOverdueRecord(LabCollaborationRecord record);
@@ -35,7 +36,9 @@ public interface LabPerformanceMapper {
     List<LabPerfScore> selectCurrentScores(String period);
     List<LabPerfScore> selectCurrentScoresForUpdate(String period);
     List<LabPerfScore> selectScoresForMember(@Param("memberId") Long memberId,@Param("period") String period);
+    List<LabPerfScore> selectScoreRevisions(@Param("memberId") Long memberId,@Param("period") String period);
     List<LabCollaborationRecord> selectCollaborationList(@Param("period") String period,@Param("memberId") Long memberId,@Param("bizLine") String bizLine,@Param("roleKey") String roleKey);
+    LabCollaborationRecord selectCollaborationById(Long id);
     LabCollaborationRecord selectCollaborationForUpdate(Long id);
     int insertCollaboration(LabCollaborationRecord record);
     int reviewCollaboration(@Param("id") Long id,@Param("score") BigDecimal score,@Param("reviewerId") Long reviewerId,@Param("reviewTime") Date reviewTime,@Param("comment") String comment,@Param("actor") String actor);

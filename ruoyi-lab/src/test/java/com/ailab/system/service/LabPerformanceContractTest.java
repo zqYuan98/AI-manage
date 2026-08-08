@@ -27,6 +27,52 @@ import org.springframework.transaction.annotation.Transactional;
 
 class LabPerformanceContractTest {
     @Test
+    void calibrationCommandDoesNotExposeClientControlledResultStatus() {
+        for (java.lang.reflect.Field field : CalibrationCommand.class.getDeclaredFields()) {
+            assertFalse("resultStatus".equals(field.getName()));
+        }
+        for (Method method : CalibrationCommand.class.getMethods()) {
+            assertFalse("getResultStatus".equals(method.getName()) || "setResultStatus".equals(method.getName()));
+        }
+    }
+
+    @Test
+    void calibrationCommandIgnoresLegacyJsonResultStatus() throws Exception {
+        CalibrationCommand command = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
+                "{\"score\":88,\"comment\":\"review\",\"resultStatus\":\"RED_LINE\"}", CalibrationCommand.class);
+        assertTrue(command.getScore().intValue() == 88 && "review".equals(command.getComment()));
+    }
+
+    @Test
+    void managerHistoryEndpointUsesDedicatedManagerOnlyPermission() throws Exception {
+        Method method = LabPerformanceController.class.getDeclaredMethod("revisions", Long.class, String.class);
+        org.springframework.security.access.prepost.PreAuthorize authorize = method.getAnnotation(org.springframework.security.access.prepost.PreAuthorize.class);
+        org.springframework.web.bind.annotation.GetMapping mapping = method.getAnnotation(org.springframework.web.bind.annotation.GetMapping.class);
+        assertTrue(authorize != null && authorize.value().contains("lab:perf:history"));
+        assertTrue(mapping != null && java.util.Arrays.asList(mapping.value()).contains("/member/{memberId}/revisions"));
+    }
+
+    @Test
+    void currentPersonalQueryExcludesHistoryAndRevisionQueryReturnsEveryRevisionDescending() throws Exception {
+        String xml = text(root().resolve("ruoyi-lab/src/main/resources/mapper/lab/LabPerformanceMapper.xml")).toLowerCase().replaceAll("\\s+", " ");
+        assertTrue(xml.contains("id=\"selectscoresformember\"") && xml.contains("member_id=#{memberid} and period=#{period} and current_flag='1' and del_flag='0'"));
+        assertTrue(xml.contains("id=\"selectscorerevisions\"") && xml.contains("member_id=#{memberid} and period=#{period} and del_flag='0' order by revision_no desc,id desc"));
+    }
+
+    @Test
+    void periodCreationAvoidsGapLockAndEarlyConsistentReadAndCollaborationLockHasCoveringIndex() throws Exception {
+        for (Method method : LabPerformanceMapper.class.getMethods()) {
+            assertFalse("selectPeriod".equals(method.getName()), "close must not establish an early repeatable-read snapshot");
+        }
+        String xml = text(root().resolve("ruoyi-lab/src/main/resources/mapper/lab/LabPerformanceMapper.xml")).toLowerCase().replaceAll("\\s+", " ");
+        assertFalse(xml.contains("id=\"selectperiod\""), "close must use ensure then a locking period read");
+        assertTrue(xml.contains("on duplicate key update id=last_insert_id(id)"), "period ensure must acquire an exclusive duplicate-key lock");
+        String sql = text(root().resolve("sql/ailab.sql")).toLowerCase().replace("`", "").replaceAll("\\s+", "");
+        assertTrue(sql.contains("keyidx_lab_collab_period_id(period,id)"));
+        assertTrue(sql.contains("addindexidx_lab_collab_period_id(period,id)"));
+    }
+
+    @Test
     void mapperXmlParsesAndMapsEveryPerformanceAuditField() throws Exception {
         Configuration configuration = new Configuration();
         configuration.addMapper(LabPerformanceMapper.class);
@@ -49,7 +95,10 @@ class LabPerformanceContractTest {
         assertTrue(xml.contains("where period=#{period} and del_flag='0' order by id for update"));
         assertTrue(xml.contains("member_status='active'") && xml.contains("order by m.id for update"));
         assertTrue(xml.contains("current_flag='1' and del_flag='0' order by member_id,id for update"));
-        assertTrue(xml.contains("insert ignore into lab_period_close") && xml.contains("insert ignore into lab_collaboration_record"));
+        assertFalse(xml.contains("insert ignore into lab_period_close"));
+        assertTrue(xml.contains("on duplicate key update id=last_insert_id(id)") && xml.contains("insert ignore into lab_collaboration_record"));
+        assertTrue(xml.contains("id=\"selectcollaborationbyid\"") && xml.contains("id=\"selectcollaborationsforperiodforupdate\""));
+        assertTrue(xml.contains("from lab_collaboration_record where period=#{period} and del_flag='0' order by id for update"));
         assertTrue(xml.contains("rolekey == 'lab_lead'") && xml.contains("rolekey == 'lab_member'"));
         assertTrue(xml.contains("json_extract(detail_json,'$.redlinetriggers')"));
         assertTrue(xml.contains("current_flag='1' and confirmation_status='pending'"));
@@ -80,10 +129,14 @@ class LabPerformanceContractTest {
         String sql = text(root().resolve("sql/ailab.sql")).replaceAll("\\s+", " ");
         String leadMenus = roleMenus(sql, "30002");
         String memberMenus = roleMenus(sql, "30003");
+        String managerMenus = roleMenus(sql, "30001");
         assertTrue(leadMenus.contains("31009"));
         assertFalse(leadMenus.contains("31090"), "line leads must not receive period close");
         assertFalse(leadMenus.contains("31094"), "line leads must not receive quarterly calibration");
         assertTrue(memberMenus.contains("31009"), "members need lab:perf:list for personal scores and confirmations");
+        assertTrue(managerMenus.contains("31095"), "managers need performance history permission");
+        assertFalse(leadMenus.contains("31095"), "line leads must not receive performance history");
+        assertFalse(memberMenus.contains("31095"), "members must not receive performance history");
     }
 
     @Test

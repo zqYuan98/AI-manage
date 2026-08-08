@@ -5,8 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,6 +35,7 @@ import com.ruoyi.common.exception.ServiceException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -40,10 +44,12 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -74,18 +80,93 @@ class LabPerformanceServiceTest {
     }
 
     @Test
-    void qualityRequiresPassedGateBoundToApprovedEvidenceAndExplainsNoGate() {
-        LabTask first = task(1L, 50, "CONFIRMED", "ONTIME");
-        LabTask second = task(2L, 50, "CONFIRMED", "ONTIME");
-        PerformanceCalculationInput input = input(first, second);
+    void qualityRequiresPassedGateBoundToApprovedEvidence() {
+        LabTask first = task(1L, 100, "CONFIRMED", "ONTIME");
+        PerformanceCalculationInput input = input(first);
         input.getEvidenceByTask().put(1L, Arrays.asList(evidence(11L, "APPROVED"), evidence(12L, "PENDING")));
         input.getQualityGatesByTask().put(1L, Arrays.asList(gate(1L, "PASSED", 11L), gate(2L, "PASSED", 12L)));
 
         PerformanceCalculationResult result = calculator.calculate(input);
 
-        assertEquals(new BigDecimal("6.25"), result.getQualityScore());
-        assertTrue(result.getDetailJson().contains("NO_APPLICABLE_GATE"));
+        assertEquals(new BigDecimal("12.50"), result.getQualityScore());
         assertTrue(result.getDetailJson().contains("approvedEvidence"));
+    }
+
+    @Test
+    void presentButUnpassedQualityGateIsValidAndScoresZeroQuality() {
+        PerformanceCalculationInput input = input(task(1L, 100, "CONFIRMED", "ONTIME"));
+        input.getQualityGatesByTask().put(1L, Collections.singletonList(gate(1L, "PENDING", null)));
+
+        PerformanceCalculationResult result = calculator.calculate(input);
+
+        assertEquals(new BigDecimal("0.00"), result.getQualityScore());
+        assertFalse(result.getDetailJson().contains("NO_APPLICABLE_GATE"));
+    }
+
+    @Test
+    void previewRejectsMonthlyKeyTaskWithoutQualityGateWithTaskSpecificError() {
+        LabTask missingGate = task(41L, 100, "CONFIRMED", "ONTIME"); missingGate.setTitle("Gate contract task");
+        when(mapper.selectPeriodTasks("2026-08")).thenReturn(Collections.singletonList(missingGate));
+        when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(41L))).thenReturn(Collections.<LabTaskQualityGate>emptyList());
+
+        ServiceException error = assertThrows(ServiceException.class, () -> service.preview(7L, "2026-08", 100L));
+
+        assertTrue(error.getMessage().contains("41"));
+        assertTrue(error.getMessage().contains("Gate contract task"));
+        assertTrue(error.getMessage().toLowerCase().contains("quality gate"));
+    }
+
+    @Test
+    void previewRejectsWhenAnyMonthlyKeyTaskInPeriodLacksGate() {
+        LabTask own = task(44L, 100, "CONFIRMED", "ONTIME");
+        LabTask other = task(45L, 100, "CONFIRMED", "ONTIME"); other.setOwnerId(88L); other.setTitle("Other member missing gate");
+        when(mapper.selectPeriodTasks("2026-08")).thenReturn(Arrays.asList(own, other));
+        when(mapper.selectQualityGatesForTaskIds(Arrays.asList(44L, 45L))).thenReturn(Collections.singletonList(gateForTask(44L, 144L, "PENDING", null)));
+
+        ServiceException error = assertThrows(ServiceException.class, () -> service.preview(7L, "2026-08", 100L));
+
+        assertTrue(error.getMessage().contains("45") && error.getMessage().contains("Other member missing gate"));
+        verify(mapper, never()).selectEvidenceForTaskIds(anyList());
+    }
+
+    @Test
+    void closeRejectsMissingGateBeforeBusinessAuditWritesAndReliesOnTransactionRollbackForPeriod() {
+        manager(100L, 900L);
+        LabTask missingGate = task(42L, 100, "ACTIVE", "DOING"); missingGate.setTitle("No gate close task");
+        when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(period("2026-08", "OPEN", 0));
+        when(mapper.selectPeriodTasksForUpdate("2026-08")).thenReturn(Collections.singletonList(missingGate));
+        when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(42L))).thenReturn(Collections.<LabTaskQualityGate>emptyList());
+
+        ServiceException error = assertThrows(ServiceException.class, () -> service.closePeriod("2026-08", "close", 100L));
+
+        assertTrue(error.getMessage().contains("42"));
+        InOrder periodOrder = inOrder(mapper);
+        periodOrder.verify(mapper).ensureOpenPeriod("2026-08", "100");
+        periodOrder.verify(mapper).selectPeriodForUpdate("2026-08");
+        verify(mapper, never()).insertOverdueRecord(any(LabCollaborationRecord.class));
+        verify(mapper, never()).insertPerfScore(any(LabPerfScore.class));
+        verify(mapper, never()).lockTasksForPeriod(any(String.class), any(String.class));
+        verify(mapper, never()).closePeriod(any(Long.class), any(Integer.class), any(String.class), any(Date.class), any(String.class));
+    }
+
+    @Test
+    void closeWithExistingOpenPeriodRejectsMissingGateBeforeDeductionsOrScores() {
+        manager(100L, 900L);
+        LabPeriodClose open = period("2026-08", "OPEN", 3);
+        LabTask missingGate = task(43L, 100, "ACTIVE", "DOING"); missingGate.setTitle("Existing period missing gate");
+        when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(open);
+        when(mapper.selectPeriodTasksForUpdate("2026-08")).thenReturn(Collections.singletonList(missingGate));
+        when(mapper.selectActiveMembersForUpdate()).thenReturn(Collections.singletonList(member(7L)));
+        when(mapper.selectEvidenceForTaskIds(Collections.singletonList(43L))).thenReturn(Collections.<LabTaskEvidence>emptyList());
+        when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(43L))).thenReturn(Collections.<LabTaskQualityGate>emptyList());
+
+        ServiceException error = assertThrows(ServiceException.class, () -> service.closePeriod("2026-08", "close", 100L));
+
+        assertTrue(error.getMessage().contains("43"));
+        verify(mapper, never()).insertOverdueRecord(any(LabCollaborationRecord.class));
+        verify(mapper, never()).insertPerfScore(any(LabPerfScore.class));
+        verify(mapper, never()).lockTasksForPeriod(any(String.class), any(String.class));
+        verify(mapper, never()).closePeriod(any(Long.class), any(Integer.class), any(String.class), any(Date.class), any(String.class));
     }
 
     @Test
@@ -104,6 +185,54 @@ class LabPerformanceServiceTest {
         assertEquals(new BigDecimal("13.00"), result.getCollaborationScore());
         assertEquals(new BigDecimal("73.00"), result.getTotalScore());
         assertTrue(result.getDetailJson().contains("positiveBeforeDeduction"));
+    }
+
+    @Test
+    void detailSnapshotIncludesEveryMemberFactWithDeterministicMetadataAndExclusions() {
+        PerformanceCalculationInput input = input(task(1L, 100, "CONFIRMED", "ONTIME"));
+        input.setCloseMode(true);
+        LabTaskEvidence approved = evidence(10L, "APPROVED"); approved.setEvidenceType("REPORT"); approved.setEvidenceTitle("Accepted report"); approved.setSubmitterId(900L);
+        approved.setSubmitTime(Date.from(Instant.parse("2026-08-29T01:02:03Z"))); approved.setAuditComment("verified against acceptance");
+        approved.setAuditorId(901L); approved.setAuditTime(Date.from(Instant.parse("2026-08-30T01:02:03Z")));
+        LabTaskEvidence pending = evidence(20L, "PENDING"); pending.setEvidenceType("LINK"); pending.setEvidenceTitle("Awaiting review");
+        LabTaskEvidence missingUrl = evidence(30L, "APPROVED"); missingUrl.setEvidenceUrl(null); missingUrl.setEvidenceType("FILE"); missingUrl.setEvidenceTitle("No URL");
+        input.getEvidenceByTask().put(1L, Arrays.asList(missingUrl, pending, approved));
+
+        LabTaskQualityGate passed = gate(101L, "PASSED", 10L); passed.setGateNo("G-01"); passed.setGateName("Acceptance");
+        passed.setCheckerId(902L); passed.setCheckTime(Date.from(Instant.parse("2026-08-30T02:03:04Z"))); passed.setCheckResult("ok");
+        LabTaskQualityGate notPassed = gate(102L, "PENDING", 20L); notPassed.setGateNo("G-02"); notPassed.setGateName("Security");
+        input.getQualityGatesByTask().put(1L, Arrays.asList(notPassed, passed));
+
+        LabCollaborationRecord first = collab(1L, "CROSS_DEPT", "10", "APPROVED", "https://e/cross");
+        first.setTaskId(1L); first.setFromMemberId(8L); first.setReviewerId(9L); first.setReviewTime(Date.from(Instant.parse("2026-08-30T03:04:05Z")));
+        LabCollaborationRecord capReached = collab(2L, "CROSS_DEPT", "1", "APPROVED", "https://e/capped");
+        LabCollaborationRecord pendingReview = collab(3L, "KNOWLEDGE", "2", "PENDING", "https://e/pending");
+        LabCollaborationRecord rejected = collab(4L, "BACKUP", "2", "REJECTED", "https://e/rejected");
+        LabCollaborationRecord missingEvidence = collab(5L, "KNOWLEDGE", "2", "APPROVED", null);
+        LabCollaborationRecord deduction = collab(6L, "OVERDUE", "-2", "APPROVED", null);
+        LabCollaborationRecord unsupported = collab(7L, "UNKNOWN", "2", "APPROVED", "https://e/unknown");
+        LabCollaborationRecord unrelated = collab(8L, "KNOWLEDGE", "5", "APPROVED", "https://secret/unrelated"); unrelated.setToMemberId(99L);
+        input.setCollaborationRecords(Arrays.asList(unrelated, unsupported, deduction, missingEvidence, rejected, pendingReview, capReached, first));
+
+        PerformanceCalculationResult result = calculator.calculate(input);
+        String detail = result.getDetailJson();
+
+        assertEquals(new BigDecimal("4.00"), result.getCollaborationScore());
+        assertTrue(detail.contains("\"evidence\":["));
+        assertTrue(detail.contains("\"evidenceId\":10") && detail.contains("\"type\":\"REPORT\"") && detail.contains("\"title\":\"Accepted report\""));
+        assertTrue(detail.contains("\"auditorId\":901") && detail.contains("\"auditTime\":\"2026-08-30T01:02:03Z\""));
+        assertTrue(detail.contains("\"submitterId\":900") && detail.contains("\"submitTime\":\"2026-08-29T01:02:03Z\"") && detail.contains("\"auditComment\":\"verified against acceptance\""));
+        assertTrue(detail.contains("\"exclusionReason\":\"AUDIT_NOT_APPROVED\"") && detail.contains("\"exclusionReason\":\"MISSING_EVIDENCE_URL\""));
+        assertTrue(detail.contains("\"gateNo\":\"G-01\"") && detail.contains("\"gateName\":\"Acceptance\""));
+        assertTrue(detail.contains("\"checkerId\":902") && detail.contains("\"checkTime\":\"2026-08-30T02:03:04Z\"") && detail.contains("\"checkResult\":\"ok\""));
+        assertTrue(detail.contains("\"recordId\":1") && detail.contains("\"reviewerId\":9") && detail.contains("\"reviewTime\":\"2026-08-30T03:04:05Z\""));
+        for (long recordId = 1; recordId <= 7; recordId++) assertTrue(detail.contains("\"recordId\":" + recordId));
+        assertTrue(detail.contains("https://e/pending") && detail.contains("https://e/rejected") && detail.contains("https://e/capped"));
+        assertTrue(detail.contains("CATEGORY_CAP_REACHED") && detail.contains("REVIEW_NOT_APPROVED") && detail.contains("MISSING_EVIDENCE") && detail.contains("UNSUPPORTED_CATEGORY"));
+        assertFalse(detail.contains("https://secret/unrelated"));
+        assertTrue(detail.indexOf("\"evidenceId\":10") < detail.indexOf("\"evidenceId\":20"));
+        assertTrue(detail.indexOf("\"recordId\":1") < detail.indexOf("\"recordId\":7"));
+        assertEquals(detail, calculator.calculate(input).getDetailJson());
     }
 
     @Test
@@ -148,8 +277,8 @@ class LabPerformanceServiceTest {
         when(mapper.selectPeriodTasksForUpdate("2026-08")).thenReturn(Collections.singletonList(unsubmitted));
         when(mapper.selectActiveMembersForUpdate()).thenReturn(Collections.singletonList(member(7L)));
         when(mapper.selectEvidenceForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.<LabTaskEvidence>emptyList());
-        when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.<LabTaskQualityGate>emptyList());
-        when(mapper.selectCollaborationForPeriod("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
+        when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(gateForTask(1L, 101L, "PENDING", null)));
+        when(mapper.selectCollaborationsForPeriodForUpdate("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
         when(mapper.selectCriticalAssetFactsForUpdate("2026-07", "2026-09")).thenReturn(Collections.<PerformanceAssetFact>emptyList());
         when(mapper.selectMaxRevision(7L, "2026-08")).thenReturn(2);
         when(mapper.insertOverdueRecord(any(LabCollaborationRecord.class))).thenReturn(1);
@@ -168,6 +297,40 @@ class LabPerformanceServiceTest {
         assertEquals("PERIOD_OVERDUE:2026-08:1", overdue.getValue().getIdempotencyKey());
         assertEquals("APPROVED", overdue.getValue().getReviewStatus());
         verify(mapper).markCurrentScoresHistorical("2026-08", 7L, "100");
+        verify(mapper, never()).selectCollaborationForPeriod("2026-08");
+        InOrder lockOrder = inOrder(mapper);
+        lockOrder.verify(mapper).selectPeriodForUpdate("2026-08");
+        lockOrder.verify(mapper).selectCollaborationsForPeriodForUpdate("2026-08");
+    }
+
+    @Test
+    void closeCapturesCutoffOnlyAfterEverySnapshotSourceIsLocked() {
+        manager(100L, 900L);
+        AtomicInteger clockCalls = new AtomicInteger(); AtomicInteger callsAtTaskLock = new AtomicInteger(-1); AtomicInteger callsAtAssetLock = new AtomicInteger(-1);
+        Clock trackingClock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { clockCalls.incrementAndGet(); return CLOCK.instant(); }
+        };
+        service = new LabPerformanceServiceImpl(mapper, access, calculator, trackingClock);
+        LabPeriodClose open = period("2026-08", "OPEN", 3);
+        when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(open);
+        LabTask confirmed = task(1L, 100, "CONFIRMED", "ONTIME");
+        when(mapper.selectPeriodTasksForUpdate("2026-08")).thenAnswer(invocation -> { callsAtTaskLock.set(clockCalls.get()); return Collections.singletonList(confirmed); });
+        when(mapper.selectActiveMembersForUpdate()).thenReturn(Collections.singletonList(member(7L)));
+        when(mapper.selectEvidenceForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(evidence(11L, "APPROVED")));
+        when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(gateForTask(1L, 101L, "PENDING", null)));
+        when(mapper.selectCollaborationsForPeriodForUpdate("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
+        when(mapper.selectCriticalAssetFactsForUpdate("2026-07", "2026-09")).thenAnswer(invocation -> { callsAtAssetLock.set(clockCalls.get()); return Collections.<PerformanceAssetFact>emptyList(); });
+        when(mapper.insertPerfScore(any(LabPerfScore.class))).thenReturn(1);
+        when(mapper.lockTasksForPeriod("2026-08", "1")).thenReturn(1);
+        when(mapper.closePeriod(eq(open.getId()), eq(3), eq("100"), any(Date.class), eq("close"))).thenReturn(1);
+
+        service.closePeriod("2026-08", "close", 100L);
+
+        assertEquals(0, callsAtTaskLock.get());
+        assertEquals(0, callsAtAssetLock.get());
+        assertEquals(1, clockCalls.get());
     }
 
     @Test
@@ -230,6 +393,8 @@ class LabPerformanceServiceTest {
         manager(100L, 9L);
         LabCollaborationRecord own = collab(1L, "CROSS_DEPT", "3", "PENDING", "https://e/1");
         own.setFromMemberId(9L);
+        when(mapper.selectCollaborationById(1L)).thenReturn(own);
+        when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(period("2026-08", "OPEN", 1));
         when(mapper.selectCollaborationForUpdate(1L)).thenReturn(own);
         assertThrows(ServiceException.class, () -> service.reviewCollaboration(1L,
                 new CollaborationReviewCommand(new BigDecimal("3"), "ok"), 100L));
@@ -240,6 +405,59 @@ class LabPerformanceServiceTest {
         service.reviewCollaboration(1L, new CollaborationReviewCommand(new BigDecimal("3"), "ok"), 100L);
         verify(mapper).reviewCollaboration(eq(1L), eq(new BigDecimal("3.00")), eq(9L),
                 eq(Date.from(CLOCK.instant())), eq("ok"), eq("100"));
+    }
+
+    @Test
+    void collaborationCreateLocksOpenPeriodBeforeInsertAndRejectsClosedPeriod() {
+        memberActor(200L, 77L, "vision");
+        LabCollaborationRecord allowed = collab(null, "KNOWLEDGE", "3", "PENDING", "https://e/open");
+        when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(period("2026-08", "OPEN", 1));
+        when(mapper.insertCollaboration(allowed)).thenReturn(1);
+
+        service.createCollaboration(allowed, 200L);
+
+        InOrder order = inOrder(mapper);
+        order.verify(mapper).ensureOpenPeriod("2026-08", "200");
+        order.verify(mapper).selectPeriodForUpdate("2026-08");
+        order.verify(mapper).insertCollaboration(allowed);
+
+        LabCollaborationRecord rejected = collab(null, "KNOWLEDGE", "2", "PENDING", "https://e/closed");
+        rejected.setPeriod("2026-09");
+        when(mapper.selectPeriodForUpdate("2026-09")).thenReturn(period("2026-09", "CLOSED", 2));
+        assertThrows(ServiceException.class, () -> service.createCollaboration(rejected, 200L));
+        verify(mapper, never()).insertCollaboration(rejected);
+    }
+
+    @Test
+    void collaborationReviewRejectsClosedPeriodBeforeAuditUpdate() {
+        manager(100L, 9L);
+        LabCollaborationRecord pending = collab(81L, "CROSS_DEPT", "3", "PENDING", "https://e/81"); pending.setFromMemberId(8L);
+        when(mapper.selectCollaborationById(81L)).thenReturn(pending);
+        when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(period("2026-08", "CLOSED", 2));
+
+        assertThrows(ServiceException.class, () -> service.reviewCollaboration(81L,
+                new CollaborationReviewCommand(new BigDecimal("3"), "review"), 100L));
+
+        verify(mapper, never()).reviewCollaboration(eq(81L), any(BigDecimal.class), any(Long.class), any(Date.class), any(String.class), any(String.class));
+    }
+
+    @Test
+    void reopenedPeriodAllowsNewCollaborationOnlyAfterSecondPeriodLock() {
+        manager(100L, 900L);
+        LabPeriodClose closed = period("2026-08", "CLOSED", 4);
+        when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(closed, period("2026-08", "OPEN", 5));
+        when(mapper.selectPeriodTasksForUpdate("2026-08")).thenReturn(Collections.<LabTask>emptyList());
+        when(mapper.selectCurrentScoresForUpdate("2026-08")).thenReturn(Collections.<LabPerfScore>emptyList());
+        when(mapper.reopenPeriod(eq(closed.getId()), eq(4), eq("100"), any(Date.class), eq("correction"))).thenReturn(1);
+        LabCollaborationRecord submitted = collab(null, "KNOWLEDGE", "2", "PENDING", "https://e/reopened");
+        when(mapper.insertCollaboration(submitted)).thenReturn(1);
+
+        service.reopenPeriod("2026-08", "correction", 100L);
+        service.createCollaboration(submitted, 100L);
+
+        verify(mapper, times(2)).selectPeriodForUpdate("2026-08");
+        verify(mapper).ensureOpenPeriod("2026-08", "100");
+        verify(mapper).insertCollaboration(submitted);
     }
 
     @Test
@@ -286,7 +504,7 @@ class LabPerformanceServiceTest {
     }
 
     @Test
-    void calibrationRejectsUnknownStatusAndCarriesActiveRedLineIntoSnapshot() {
+    void calibrationIgnoresClientStatusAndRejectsEveryActiveRedLine() {
         manager(100L, 9L);
         LabPerfScore july=score(1L,7L,1); july.setPeriod("2026-07"); july.setRedLineFlag("1"); july.setRevokedFlag("0");
         LabPerfScore august=score(2L,7L,1); august.setPeriod("2026-08");
@@ -297,13 +515,15 @@ class LabPerformanceServiceTest {
         when(mapper.insertPerfScore(any(LabPerfScore.class))).thenReturn(1);
 
         assertThrows(ServiceException.class, () -> service.calibrateQuarter("2026-Q3", 7L,
-                new CalibrationCommand(new BigDecimal("90"), "review", "EXCELLENT"), 100L));
+                new CalibrationCommand(new BigDecimal("90"), "review", "RED_LINE"), 100L));
+        verify(mapper, never()).insertPerfScore(any(LabPerfScore.class));
 
+        july.setRedLineFlag("0");
         LabPerfScore result = service.calibrateQuarter("2026-Q3", 7L,
                 new CalibrationCommand(new BigDecimal("90"), "review", "RED_LINE"), 100L);
-        assertEquals("RED_LINE", result.getResultStatus());
-        assertEquals("1", result.getRedLineFlag());
-        assertTrue(result.getDetailJson().contains("activeMonthlyRedLine"));
+        assertEquals("NORMAL", result.getResultStatus());
+        assertEquals("0", result.getRedLineFlag());
+        assertTrue(result.getDetailJson().contains("\"activeMonthlyRedLine\":false"));
     }
 
     @Test
@@ -315,11 +535,30 @@ class LabPerformanceServiceTest {
     }
 
     @Test
+    void revisionHistoryIsManagerOnlyAndReturnsCurrentAndHistoricalRowsDescending() {
+        manager(100L, 9L);
+        LabPerfScore current = score(2L, 77L, 2);
+        LabPerfScore historical = score(1L, 77L, 1); historical.setCurrentFlag("0");
+        when(mapper.selectScoreRevisions(77L, "2026-08")).thenReturn(Arrays.asList(current, historical));
+
+        List<LabPerfScore> revisions = service.listScoreRevisions(77L, "2026-08", 100L);
+        assertEquals(Arrays.asList(current, historical), revisions);
+
+        memberActor(200L, 77L, "vision");
+        assertThrows(ServiceException.class, () -> service.listScoreRevisions(77L, "2026-08", 200L));
+        verify(mapper, times(1)).selectScoreRevisions(77L, "2026-08");
+
+        leadActor(201L, 78L, "vision");
+        assertThrows(ServiceException.class, () -> service.listScoreRevisions(77L, "2026-08", 201L));
+        verify(mapper, times(1)).selectScoreRevisions(77L, "2026-08");
+    }
+
+    @Test
     void previewUsesNonLockingReadsAndNeverRunsForUpdateInReadOnlyTransaction() {
         LabTask confirmed = task(1L, 100, "CONFIRMED", "ONTIME");
         when(mapper.selectPeriodTasks("2026-08")).thenReturn(Collections.singletonList(confirmed));
         when(mapper.selectEvidenceForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(evidence(1L, "APPROVED")));
-        when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.<LabTaskQualityGate>emptyList());
+        when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(gateForTask(1L, 101L, "PENDING", null)));
         when(mapper.selectCollaborationForPeriod("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
         when(mapper.selectCriticalAssetFacts("2026-07", "2026-09")).thenReturn(Collections.<PerformanceAssetFact>emptyList());
 
@@ -339,7 +578,7 @@ class LabPerformanceServiceTest {
         when(mapper.selectActiveMembersForUpdate()).thenReturn(Collections.singletonList(member(7L)));
         when(mapper.selectEvidenceForTaskIds(Collections.<Long>emptyList())).thenReturn(Collections.<LabTaskEvidence>emptyList());
         when(mapper.selectQualityGatesForTaskIds(Collections.<Long>emptyList())).thenReturn(Collections.<LabTaskQualityGate>emptyList());
-        when(mapper.selectCollaborationForPeriod("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
+        when(mapper.selectCollaborationsForPeriodForUpdate("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
         when(mapper.selectCriticalAssetFactsForUpdate("2026-07", "2026-09")).thenReturn(Collections.<PerformanceAssetFact>emptyList());
         when(mapper.selectMaxRevision(7L, "2026-08")).thenReturn(0);
         when(mapper.insertPerfScore(any(LabPerfScore.class))).thenReturn(0);
@@ -353,6 +592,7 @@ class LabPerformanceServiceTest {
         memberActor(200L, 77L, "vision");
         LabCollaborationRecord submitted = collab(null, "KNOWLEDGE", "3", "APPROVED", "https://e/client");
         submitted.setFromMemberId(999L); submitted.setReviewerId(999L); submitted.setReviewTime(new Date(0)); submitted.setReviewComment("forged");
+        when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(period("2026-08", "OPEN", 1));
         when(mapper.insertCollaboration(submitted)).thenReturn(1);
 
         service.createCollaboration(submitted, 200L);
@@ -392,6 +632,31 @@ class LabPerformanceServiceTest {
         verify(mapper, never()).confirmScore(eq(2L), eq(0), any(Long.class), any(Date.class), any(String.class));
     }
 
+    @Test
+    void activeRedLineConfirmationIsManagerOnlyButRevokedRedLineReturnsToNormalRoleRules() {
+        memberActor(200L, 77L, "vision");
+        LabPerfScore activeMemberRedLine = score(11L, 77L, 1); activeMemberRedLine.setRedLineFlag("1"); activeMemberRedLine.setRevokedFlag("0");
+        when(mapper.selectScoreForUpdate(11L)).thenReturn(activeMemberRedLine);
+        assertThrows(ServiceException.class, () -> service.confirmMonthlyScore(11L, 0, 200L));
+        verify(mapper, never()).confirmScore(eq(11L), any(Integer.class), any(Long.class), any(Date.class), any(String.class));
+
+        leadActor(201L, 78L, "vision");
+        LabPerfScore activeLeadRedLine = score(12L, 78L, 1); activeLeadRedLine.setRedLineFlag("1"); activeLeadRedLine.setRevokedFlag("0");
+        when(mapper.selectScoreForUpdate(12L)).thenReturn(activeLeadRedLine);
+        assertThrows(ServiceException.class, () -> service.confirmMonthlyScore(12L, 0, 201L));
+        verify(mapper, never()).confirmScore(eq(12L), any(Integer.class), any(Long.class), any(Date.class), any(String.class));
+
+        manager(100L, 9L);
+        when(mapper.selectScoreForUpdate(13L)).thenReturn(activeMemberRedLine);
+        when(mapper.confirmScore(13L, 0, 9L, Date.from(CLOCK.instant()), "100")).thenReturn(1);
+        service.confirmMonthlyScore(13L, 0, 100L);
+
+        LabPerfScore revoked = score(14L, 77L, 2); revoked.setRedLineFlag("1"); revoked.setRevokedFlag("1");
+        when(mapper.selectScoreForUpdate(14L)).thenReturn(revoked);
+        when(mapper.confirmScore(14L, 0, 77L, Date.from(CLOCK.instant()), "200")).thenReturn(1);
+        service.confirmMonthlyScore(14L, 0, 200L);
+    }
+
     private PerformanceCalculationInput input(LabTask... tasks) {
         PerformanceCalculationInput value = new PerformanceCalculationInput();
         value.setMemberId(7L); value.setPeriod("2026-08"); value.setCutoffTime(Date.from(CLOCK.instant()));
@@ -418,6 +683,10 @@ class LabPerformanceServiceTest {
         LabTaskQualityGate g = new LabTaskQualityGate(); g.setId(id); g.setGateStatus(status); g.setEvidenceId(evidenceId); g.setDelFlag("0"); return g;
     }
 
+    private LabTaskQualityGate gateForTask(Long taskId, Long id, String status, Long evidenceId) {
+        LabTaskQualityGate gate = gate(id, status, evidenceId); gate.setTaskId(taskId); return gate;
+    }
+
     private LabCollaborationRecord collab(Long id, String category, String points, String reviewStatus, String evidenceUrl) {
         LabCollaborationRecord c = new LabCollaborationRecord(); c.setId(id); c.setPeriod("2026-08"); c.setToMemberId(7L);
         c.setCategory(category); c.setSignedScore(new BigDecimal(points)); c.setReviewStatus(reviewStatus); c.setEvidenceUrl(evidenceUrl); c.setDelFlag("0"); return c;
@@ -434,5 +703,6 @@ class LabPerformanceServiceTest {
 
     private void manager(Long userId, Long memberId) { when(access.context(userId)).thenReturn(context(userId, memberId, LabAccessServiceImpl.MANAGER, "manage")); }
     private void memberActor(Long userId, Long memberId, String line) { when(access.context(userId)).thenReturn(context(userId, memberId, LabAccessServiceImpl.MEMBER, line)); }
+    private void leadActor(Long userId, Long memberId, String line) { when(access.context(userId)).thenReturn(context(userId, memberId, LabAccessServiceImpl.LEAD, line)); }
     private LabAccessContext context(Long userId, Long memberId, String role, String line) { LabAccessContext c = new LabAccessContext(); c.setUserId(userId); c.setMemberId(memberId); c.setRoleKey(role); c.setBizLine(line); return c; }
 }
