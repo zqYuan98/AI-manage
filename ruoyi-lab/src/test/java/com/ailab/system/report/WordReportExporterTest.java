@@ -3,6 +3,7 @@ package com.ailab.system.report;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.ailab.system.report.exporter.WordReportExporter;
 import com.ailab.system.report.model.ReportContext;
@@ -55,6 +56,13 @@ class WordReportExporterTest {
         assertFalse(document.contains("lab:secret"));
     }
 
+    @Test
+    void rejectsHugeCanonicalTextBeforeBuildingTheDocumentPackage() {
+        ReportData value = new ReportData(report().getContext(), "t", 1,
+                Collections.singletonList(new ReportSectionData("x", "TEXT", "x", Collections.<Map<String,Object>>emptyList(), map("text", repeat("界", 400000)))), Collections.<String,Object>emptyMap());
+        assertThrows(java.io.IOException.class, () -> new WordReportExporter().export(value));
+    }
+
     private Map<String, String> xmlEntries(byte[] bytes) throws Exception {
         Map<String, String> result = new LinkedHashMap<String, String>();
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
@@ -92,4 +100,5 @@ class WordReportExporterTest {
         try { BufferedImage image = new BufferedImage(640, 320, BufferedImage.TYPE_INT_RGB); ByteArrayOutputStream out = new ByteArrayOutputStream(); ImageIO.write(image, "png", out); return java.util.Base64.getEncoder().encodeToString(out.toByteArray()); }
         catch (Exception ex) { throw new AssertionError(ex); }
     }
+    private String repeat(String value, int count) { StringBuilder out = new StringBuilder(value.length() * count); for (int i = 0; i < count; i++) out.append(value); return out.toString(); }
 }
