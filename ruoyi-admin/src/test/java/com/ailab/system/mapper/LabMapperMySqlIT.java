@@ -19,12 +19,16 @@ import com.ailab.system.domain.LabPerfScore;
 import com.ailab.system.domain.LabCollaborationRecord;
 import com.ailab.system.dto.CollaborationReviewCommand;
 import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.dto.PerformanceAssetFact;
+import com.ailab.system.dto.PerformanceCalculationInput;
+import com.ailab.system.dto.PerformanceCalculationResult;
 import com.ailab.system.dto.RedLineRevokeCommand;
 import com.ailab.system.dto.TaskSubmitCommand;
 import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.LabGoalService;
 import com.ailab.system.service.LabLedgerService;
 import com.ailab.system.service.LabMemberService;
+import com.ailab.system.service.LabPerformanceCalculator;
 import com.ailab.system.service.LabTaskService;
 import com.ailab.system.service.LabPerformanceService;
 import com.ruoyi.RuoYiApplication;
@@ -48,6 +52,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -423,13 +428,16 @@ class LabMapperMySqlIT {
         jdbcTemplate.update("insert into lab_task_quality_gate(id,task_id,gate_no,gate_name,gate_status,del_flag,create_by,create_time) values(39880,?,'IT-CLOSE-GATE','IT close gate','PENDING','0','it',now())", taskId);
         try {
             ExecutorService pool = Executors.newFixedThreadPool(2);
-            CountDownLatch start = new CountDownLatch(1);
-            Future<List<LabPerfScore>> first = pool.submit(() -> { start.await(); return performanceService.closePeriod(period, "concurrent close", 39101L); });
-            Future<List<LabPerfScore>> second = pool.submit(() -> { start.await(); return performanceService.closePeriod(period, "concurrent close", 39101L); });
-            start.countDown();
-            assertEquals(3, first.get().size());
-            assertEquals(3, second.get().size());
-            pool.shutdownNow();
+            try {
+                CountDownLatch start = new CountDownLatch(1);
+                Future<List<LabPerfScore>> first = pool.submit(() -> { start.await(); return performanceService.closePeriod(period, "concurrent close", 39101L); });
+                Future<List<LabPerfScore>> second = pool.submit(() -> { start.await(); return performanceService.closePeriod(period, "concurrent close", 39101L); });
+                start.countDown();
+                assertEquals(3, first.get().size());
+                assertEquals(3, second.get().size());
+            } finally {
+                shutdownExecutor(pool);
+            }
 
             assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_period_close where period=? and close_status='CLOSED' and del_flag='0'", Integer.class, period));
             assertEquals(3, jdbcTemplate.queryForObject("select count(1) from lab_perf_score where period=? and current_flag='1' and del_flag='0'", Integer.class, period));
@@ -462,10 +470,19 @@ class LabMapperMySqlIT {
             training.setCategory("BACKUP"); training.setSignedScore(new BigDecimal("4")); training.setEvidenceUrl("https://example.invalid/it/backup");
             performanceService.createCollaboration(training, 39102L);
 
-            ExecutorService reclosePool = Executors.newFixedThreadPool(2); CountDownLatch recloseStart = new CountDownLatch(1);
-            Future<List<LabPerfScore>> reclose = reclosePool.submit(() -> { recloseStart.await(); return performanceService.closePeriod(period, "corrected close", 39101L); });
-            Future<Boolean> review = reclosePool.submit(() -> { recloseStart.await(); try { performanceService.reviewCollaboration(training.getId(), new CollaborationReviewCommand(new BigDecimal("4"), "trained"), 39101L); return true; } catch (ServiceException closed) { if (!closed.getMessage().contains("open period")) throw closed; return false; } });
-            recloseStart.countDown(); List<LabPerfScore> revised = reclose.get(); boolean reviewedBeforeCutoff = review.get(); reclosePool.shutdownNow();
+            List<LabPerfScore> revised;
+            boolean reviewedBeforeCutoff;
+            ExecutorService reclosePool = Executors.newFixedThreadPool(2);
+            try {
+                CountDownLatch recloseStart = new CountDownLatch(1);
+                Future<List<LabPerfScore>> reclose = reclosePool.submit(() -> { recloseStart.await(); return performanceService.closePeriod(period, "corrected close", 39101L); });
+                Future<Boolean> review = reclosePool.submit(() -> { recloseStart.await(); try { performanceService.reviewCollaboration(training.getId(), new CollaborationReviewCommand(new BigDecimal("4"), "trained"), 39101L); return true; } catch (ServiceException closed) { if (!closed.getMessage().contains("open period")) throw closed; return false; } });
+                recloseStart.countDown();
+                revised = reclose.get();
+                reviewedBeforeCutoff = review.get();
+            } finally {
+                shutdownExecutor(reclosePool);
+            }
             assertEquals(3, revised.size());
             assertEquals(Arrays.asList(1, 2), jdbcTemplate.queryForList("select revision_no from lab_perf_score where member_id=39203 and period=? order by revision_no", Integer.class, period));
             assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_perf_score where member_id=39203 and period=? and current_flag='1' and revision_no=2", Integer.class, period));
@@ -487,6 +504,29 @@ class LabMapperMySqlIT {
         }
     }
 
+    @Test
+    void quarterBackupFactsIncludeJulyAndAugustButExcludeSeptemberAndOtherOwners() {
+        long taskId = 39881L;
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,asset_id,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values(?,0,39001,39002,'month','2098-08','algorithm','daily','IT backup cutoff',39203,101,'2098-08-20','artifact',0,0,'CONFIRMED','ONTIME',39301,'0','0','0',0,'0','it',now())", taskId);
+        jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?,'2098-07',39202,39203,'BACKUP',4,'https://example.invalid/it/july-backup',39201,'APPROVED',now(),'July training',0,'0','it',now())", taskId);
+        jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?,'2098-08',39203,39202,'BACKUP',4,'https://example.invalid/it/unrelated-backup',39201,'APPROVED',now(),'Other owner',0,'0','it',now())", taskId);
+        jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?,'2098-09',39202,39203,'BACKUP',4,'https://example.invalid/it/future-backup',39201,'APPROVED',now(),'Future training',0,'0','it',now())", taskId);
+
+        List<LabCollaborationRecord> bounded = performanceMapper.selectQuarterCollaborationFacts("2098-07", "2098-08");
+
+        assertEquals(Arrays.asList("2098-07", "2098-08"), Arrays.asList(bounded.get(0).getPeriod(), bounded.get(1).getPeriod()));
+        assertTrue(bounded.stream().allMatch(fact -> Long.valueOf(39301L).equals(fact.getRelatedAssetId())));
+        PerformanceAssetFact criticalAsset = new PerformanceAssetFact();
+        criticalAsset.setAssetId(39301L); criticalAsset.setAssetName("IT critical model"); criticalAsset.setPrimaryOwnerId(39203L);
+        PerformanceCalculationInput accepted = backupCutoffInput(bounded, criticalAsset);
+        assertFalse(new LabPerformanceCalculator().calculate(accepted).getDetailJson().contains("CRITICAL_ASSET_WITHOUT_BACKUP"));
+
+        PerformanceCalculationInput unrelatedOnly = backupCutoffInput(Collections.singletonList(bounded.get(1)), criticalAsset);
+        PerformanceCalculationResult unrelated = new LabPerformanceCalculator().calculate(unrelatedOnly);
+        assertTrue(unrelated.getDetailJson().contains("CRITICAL_ASSET_WITHOUT_BACKUP"));
+        assertTrue(unrelated.getDetailJson().contains("\"quarterBackupTraining\":false"));
+    }
+
     private void cleanupPerformanceFixture(String period, long taskId) {
         jdbcTemplate.update("delete from lab_perf_score where period=?", period);
         jdbcTemplate.update("delete from lab_collaboration_record where period=? or idempotency_key=?", period, "PERIOD_OVERDUE:" + period + ":" + taskId);
@@ -494,6 +534,22 @@ class LabMapperMySqlIT {
         jdbcTemplate.update("delete from lab_task_evidence where task_id=?", taskId);
         jdbcTemplate.update("delete from lab_task where id=?", taskId);
         jdbcTemplate.update("delete from lab_period_close where period=?", period);
+    }
+
+    private void shutdownExecutor(ExecutorService executor) {
+        executor.shutdownNow();
+        try {
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private PerformanceCalculationInput backupCutoffInput(List<LabCollaborationRecord> facts, PerformanceAssetFact asset) {
+        PerformanceCalculationInput input = new PerformanceCalculationInput();
+        input.setMemberId(39203L); input.setPeriod("2098-08"); input.setCloseMode(true); input.setCutoffTime(new Date(0));
+        input.setQuarterCollaborationFacts(facts); input.setAssetFacts(Collections.singletonList(asset));
+        return input;
     }
 
     private LabTask newTask(Long ownerId, String title) {

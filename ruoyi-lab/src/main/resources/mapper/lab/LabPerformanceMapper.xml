@@ -24,6 +24,7 @@
     </resultMap>
     <resultMap id="CollaborationResult" type="com.ailab.system.domain.LabCollaborationRecord">
         <id property="id" column="id"/><result property="taskId" column="task_id"/><result property="period" column="period"/>
+        <result property="relatedAssetId" column="related_asset_id"/>
         <result property="fromMemberId" column="from_member_id"/><result property="toMemberId" column="to_member_id"/><result property="category" column="category"/>
         <result property="signedScore" column="signed_score"/><result property="evidenceUrl" column="evidence_url"/><result property="reviewerId" column="reviewer_id"/>
         <result property="reviewStatus" column="review_status"/><result property="reviewTime" column="review_time"/><result property="reviewComment" column="review_comment"/>
@@ -93,12 +94,18 @@
     </select>
     <select id="selectCollaborationForPeriod" parameterType="string" resultMap="CollaborationResult">select <include refid="collaborationColumns"/> from lab_collaboration_record where period=#{period} and del_flag='0' order by id</select>
     <select id="selectCollaborationsForPeriodForUpdate" parameterType="string" resultMap="CollaborationResult">select <include refid="collaborationColumns"/> from lab_collaboration_record where period=#{period} and del_flag='0' order by id for update</select>
+    <select id="selectQuarterCollaborationFacts" resultMap="CollaborationResult">
+        select c.*,t.asset_id related_asset_id from lab_collaboration_record c join lab_task t on t.id=c.task_id and t.del_flag='0'
+        where c.category='BACKUP' and c.period between #{quarterStart} and #{closePeriod} and c.del_flag='0' order by c.period,c.id
+    </select>
+    <select id="selectQuarterCollaborationFactsForUpdate" resultMap="CollaborationResult">
+        select c.*,t.asset_id related_asset_id from lab_collaboration_record c join lab_task t on t.id=c.task_id and t.del_flag='0'
+        where c.category='BACKUP' and c.period between #{quarterStart} and #{closePeriod} and c.del_flag='0' order by c.period,c.id for update
+    </select>
     <select id="selectCriticalAssetFacts" resultMap="AssetFactResult">
         select a.id asset_id,a.asset_name,a.primary_owner_id,
                case when bm.id is not null and bm.member_status='ACTIVE' and bu.user_id is not null and bu.status='0' then 1 else 0 end active_backup,
-               case when exists(select 1 from lab_collaboration_record c join lab_task t on t.id=c.task_id and t.asset_id=a.id and t.del_flag='0'
-                    where c.category='BACKUP' and c.review_status='APPROVED' and c.evidence_url is not null and trim(c.evidence_url)&lt;&gt;''
-                      and c.period between #{quarterStart} and #{quarterEnd} and c.del_flag='0') then 1 else 0 end quarter_backup_training
+               0 quarter_backup_training
         from lab_asset a left join lab_member bm on bm.id=a.backup_owner_id and bm.del_flag='0'
         left join sys_user bu on bu.user_id=bm.user_id and bu.del_flag='0'
         where a.critical_flag='1' and a.status='ACTIVE' and a.del_flag='0' order by a.id
@@ -106,9 +113,7 @@
     <select id="selectCriticalAssetFactsForUpdate" resultMap="AssetFactResult">
         select a.id asset_id,a.asset_name,a.primary_owner_id,
                case when bm.id is not null and bm.member_status='ACTIVE' and bu.user_id is not null and bu.status='0' then 1 else 0 end active_backup,
-               case when exists(select 1 from lab_collaboration_record c join lab_task t on t.id=c.task_id and t.asset_id=a.id and t.del_flag='0'
-                    where c.category='BACKUP' and c.review_status='APPROVED' and c.evidence_url is not null and trim(c.evidence_url)&lt;&gt;''
-                      and c.period between #{quarterStart} and #{quarterEnd} and c.del_flag='0') then 1 else 0 end quarter_backup_training
+               0 quarter_backup_training
         from lab_asset a left join lab_member bm on bm.id=a.backup_owner_id and bm.del_flag='0'
         left join sys_user bu on bu.user_id=bm.user_id and bu.del_flag='0'
         where a.critical_flag='1' and a.status='ACTIVE' and a.del_flag='0' order by a.id for update

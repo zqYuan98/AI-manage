@@ -205,11 +205,14 @@ class LabPerformanceServiceTest {
 
         LabCollaborationRecord first = collab(1L, "CROSS_DEPT", "10", "APPROVED", "https://e/cross");
         first.setTaskId(1L); first.setFromMemberId(8L); first.setReviewerId(9L); first.setReviewTime(Date.from(Instant.parse("2026-08-30T03:04:05Z")));
+        first.setRelatedAssetId(21L); first.setReviewComment("accepted collaboration"); first.setIdempotencyKey("MANUAL:COLLAB:1"); first.setVersion(3);
+        first.setCreateBy("200"); first.setCreateTime(Date.from(Instant.parse("2026-08-28T01:02:03Z"))); first.setUpdateBy("100"); first.setUpdateTime(Date.from(Instant.parse("2026-08-30T03:04:06Z"))); first.setRemark("source remark");
         LabCollaborationRecord capReached = collab(2L, "CROSS_DEPT", "1", "APPROVED", "https://e/capped");
         LabCollaborationRecord pendingReview = collab(3L, "KNOWLEDGE", "2", "PENDING", "https://e/pending");
         LabCollaborationRecord rejected = collab(4L, "BACKUP", "2", "REJECTED", "https://e/rejected");
         LabCollaborationRecord missingEvidence = collab(5L, "KNOWLEDGE", "2", "APPROVED", null);
         LabCollaborationRecord deduction = collab(6L, "OVERDUE", "-2", "APPROVED", null);
+        deduction.setIdempotencyKey("PERIOD_OVERDUE:2026-08:6"); deduction.setReviewComment("system overdue at cutoff"); deduction.setVersion(0); deduction.setCreateBy("100");
         LabCollaborationRecord unsupported = collab(7L, "UNKNOWN", "2", "APPROVED", "https://e/unknown");
         LabCollaborationRecord unrelated = collab(8L, "KNOWLEDGE", "5", "APPROVED", "https://secret/unrelated"); unrelated.setToMemberId(99L);
         input.setCollaborationRecords(Arrays.asList(unrelated, unsupported, deduction, missingEvidence, rejected, pendingReview, capReached, first));
@@ -232,6 +235,33 @@ class LabPerformanceServiceTest {
         assertFalse(detail.contains("https://secret/unrelated"));
         assertTrue(detail.indexOf("\"evidenceId\":10") < detail.indexOf("\"evidenceId\":20"));
         assertTrue(detail.indexOf("\"recordId\":1") < detail.indexOf("\"recordId\":7"));
+        com.alibaba.fastjson2.JSONArray collaborationItems = com.alibaba.fastjson2.JSON.parseObject(detail).getJSONObject("collaboration").getJSONArray("items");
+        com.alibaba.fastjson2.JSONObject firstSnapshot = collaborationItems.getJSONObject(0);
+        assertEquals(Long.valueOf(1L), firstSnapshot.getLong("id"));
+        assertEquals(Long.valueOf(1L), firstSnapshot.getLong("recordId"));
+        assertEquals(Long.valueOf(1L), firstSnapshot.getLong("taskId"));
+        assertEquals("2026-08", firstSnapshot.getString("period"));
+        assertEquals(Long.valueOf(21L), firstSnapshot.getLong("relatedAssetId"));
+        assertEquals(Long.valueOf(8L), firstSnapshot.getLong("fromMemberId"));
+        assertEquals(Long.valueOf(7L), firstSnapshot.getLong("toMemberId"));
+        assertEquals("CROSS_DEPT", firstSnapshot.getString("category"));
+        assertEquals(new BigDecimal("10.00"), firstSnapshot.getBigDecimal("signedScore"));
+        assertEquals("https://e/cross", firstSnapshot.getString("evidenceUrl"));
+        assertEquals(Long.valueOf(9L), firstSnapshot.getLong("reviewerId"));
+        assertEquals("APPROVED", firstSnapshot.getString("reviewStatus"));
+        assertEquals("2026-08-30T03:04:05Z", firstSnapshot.getString("reviewTime"));
+        assertEquals("accepted collaboration", firstSnapshot.getString("reviewComment"));
+        assertEquals("MANUAL:COLLAB:1", firstSnapshot.getString("idempotencyKey"));
+        assertEquals(Integer.valueOf(3), firstSnapshot.getInteger("version"));
+        assertEquals("200", firstSnapshot.getString("createBy"));
+        assertEquals("2026-08-28T01:02:03Z", firstSnapshot.getString("createTime"));
+        assertEquals("100", firstSnapshot.getString("updateBy"));
+        assertEquals("2026-08-30T03:04:06Z", firstSnapshot.getString("updateTime"));
+        assertEquals("0", firstSnapshot.getString("delFlag"));
+        assertEquals("source remark", firstSnapshot.getString("remark"));
+        com.alibaba.fastjson2.JSONObject overdueSnapshot = null; for (int i = 0; i < collaborationItems.size(); i++) if (collaborationItems.getJSONObject(i).getLongValue("recordId") == 6L) overdueSnapshot = collaborationItems.getJSONObject(i);
+        assertTrue(overdueSnapshot != null && "PERIOD_OVERDUE:2026-08:6".equals(overdueSnapshot.getString("idempotencyKey")));
+        assertEquals("system overdue at cutoff", overdueSnapshot.getString("reviewComment"));
         assertEquals(detail, calculator.calculate(input).getDetailJson());
     }
 
@@ -269,6 +299,31 @@ class LabPerformanceServiceTest {
     }
 
     @Test
+    void quarterBackupTrainingUsesOnlyEligibleFactsThroughTheCloseMonthForTheSameAssetOwner() {
+        for (String eligiblePeriod : Arrays.asList("2026-07", "2026-08")) {
+            PerformanceCalculationInput eligible = backupInput();
+            eligible.setQuarterCollaborationFacts(Collections.singletonList(backupFact(71L, eligiblePeriod, 21L, 7L, "BACKUP", "APPROVED", "https://e/training")));
+            PerformanceCalculationResult accepted = calculator.calculate(eligible);
+            assertFalse(accepted.getDetailJson().contains("CRITICAL_ASSET_WITHOUT_BACKUP"), eligiblePeriod);
+            assertTrue(accepted.getDetailJson().contains("\"quarterBackupTraining\":true"), eligiblePeriod);
+        }
+
+        PerformanceCalculationInput rejected = backupInput();
+        rejected.setQuarterCollaborationFacts(Arrays.asList(
+                backupFact(81L, "2026-09", 21L, 7L, "BACKUP", "APPROVED", "https://e/future"),
+                backupFact(82L, "2026-07", 21L, 7L, "BACKUP", "PENDING", "https://e/pending"),
+                backupFact(83L, "2026-07", 21L, 7L, "BACKUP", "REJECTED", "https://e/rejected"),
+                backupFact(84L, "2026-07", 21L, 7L, "BACKUP", "APPROVED", " "),
+                backupFact(85L, "2026-07", 21L, 7L, "KNOWLEDGE", "APPROVED", "https://e/wrong-category"),
+                backupFact(86L, "2026-07", 22L, 7L, "BACKUP", "APPROVED", "https://e/wrong-asset"),
+                backupFact(87L, "2026-07", 21L, 99L, "BACKUP", "APPROVED", "https://e/wrong-member")));
+
+        PerformanceCalculationResult excluded = calculator.calculate(rejected);
+        assertTrue(excluded.getDetailJson().contains("CRITICAL_ASSET_WITHOUT_BACKUP"));
+        assertTrue(excluded.getDetailJson().contains("\"quarterBackupTraining\":false"));
+    }
+
+    @Test
     void closeLocksInStableOrderCreatesOneOverdueAndIncrementsRevisions() {
         manager(100L, 900L);
         LabPeriodClose open = period("2026-08", "OPEN", 3);
@@ -278,8 +333,9 @@ class LabPerformanceServiceTest {
         when(mapper.selectActiveMembersForUpdate()).thenReturn(Collections.singletonList(member(7L)));
         when(mapper.selectEvidenceForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.<LabTaskEvidence>emptyList());
         when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(gateForTask(1L, 101L, "PENDING", null)));
+        when(mapper.selectQuarterCollaborationFactsForUpdate("2026-07", "2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
         when(mapper.selectCollaborationsForPeriodForUpdate("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
-        when(mapper.selectCriticalAssetFactsForUpdate("2026-07", "2026-09")).thenReturn(Collections.<PerformanceAssetFact>emptyList());
+        when(mapper.selectCriticalAssetFactsForUpdate(any(String.class), any(String.class))).thenReturn(Collections.<PerformanceAssetFact>emptyList());
         when(mapper.selectMaxRevision(7L, "2026-08")).thenReturn(2);
         when(mapper.insertOverdueRecord(any(LabCollaborationRecord.class))).thenReturn(1);
         when(mapper.insertPerfScore(any(LabPerfScore.class))).thenReturn(1);
@@ -300,7 +356,9 @@ class LabPerformanceServiceTest {
         verify(mapper, never()).selectCollaborationForPeriod("2026-08");
         InOrder lockOrder = inOrder(mapper);
         lockOrder.verify(mapper).selectPeriodForUpdate("2026-08");
+        lockOrder.verify(mapper).selectQuarterCollaborationFactsForUpdate("2026-07", "2026-08");
         lockOrder.verify(mapper).selectCollaborationsForPeriodForUpdate("2026-08");
+        lockOrder.verify(mapper).selectCriticalAssetFactsForUpdate("2026-07", "2026-08");
     }
 
     @Test
@@ -321,7 +379,7 @@ class LabPerformanceServiceTest {
         when(mapper.selectEvidenceForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(evidence(11L, "APPROVED")));
         when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(gateForTask(1L, 101L, "PENDING", null)));
         when(mapper.selectCollaborationsForPeriodForUpdate("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
-        when(mapper.selectCriticalAssetFactsForUpdate("2026-07", "2026-09")).thenAnswer(invocation -> { callsAtAssetLock.set(clockCalls.get()); return Collections.<PerformanceAssetFact>emptyList(); });
+        when(mapper.selectCriticalAssetFactsForUpdate("2026-07", "2026-08")).thenAnswer(invocation -> { callsAtAssetLock.set(clockCalls.get()); return Collections.<PerformanceAssetFact>emptyList(); });
         when(mapper.insertPerfScore(any(LabPerfScore.class))).thenReturn(1);
         when(mapper.lockTasksForPeriod("2026-08", "1")).thenReturn(1);
         when(mapper.closePeriod(eq(open.getId()), eq(3), eq("100"), any(Date.class), eq("close"))).thenReturn(1);
@@ -560,11 +618,13 @@ class LabPerformanceServiceTest {
         when(mapper.selectEvidenceForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(evidence(1L, "APPROVED")));
         when(mapper.selectQualityGatesForTaskIds(Collections.singletonList(1L))).thenReturn(Collections.singletonList(gateForTask(1L, 101L, "PENDING", null)));
         when(mapper.selectCollaborationForPeriod("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
-        when(mapper.selectCriticalAssetFacts("2026-07", "2026-09")).thenReturn(Collections.<PerformanceAssetFact>emptyList());
+        when(mapper.selectQuarterCollaborationFacts("2026-07", "2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
+        when(mapper.selectCriticalAssetFacts(any(String.class), any(String.class))).thenReturn(Collections.<PerformanceAssetFact>emptyList());
 
         assertEquals(new BigDecimal("60.00"), service.preview(7L, "2026-08", 100L).getDeliveryScore());
 
         verify(mapper).selectPeriodTasks("2026-08");
+        verify(mapper).selectQuarterCollaborationFacts("2026-07", "2026-08");
         verify(mapper, never()).selectPeriodTasksForUpdate(any(String.class));
         verify(mapper, never()).selectCriticalAssetFactsForUpdate(any(String.class), any(String.class));
     }
@@ -579,7 +639,7 @@ class LabPerformanceServiceTest {
         when(mapper.selectEvidenceForTaskIds(Collections.<Long>emptyList())).thenReturn(Collections.<LabTaskEvidence>emptyList());
         when(mapper.selectQualityGatesForTaskIds(Collections.<Long>emptyList())).thenReturn(Collections.<LabTaskQualityGate>emptyList());
         when(mapper.selectCollaborationsForPeriodForUpdate("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
-        when(mapper.selectCriticalAssetFactsForUpdate("2026-07", "2026-09")).thenReturn(Collections.<PerformanceAssetFact>emptyList());
+        when(mapper.selectCriticalAssetFactsForUpdate("2026-07", "2026-08")).thenReturn(Collections.<PerformanceAssetFact>emptyList());
         when(mapper.selectMaxRevision(7L, "2026-08")).thenReturn(0);
         when(mapper.insertPerfScore(any(LabPerfScore.class))).thenReturn(0);
 
@@ -695,6 +755,18 @@ class LabPerformanceServiceTest {
     private PerformanceAssetFact assetFact(Long id, String name, boolean activeBackup, boolean quarterTraining) {
         PerformanceAssetFact f = new PerformanceAssetFact(); f.setAssetId(id); f.setAssetName(name); f.setPrimaryOwnerId(7L);
         f.setActiveBackup(activeBackup); f.setQuarterBackupTraining(quarterTraining); return f;
+    }
+
+    private PerformanceCalculationInput backupInput() {
+        LabTask task = task(1L, 100, "CONFIRMED", "ONTIME");
+        PerformanceCalculationInput value = input(task); value.setCloseMode(true);
+        value.getEvidenceByTask().put(1L, Collections.singletonList(evidence(11L, "APPROVED")));
+        value.setAssetFacts(Collections.singletonList(assetFact(21L, "Critical model", false, false)));
+        return value;
+    }
+
+    private LabCollaborationRecord backupFact(Long id, String period, Long assetId, Long toMemberId, String category, String status, String url) {
+        LabCollaborationRecord value = collab(id, category, "1", status, url); value.setPeriod(period); value.setRelatedAssetId(assetId); value.setToMemberId(toMemberId); return value;
     }
 
     private LabMember member(Long id) { LabMember m = new LabMember(); m.setId(id); m.setMemberStatus("ACTIVE"); return m; }

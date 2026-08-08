@@ -17,6 +17,7 @@ public class PerformanceCalculationInput {
     private Map<Long,List<LabTaskEvidence>> evidenceByTask=new HashMap<Long,List<LabTaskEvidence>>();
     private Map<Long,List<LabTaskQualityGate>> qualityGatesByTask=new HashMap<Long,List<LabTaskQualityGate>>();
     private List<LabCollaborationRecord> collaborationRecords=new ArrayList<LabCollaborationRecord>();
+    private List<LabCollaborationRecord> quarterCollaborationFacts=new ArrayList<LabCollaborationRecord>();
     private List<PerformanceAssetFact> assetFacts=new ArrayList<PerformanceAssetFact>();
     public Long getMemberId(){return memberId;} public void setMemberId(Long v){memberId=v;} public String getPeriod(){return period;} public void setPeriod(String v){period=v;}
     public Date getCutoffTime(){return cutoffTime==null?null:new Date(cutoffTime.getTime());} public void setCutoffTime(Date v){cutoffTime=v==null?null:new Date(v.getTime());}
@@ -24,5 +25,6 @@ public class PerformanceCalculationInput {
     public Map<Long,List<LabTaskEvidence>> getEvidenceByTask(){return evidenceByTask;} public void setEvidenceByTask(Map<Long,List<LabTaskEvidence>> v){evidenceByTask=v==null?new HashMap<Long,List<LabTaskEvidence>>():v;}
     public Map<Long,List<LabTaskQualityGate>> getQualityGatesByTask(){return qualityGatesByTask;} public void setQualityGatesByTask(Map<Long,List<LabTaskQualityGate>> v){qualityGatesByTask=v==null?new HashMap<Long,List<LabTaskQualityGate>>():v;}
     public List<LabCollaborationRecord> getCollaborationRecords(){return collaborationRecords;} public void setCollaborationRecords(List<LabCollaborationRecord> v){collaborationRecords=v==null?new ArrayList<LabCollaborationRecord>():v;}
+    public List<LabCollaborationRecord> getQuarterCollaborationFacts(){return quarterCollaborationFacts;} public void setQuarterCollaborationFacts(List<LabCollaborationRecord> v){quarterCollaborationFacts=v==null?new ArrayList<LabCollaborationRecord>():v;}
     public List<PerformanceAssetFact> getAssetFacts(){return assetFacts;} public void setAssetFacts(List<PerformanceAssetFact> v){assetFacts=v==null?new ArrayList<PerformanceAssetFact>():v;}
 }

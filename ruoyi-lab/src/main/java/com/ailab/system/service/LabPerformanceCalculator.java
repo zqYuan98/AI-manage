@@ -12,6 +12,8 @@ import com.ailab.system.dto.PerformanceCalculationResult;
 import com.ruoyi.common.exception.ServiceException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DateTimeException;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -81,7 +83,7 @@ public class LabPerformanceCalculator {
         CollaborationCalculation collaboration=collaboration(input);
         List<PerformanceAssetFact> assets=sortedAssets(input.getAssetFacts());
         if(input.isCloseMode())for(PerformanceAssetFact asset:assets){
-            if(same(input.getMemberId(),asset.getPrimaryOwnerId())&&!asset.isActiveBackup()&&!asset.isQuarterBackupTraining()){
+            if(same(input.getMemberId(),asset.getPrimaryOwnerId())&&!asset.isActiveBackup()&&!hasQuarterBackupTraining(asset,input)){
                 Map<String,Object> trigger=new LinkedHashMap<String,Object>(); trigger.put("code","CRITICAL_ASSET_WITHOUT_BACKUP"); trigger.put("assetId",asset.getAssetId());
                 trigger.put("assetName",asset.getAssetName()); trigger.put("activeBackup",false); trigger.put("quarterBackupTraining",false); triggers.add(trigger);
             }
@@ -91,7 +93,7 @@ public class LabPerformanceCalculator {
         Map<String,Object> detail=new LinkedHashMap<String,Object>(); detail.put("calculationVersion",LabConstants.PERF_FORMULA_VERSION);
         detail.put("period",input.getPeriod()); detail.put("memberId",input.getMemberId()); detail.put("cutoff",input.getCutoffTime().toInstant().toString()); detail.put("closeMode",input.isCloseMode());
         detail.put("formula","total=min(100,delivery+quality+collaboration); delivery=min(60,sum(weight*coefficient)*0.6); quality=25*sum(weight*rate)/100");
-        detail.put("tasks",taskDetails); detail.put("collaboration",collaboration.detail); detail.put("assetFacts",assetDetail(assets)); detail.put("redLineTriggers",triggers);
+        detail.put("tasks",taskDetails); detail.put("collaboration",collaboration.detail); detail.put("assetFacts",assetDetail(assets,input)); detail.put("redLineTriggers",triggers);
         Map<String,Object> totals=new LinkedHashMap<String,Object>(); totals.put("delivery",delivery); totals.put("quality",quality); totals.put("collaboration",collaboration.score); totals.put("total",total); detail.put("totals",totals);
 
         PerformanceCalculationResult result=new PerformanceCalculationResult(); result.setDeliveryScore(delivery); result.setQualityScore(quality);
@@ -121,9 +123,11 @@ public class LabPerformanceCalculator {
                 else if(remaining.compareTo(BigDecimal.ZERO)<=0)exclusionReason="CATEGORY_CAP_REACHED";
                 else{applied=rawEligible.min(remaining);positive.put(record.getCategory(),positive.get(record.getCategory()).add(applied));included=true;if(applied.compareTo(rawEligible)<0)capAdjustment="PARTIALLY_CAPPED";}
             }
-            Map<String,Object> item=new LinkedHashMap<String,Object>(); item.put("recordId",record.getId()); item.put("taskId",record.getTaskId()); item.put("fromMemberId",record.getFromMemberId()); item.put("toMemberId",record.getToMemberId());
+            Map<String,Object> item=new LinkedHashMap<String,Object>(); item.put("id",record.getId()); item.put("recordId",record.getId()); item.put("taskId",record.getTaskId()); item.put("relatedAssetId",record.getRelatedAssetId()); item.put("period",record.getPeriod()); item.put("fromMemberId",record.getFromMemberId()); item.put("toMemberId",record.getToMemberId());
             item.put("category",record.getCategory()); item.put("signedScore",money(points)); item.put("evidenceUrl",record.getEvidenceUrl()); item.put("reviewStatus",record.getReviewStatus());
-            item.put("reviewerId",record.getReviewerId()); item.put("reviewTime",iso(record.getReviewTime())); item.put("included",included); item.put("exclusionReason",exclusionReason);
+            item.put("reviewerId",record.getReviewerId()); item.put("reviewTime",iso(record.getReviewTime())); item.put("reviewComment",record.getReviewComment()); item.put("idempotencyKey",record.getIdempotencyKey());
+            item.put("version",record.getVersion()); item.put("delFlag",record.getDelFlag()); item.put("createBy",record.getCreateBy()); item.put("createTime",iso(record.getCreateTime())); item.put("updateBy",record.getUpdateBy()); item.put("updateTime",iso(record.getUpdateTime())); item.put("remark",record.getRemark());
+            item.put("included",included); item.put("exclusionReason",exclusionReason);
             item.put("rawEligiblePoints",money(rawEligible)); item.put("appliedPoints",money(applied)); item.put("capAdjustment",capAdjustment); items.add(item);
         }
         BigDecimal cross=positive.get(LabConstants.COLLAB_CROSS_DEPT); BigDecimal knowledge=positive.get(LabConstants.COLLAB_KNOWLEDGE); BigDecimal backup=positive.get(LabConstants.COLLAB_BACKUP);
@@ -148,7 +152,9 @@ public class LabPerformanceCalculator {
     private List<LabTaskEvidence> sortedEvidence(List<LabTaskEvidence> source){List<LabTaskEvidence> result=source==null?new ArrayList<LabTaskEvidence>():new ArrayList<LabTaskEvidence>(source); Collections.sort(result,Comparator.comparing(LabTaskEvidence::getId,Comparator.nullsLast(Comparator.naturalOrder()))); return result;}
     private List<LabTaskQualityGate> sortedGates(List<LabTaskQualityGate> source){List<LabTaskQualityGate> result=source==null?new ArrayList<LabTaskQualityGate>():new ArrayList<LabTaskQualityGate>(source); Collections.sort(result,Comparator.comparing(LabTaskQualityGate::getId,Comparator.nullsLast(Comparator.naturalOrder()))); return result;}
     private List<PerformanceAssetFact> sortedAssets(List<PerformanceAssetFact> source){List<PerformanceAssetFact> result=source==null?new ArrayList<PerformanceAssetFact>():new ArrayList<PerformanceAssetFact>(source); Collections.sort(result,Comparator.comparing(PerformanceAssetFact::getAssetId,Comparator.nullsLast(Comparator.naturalOrder()))); return result;}
-    private List<Map<String,Object>> assetDetail(List<PerformanceAssetFact> assets){List<Map<String,Object>> result=new ArrayList<Map<String,Object>>(); for(PerformanceAssetFact asset:assets){Map<String,Object> item=new LinkedHashMap<String,Object>(); item.put("assetId",asset.getAssetId()); item.put("assetName",asset.getAssetName()); item.put("primaryOwnerId",asset.getPrimaryOwnerId()); item.put("activeBackup",asset.isActiveBackup()); item.put("quarterBackupTraining",asset.isQuarterBackupTraining()); result.add(item);} return result;}
+    private boolean hasQuarterBackupTraining(PerformanceAssetFact asset,PerformanceCalculationInput input){for(LabCollaborationRecord fact:input.getQuarterCollaborationFacts())if(eligibleBackupTraining(asset,input.getPeriod(),fact))return true;return false;}
+    private boolean eligibleBackupTraining(PerformanceAssetFact asset,String closePeriod,LabCollaborationRecord fact){if(fact==null||!LabConstants.COLLAB_BACKUP.equals(fact.getCategory())||!LabConstants.REVIEW_APPROVED.equals(fact.getReviewStatus())||!hasText(fact.getEvidenceUrl())||!same(asset.getAssetId(),fact.getRelatedAssetId())||!same(asset.getPrimaryOwnerId(),fact.getToMemberId()))return false;try{YearMonth close=YearMonth.parse(closePeriod);YearMonth month=YearMonth.parse(fact.getPeriod());int first=((close.getMonthValue()-1)/3)*3+1;YearMonth start=YearMonth.of(close.getYear(),first);return !month.isBefore(start)&&!month.isAfter(close);}catch(DateTimeException ex){return false;}}
+    private List<Map<String,Object>> assetDetail(List<PerformanceAssetFact> assets,PerformanceCalculationInput input){List<Map<String,Object>> result=new ArrayList<Map<String,Object>>(); for(PerformanceAssetFact asset:assets){Map<String,Object> item=new LinkedHashMap<String,Object>(); item.put("assetId",asset.getAssetId()); item.put("assetName",asset.getAssetName()); item.put("primaryOwnerId",asset.getPrimaryOwnerId()); item.put("activeBackup",asset.isActiveBackup()); item.put("quarterBackupTraining",hasQuarterBackupTraining(asset,input)); result.add(item);} return result;}
     private String triggerReason(List<Map<String,Object>> triggers){StringBuilder value=new StringBuilder(); for(Map<String,Object> trigger:triggers){if(value.length()>0)value.append(';'); value.append(trigger.get("code"));} return value.toString();}
     private void requireInput(PerformanceCalculationInput input){if(input==null||input.getMemberId()==null||!hasText(input.getPeriod())||input.getCutoffTime()==null)throw new ServiceException("Complete performance calculation input is required");}
     private static BigDecimal value(BigDecimal v){return v==null?BigDecimal.ZERO:v;}

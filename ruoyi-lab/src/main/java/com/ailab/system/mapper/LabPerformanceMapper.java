@@ -23,6 +23,8 @@ public interface LabPerformanceMapper {
     List<LabTaskQualityGate> selectQualityGatesForTaskIds(@Param("taskIds") List<Long> taskIds);
     List<LabCollaborationRecord> selectCollaborationForPeriod(String period);
     List<LabCollaborationRecord> selectCollaborationsForPeriodForUpdate(String period);
+    List<LabCollaborationRecord> selectQuarterCollaborationFacts(@Param("quarterStart") String quarterStart,@Param("closePeriod") String closePeriod);
+    List<LabCollaborationRecord> selectQuarterCollaborationFactsForUpdate(@Param("quarterStart") String quarterStart,@Param("closePeriod") String closePeriod);
     List<PerformanceAssetFact> selectCriticalAssetFacts(@Param("quarterStart") String quarterStart,@Param("quarterEnd") String quarterEnd);
     List<PerformanceAssetFact> selectCriticalAssetFactsForUpdate(@Param("quarterStart") String quarterStart,@Param("quarterEnd") String quarterEnd);
     int insertOverdueRecord(LabCollaborationRecord record);

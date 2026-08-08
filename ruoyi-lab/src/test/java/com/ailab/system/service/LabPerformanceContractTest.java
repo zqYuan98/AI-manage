@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ailab.system.controller.LabPerformanceController;
 import com.ailab.system.dto.CalibrationCommand;
+import com.ailab.system.dto.PerformanceCalculationInput;
+import com.ailab.system.domain.LabCollaborationRecord;
 import com.ailab.system.dto.RedLineRevokeCommand;
 import com.ailab.system.mapper.LabPerformanceMapper;
 import com.ailab.system.service.impl.LabPerformanceServiceImpl;
@@ -105,6 +107,23 @@ class LabPerformanceContractTest {
     }
 
     @Test
+    void quarterBackupFactsExposeTaskAssetAndUseCloseMonthAsStableUpperBound() throws Exception {
+        Set<String> recordMethods = methodNames(LabCollaborationRecord.class);
+        Set<String> inputMethods = methodNames(PerformanceCalculationInput.class);
+        Set<String> mapperMethods = methodNames(LabPerformanceMapper.class);
+        assertTrue(recordMethods.contains("getRelatedAssetId") && recordMethods.contains("setRelatedAssetId"));
+        assertTrue(inputMethods.contains("getQuarterCollaborationFacts") && inputMethods.contains("setQuarterCollaborationFacts"));
+        assertTrue(mapperMethods.contains("selectQuarterCollaborationFacts") && mapperMethods.contains("selectQuarterCollaborationFactsForUpdate"));
+
+        String xml = text(root().resolve("ruoyi-lab/src/main/resources/mapper/lab/LabPerformanceMapper.xml")).toLowerCase().replaceAll("\\s+", " ");
+        assertTrue(xml.contains("property=\"relatedassetid\" column=\"related_asset_id\""));
+        assertTrue(xml.contains("id=\"selectquartercollaborationfacts\"") && xml.contains("id=\"selectquartercollaborationfactsforupdate\""));
+        assertTrue(xml.contains("join lab_task t on t.id=c.task_id") && xml.contains("t.asset_id related_asset_id"));
+        assertTrue(xml.contains("c.period between #{quarterstart} and #{closeperiod}") && xml.contains("order by c.period,c.id for update"));
+        assertFalse(xml.contains("exists(select 1 from lab_collaboration_record"), "asset backup state must not use an unlocked collaboration subquery");
+    }
+
+    @Test
     void schemaHasIdempotentOverdueAndOneCurrentRevisionContracts() throws Exception {
         String sql = text(root().resolve("sql/ailab.sql")).toLowerCase().replace("`", "").replaceAll("\\s+", "");
         assertTrue(sql.contains("uniquekeyuk_lab_collab_idempotency(idempotency_key,idempotency_unique_flag)"));
@@ -148,6 +167,15 @@ class LabPerformanceContractTest {
         }
     }
 
+    @Test
+    void mysqlConcurrencyExecutorsAlwaysShutdownAndAwaitTerminationInFinally() throws Exception {
+        String source = text(root().resolve("ruoyi-admin/src/test/java/com/ailab/system/mapper/LabMapperMySqlIT.java")).replaceAll("\\s+", " ");
+        assertTrue(source.contains("finally { shutdownExecutor(pool); }"), "first close executor must be cleaned up in finally");
+        assertTrue(source.contains("finally { shutdownExecutor(reclosePool); }"), "reclose/review executor must be cleaned up in finally");
+        assertTrue(source.contains("executor.shutdownNow()") && source.contains("executor.awaitTermination("));
+        assertTrue(source.contains("Thread.currentThread().interrupt()"), "interruption must be restored");
+    }
+
     private void assertSensitive(String name, Class<?>... types) throws Exception {
         Log log = LabPerformanceController.class.getDeclaredMethod(name, types).getAnnotation(Log.class);
         assertTrue(log != null && !log.isSaveRequestData() && !log.isSaveResponseData());
@@ -157,6 +185,7 @@ class LabPerformanceContractTest {
         assertTrue(matcher.find(), "missing role menu seed for " + roleId);
         return matcher.group(1);
     }
+    private Set<String> methodNames(Class<?> type){Set<String> names=new HashSet<String>();for(Method method:type.getMethods())names.add(method.getName());return names;}
     private Path root(){Path p=Paths.get(System.getProperty("user.dir")).toAbsolutePath();while(p!=null&&!Files.exists(p.resolve("sql/ailab.sql")))p=p.getParent();if(p==null)throw new IllegalStateException("root not found");return p;}
     private String text(Path path) throws Exception{return new String(Files.readAllBytes(path),StandardCharsets.UTF_8);}
 }

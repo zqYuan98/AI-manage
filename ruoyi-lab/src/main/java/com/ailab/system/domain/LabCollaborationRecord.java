@@ -10,6 +10,8 @@ public class LabCollaborationRecord extends BaseEntity {
     private static final long serialVersionUID = 1L;
     private Long id;
     private Long taskId;
+    /** Projection-only task asset used by performance cutoff calculations. */
+    private Long relatedAssetId;
     private String period;
     private Long fromMemberId;
     private Long toMemberId;
@@ -26,6 +28,7 @@ public class LabCollaborationRecord extends BaseEntity {
 
     public Long getId(){return id;} public void setId(Long v){id=v;}
     public Long getTaskId(){return taskId;} public void setTaskId(Long v){taskId=v;}
+    public Long getRelatedAssetId(){return relatedAssetId;} public void setRelatedAssetId(Long v){relatedAssetId=v;}
     public String getPeriod(){return period;} public void setPeriod(String v){period=v;}
     public Long getFromMemberId(){return fromMemberId;} public void setFromMemberId(Long v){fromMemberId=v;}
     public Long getToMemberId(){return toMemberId;} public void setToMemberId(Long v){toMemberId=v;}
