@@ -1,6 +1,7 @@
 package com.ailab.system.report;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -81,16 +82,47 @@ class WordReportExporterTest {
     }
 
     @Test
-    void rejectsChartFallbackGridBeforePoiAllocatesFiftyThousandCategories() throws Exception {
-        Class<?> limits = Class.forName("com.ailab.system.report.exporter.WordReportExporter$Limits"); java.lang.reflect.Constructor<?> constructor = limits.getDeclaredConstructor(); constructor.setAccessible(true);
-        java.lang.reflect.Method cells = WordReportExporter.class.getDeclaredMethod("cells", limits, int.class, int.class); cells.setAccessible(true);
-        java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class, () -> cells.invoke(new WordReportExporter(), constructor.newInstance(), 2, 50002));
-        assertTrue(error.getCause() instanceof java.io.IOException);
+    void cumulativeTableStatAndChartCellsAreRejectedBeforePoiAllocatesThem() {
+        java.util.List<String> headers = new java.util.ArrayList<String>();
+        for (int i = 0; i < 100; i++) headers.add("c" + i);
+        java.util.List<Map<String,Object>> rows = repeatedRows(499);
+        ReportData value = new ReportData(report().getContext(), "t", 1, Arrays.asList(
+                new ReportSectionData("table", "TABLE", "table", rows, map("headers", headers)),
+                new ReportSectionData("stat", "STAT", "stat", rows, map("headers", headers)),
+                new ReportSectionData("chart", "CHART", "chart", Collections.<Map<String,Object>>emptyList(),
+                        map("categories", Collections.singletonList("x"), "values", Collections.singletonList(1)))),
+                Collections.<String,Object>emptyMap());
+        assertThrows(java.io.IOException.class, () -> invokePreflight(value));
+    }
+
+    @Test
+    void cumulativeRenderedRowsIncludeEveryTableHeaderBeforePoiAllocatesThem() {
+        java.util.List<Map<String,Object>> rows = repeatedRows(3333);
+        java.util.List<String> categories = new java.util.ArrayList<String>();
+        for (int i = 0; i < 3333; i++) categories.add("c" + i);
+        ReportData value = new ReportData(report().getContext(), "t", 1, Arrays.asList(
+                new ReportSectionData("table", "TABLE", "table", rows,
+                        map("headers", Collections.singletonList("value"))),
+                new ReportSectionData("stat", "STAT", "stat", rows,
+                        map("headers", Collections.singletonList("value"))),
+                new ReportSectionData("chart", "CHART", "chart", Collections.<Map<String,Object>>emptyList(),
+                        map("categories", categories, "values", Collections.emptyList()))),
+                Collections.<String,Object>emptyMap());
+        assertThrows(java.io.IOException.class, () -> invokePreflight(value));
+    }
+
+    @Test
+    void statTextRowsDoNotConsumeATableRowBudgetBecauseNoTableIsRendered() {
+        ReportData value = new ReportData(report().getContext(), "t", 1,
+                Collections.singletonList(new ReportSectionData("stat", "STAT", "stat",
+                        repeatedRows(10001), map("text", "summary"))),
+                Collections.<String,Object>emptyMap());
+        assertDoesNotThrow(() -> invokePreflight(value));
     }
 
     @Test
     void boundedSerializerRefusesBytesBeyondTheConfiguredCap() throws Exception {
-        Class<?> type = Class.forName("com.ailab.system.report.exporter.WordReportExporter$BoundedOutputStream");
+        Class<?> type = nested("BoundedOutputStream");
         java.lang.reflect.Constructor<?> constructor = type.getDeclaredConstructor(java.io.OutputStream.class, int.class); constructor.setAccessible(true);
         java.io.OutputStream stream = (java.io.OutputStream) constructor.newInstance(new ByteArrayOutputStream(), 1);
         java.io.IOException error = assertThrows(java.io.IOException.class, () -> stream.write(new byte[] {1, 2}));
@@ -111,6 +143,24 @@ class WordReportExporterTest {
     private org.w3c.dom.Document xml(String xml) throws Exception { DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance(); factory.setNamespaceAware(true); return factory.newDocumentBuilder().parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8))); }
     private org.w3c.dom.Element first(org.w3c.dom.Element element, String name) { return (org.w3c.dom.Element) element.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", name).item(0); }
     private int count(org.w3c.dom.Element element, String name) { return element.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", name).getLength(); }
+
+    private void invokePreflight(ReportData data) throws Throwable {
+        java.lang.reflect.Method method = WordReportExporter.class.getDeclaredMethod("preflight", ReportData.class);
+        method.setAccessible(true);
+        try { method.invoke(new WordReportExporter(), data); }
+        catch (java.lang.reflect.InvocationTargetException error) { throw error.getCause(); }
+    }
+
+    private Class<?> nested(String simpleName) {
+        for (Class<?> type : WordReportExporter.class.getDeclaredClasses())
+            if (simpleName.equals(type.getSimpleName())) return type;
+        throw new AssertionError("missing nested type " + simpleName);
+    }
+
+    private java.util.List<Map<String,Object>> repeatedRows(int count) {
+        return new java.util.ArrayList<Map<String,Object>>(
+                Collections.nCopies(count, map("value", "v")));
+    }
 
     private ReportData report() {
         ReportContext context = new ReportContext("2026-08", "人工智能实验室", 7L,
