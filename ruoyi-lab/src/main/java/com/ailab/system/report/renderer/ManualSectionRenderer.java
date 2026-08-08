@@ -12,7 +12,8 @@ public final class ManualSectionRenderer implements SectionRenderer {
     @Override public String getId() { return "MANUAL"; }
     @Override public boolean supports(String value) { return "MANUAL".equals(value); }
     @Override public ReportSectionData render(ReportContext context, ReportSectionConfig config, ReportSectionData source) {
-        RendererSupport.require(getId(), context, config, source); Object content = source.getSummary().get("manualText"); if (content == null) content = source.getSummary().get("text"); String text = content == null || String.valueOf(content).trim().isEmpty() ? "暂无人工填写内容" : String.valueOf(content);
+        RendererSupport.require(getId(), context, config, source); Object content = source.getSummary().get("manualText"); if (content == null) content = source.getSummary().get("text"); String text = content == null || String.valueOf(content).trim().isEmpty() ? placeholder(config) : String.valueOf(content);
         return RendererSupport.result(config, Collections.<Map<String, Object>>emptyList(), RendererSupport.map("text", text));
     }
+    private String placeholder(ReportSectionConfig config) { Object value = config.getRenderConfig().get("placeholder"); if (value == null || String.valueOf(value).trim().isEmpty()) return "暂无人工填写内容"; String text = String.valueOf(value); RendererSupport.safeText(text); return text; }
 }

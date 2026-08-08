@@ -11,6 +11,7 @@ import com.ailab.system.report.model.ReportData;
 import com.ailab.system.report.model.ReportSectionData;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Collections;
@@ -41,9 +42,35 @@ class MarkdownReportExporterTest {
         row.put("n", Double.NaN);
         ReportData nonFinite = new ReportData(numeric.getContext(), "t", 1, Collections.singletonList(new ReportSectionData("x", "TABLE", "x", Collections.singletonList(row), Collections.<String, Object>emptyMap())), Collections.<String, Object>emptyMap());
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> new JsonReportExporter().export(nonFinite));
-        ReportData title = new ReportData(numeric.getContext(), "t", 1, Collections.singletonList(new ReportSectionData("x", "TEXT", "标题\n---", Collections.<Map<String, Object>>emptyList(), Collections.<String, Object>singletonMap("text", "- 注入\n```\n1. injected"))), Collections.<String, Object>emptyMap());
+        ReportData title = new ReportData(numeric.getContext(), "t", 1, Collections.singletonList(new ReportSectionData("x", "TEXT", "标题\n---", Collections.<Map<String, Object>>emptyList(), Collections.<String, Object>singletonMap("text", "- 注入\n```\n1. injected\n    code"))), Collections.<String, Object>emptyMap());
         String markdown = new String(new MarkdownReportExporter().export(title), StandardCharsets.UTF_8);
-        assertFalse(markdown.contains("\n---\n")); assertFalse(markdown.contains("\n```\n")); assertFalse(markdown.contains("\n1. injected"));
+        assertFalse(markdown.contains("\n---\n")); assertFalse(markdown.contains("\n```\n")); assertFalse(markdown.contains("\n1. injected")); assertFalse(markdown.contains("\n    code")); assertTrue(markdown.contains("\u00a0\u00a0\u00a0\u00a0code"));
+    }
+
+    @Test
+    void jsonCanonicalizesEquivalentBigDecimalsWithoutLosingLargePrecision() throws Exception {
+        ReportContext context = report().getContext();
+        ReportData first = decimalReport(context, new BigDecimal("1000000000000000000000000000000000000.00"));
+        ReportData second = decimalReport(context, new BigDecimal("1000000000000000000000000000000000000"));
+        JsonReportExporter exporter = new JsonReportExporter();
+        assertArrayEquals(exporter.export(first), exporter.export(second));
+        assertArrayEquals(exporter.export(decimalReport(context, new BigDecimal("1.0"))), exporter.export(decimalReport(context, new BigDecimal("1.00"))));
+        assertArrayEquals(exporter.export(decimalReport(context, new BigDecimal("1.00"))), exporter.export(decimalReport(context, BigDecimal.ONE)));
+        assertTrue(new String(exporter.export(first), StandardCharsets.UTF_8).contains("1000000000000000000000000000000000000"));
+        assertTrue(new String(exporter.export(decimalReport(context, new BigDecimal("-0.00"))), StandardCharsets.UTF_8).contains("\"n\":0"));
+    }
+
+    @Test
+    void markdownTableEmptyAndChartPortableDataAreExplicit() throws Exception {
+        Map<String, Object> table = new LinkedHashMap<String, Object>(); table.put("headers", Arrays.asList("名称")); table.put("alignments", Arrays.asList("left"));
+        Map<String, Object> chart = new LinkedHashMap<String, Object>(); chart.put("categories", Arrays.asList("一月", "二月")); chart.put("series", Collections.singletonList(Collections.<String, Object>singletonMap("values", Arrays.asList(1, 2)))); chart.put("values", Arrays.asList(1, 2)); chart.put("pngBase64", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL0WQAAAABJRU5ErkJggg==");
+        ReportData report = new ReportData(report().getContext(), "t", 1, Arrays.asList(new ReportSectionData("t", "TABLE", "空表", Collections.<Map<String, Object>>emptyList(), table), new ReportSectionData("c", "CHART", "图", Collections.<Map<String, Object>>emptyList(), chart)), Collections.<String, Object>emptyMap());
+        String markdown = new String(new MarkdownReportExporter().export(report), StandardCharsets.UTF_8);
+        assertTrue(markdown.contains("暂无数据")); assertTrue(markdown.contains("一月")); assertTrue(markdown.contains("二月")); assertTrue(markdown.contains("1")); assertTrue(markdown.contains("data:image/png;base64,iVBORw0KGgo"));
+    }
+
+    private ReportData decimalReport(ReportContext context, BigDecimal value) {
+        return new ReportData(context, "t", 1, Collections.singletonList(new ReportSectionData("x", "TABLE", "x", Collections.singletonList(Collections.<String, Object>singletonMap("n", value)), Collections.<String, Object>emptyMap())), Collections.<String, Object>emptyMap());
     }
 
     private ReportData report() {

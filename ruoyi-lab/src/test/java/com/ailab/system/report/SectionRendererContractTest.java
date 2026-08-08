@@ -76,8 +76,8 @@ class SectionRendererContractTest {
 
     @Test
     void groupTextHonorsTaskNinePrecomputedSummaryGroupsBeforeRows() {
-        Map<String, Object> summary = row("groups", Arrays.asList(row("title", "研发组", "rows", Collections.singletonList(row("owner", "李四")), "summary", "共1项")));
-        ReportSectionData source = new ReportSectionData("s1", "GROUP_TEXT", "本月进展", Collections.<Map<String, Object>>emptyList(), summary);
+        Map<String, Object> summary = row("groups", Arrays.asList(row("field", "owner", "key", "研发组", "count", 1)));
+        ReportSectionData source = new ReportSectionData("s1", "GROUP_TEXT", "本月进展", Collections.singletonList(row("owner", "研发组")), summary);
         ReportSectionData rendered = new GroupTextSectionRenderer().render(context, section("GROUP_TEXT", "{\"groupBy\":\"owner\"}"), source);
         assertEquals("研发组", ((Map<?, ?>) ((List<?>) rendered.getSummary().get("groups")).get(0)).get("title"));
     }
@@ -105,6 +105,34 @@ class SectionRendererContractTest {
         ReportSectionData rendered = new StatSectionRenderer().render(context, section("STAT", "{\"metrics\":[\"average\",\"top\"]}"), taskStats);
         assertEquals("3", ((Map<?, ?>) ((List<?>) rendered.getSummary().get("metrics")).get(0)).get("value"));
         assertEquals("4", ((Map<?, ?>) ((List<?>) rendered.getSummary().get("metrics")).get(1)).get("value"));
+    }
+
+    @Test
+    void groupTextUsesTaskNineFieldKeyCountGroupsAgainstSourceRows() {
+        List<Map<String, Object>> rows = Arrays.asList(row("bizLine", "算法", "owner", "张三"), row("bizLine", "算法", "owner", "李四"), row("bizLine", null, "owner", "王五"));
+        Map<String, Object> summary = row("groups", Arrays.asList(row("field", "bizLine", "key", "算法", "count", 2), row("field", "bizLine", "key", null, "count", 1)));
+        ReportSectionData source = new ReportSectionData("s1", "GROUP_TEXT", "协同", rows, summary);
+        List<?> groups = (List<?>) new GroupTextSectionRenderer().render(context, section("GROUP_TEXT", "{\"groupBy\":\"bizLine\"}"), source).getSummary().get("groups");
+        assertEquals("算法", ((Map<?, ?>) groups.get(0)).get("title")); assertEquals(2, ((List<?>) ((Map<?, ?>) groups.get(0)).get("rows")).size()); assertEquals("（未分组）", ((Map<?, ?>) groups.get(1)).get("title"));
+    }
+
+    @Test
+    void groupTextMatchesTaskNineStringifiedNumericAndNullKeys() {
+        List<Map<String, Object>> rows = Arrays.asList(row("goalId", Long.valueOf(123L)), row("goalId", null));
+        Map<String, Object> summary = row("groups", Arrays.asList(row("field", "goalId", "key", "123", "count", 1), row("field", "goalId", "key", "null", "count", 1)));
+        ReportSectionData source = new ReportSectionData("s1", "GROUP_TEXT", "协同", rows, summary);
+        List<?> groups = (List<?>) new GroupTextSectionRenderer().render(context, section("GROUP_TEXT", "{\"groupBy\":\"goalId\"}"), source).getSummary().get("groups");
+        assertEquals(1, ((List<?>) ((Map<?, ?>) groups.get(0)).get("rows")).size());
+        assertEquals("（未分组）", ((Map<?, ?>) groups.get(1)).get("title")); assertEquals(1, ((List<?>) ((Map<?, ?>) groups.get(1)).get("rows")).size());
+    }
+
+    @Test
+    void manualPlaceholderAndEmptyStatAreExplicitWithoutInventingZeroMetrics() {
+        ReportSectionData manual = new ReportSectionData("s1", "MANUAL", "人工", Collections.<Map<String, Object>>emptyList(), Collections.<String, Object>emptyMap());
+        assertEquals("请输入管理说明", new ManualSectionRenderer().render(context, section("MANUAL", "{\"placeholder\":\"请输入管理说明\"}"), manual).getSummary().get("text"));
+        ReportSectionData stat = new ReportSectionData("s1", "STAT", "统计", Collections.<Map<String, Object>>emptyList(), Collections.<String, Object>emptyMap());
+        ReportSectionData rendered = new StatSectionRenderer().render(context, section("STAT", "{\"metrics\":[\"average\",\"top\"]}"), stat);
+        assertEquals(Boolean.TRUE, rendered.getSummary().get("empty")); assertTrue(((List<?>) rendered.getSummary().get("metrics")).isEmpty());
     }
 
     @Test
