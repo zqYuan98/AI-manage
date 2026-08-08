@@ -6,8 +6,10 @@ import com.sun.jna.platform.win32.WinNT;
 import com.sun.jna.ptr.IntByReference;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import oshi.SystemInfo;
@@ -23,11 +25,51 @@ public final class ProcessTestSupport {
     }
 
     public static void writeCurrentPid(Path target) throws IOException {
-        Files.write(target, String.valueOf(currentPid()).getBytes(StandardCharsets.US_ASCII));
+        Path absolute = target.toAbsolutePath();
+        Path parent = absolute.getParent();
+        String fileName = absolute.getFileName().toString();
+        String prefix = fileName.length() >= 3 ? fileName : "pid" + fileName;
+        Path temporary = Files.createTempFile(parent, prefix + ".", ".tmp");
+        try {
+            Files.write(temporary, String.valueOf(currentPid()).getBytes(StandardCharsets.US_ASCII));
+            try {
+                Files.move(temporary, absolute, StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, absolute, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
     }
 
-    public static long readPid(Path target) throws IOException {
-        return Long.parseLong(new String(Files.readAllBytes(target), StandardCharsets.US_ASCII));
+    public static long awaitPid(Path target, long timeoutSeconds) throws InterruptedException {
+        long timeout = TimeUnit.SECONDS.toNanos(Math.max(0L, timeoutSeconds));
+        long started = System.nanoTime();
+        long deadline = started > Long.MAX_VALUE - timeout ? Long.MAX_VALUE : started + timeout;
+        String lastValue = "<missing>";
+        Throwable lastFailure = null;
+        do {
+            try {
+                if (Files.isRegularFile(target)) {
+                    lastValue = new String(Files.readAllBytes(target), StandardCharsets.US_ASCII).trim();
+                    try {
+                        long pid = Long.parseLong(lastValue);
+                        if (pid > 0L) return pid;
+                        lastFailure = new NumberFormatException("PID is not positive: " + pid);
+                    } catch (NumberFormatException invalid) {
+                        lastFailure = invalid;
+                    }
+                }
+            } catch (IOException unreadable) {
+                lastFailure = unreadable;
+            }
+            if (System.nanoTime() >= deadline) break;
+            Thread.sleep(20L);
+        } while (true);
+        String display = lastValue.length() <= 128 ? lastValue : lastValue.substring(0, 128) + "...";
+        throw new AssertionError("valid positive PID was not published to " + target
+                + "; lastValue='" + display + "'", lastFailure);
     }
 
     public static boolean isAlive(long pid) {

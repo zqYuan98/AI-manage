@@ -81,8 +81,8 @@ public final class FakeLibreOfficeMain {
                 ProcessBuilder child = javaProcess("child", base.toString(), tag);
                 if (tag.contains("orphan")) child.command().add(token);
                 child.start();
-                ProcessTestSupport.awaitFile(base.resolve(tag + ".child.pid"), 20L);
-                ProcessTestSupport.awaitFile(base.resolve(tag + ".grandchild.pid"), 20L);
+                ProcessTestSupport.awaitPid(base.resolve(tag + ".child.pid"), 20L);
+                ProcessTestSupport.awaitPid(base.resolve(tag + ".grandchild.pid"), 20L);
             }
             Thread.sleep(tag.contains("orphan") ? 400L : SLEEP_MILLIS);
             return;
@@ -114,9 +114,8 @@ public final class FakeLibreOfficeMain {
     private static void lateBroker(Path base, String tag) throws Exception {
         Path rootPidFile = base.resolve(tag + ".root.pid");
         Path tokenFile = base.resolve(tag + ".token");
-        ProcessTestSupport.awaitFile(rootPidFile, 10L);
         ProcessTestSupport.awaitFile(tokenFile, 10L);
-        long rootPid = ProcessTestSupport.readPid(rootPidFile);
+        long rootPid = ProcessTestSupport.awaitPid(rootPidFile, 10L);
         ProcessTestSupport.awaitDead(rootPid, 10L);
         String token = new String(Files.readAllBytes(tokenFile), StandardCharsets.UTF_8);
         javaProcess("late-child", base.toString(), tag, token).start();

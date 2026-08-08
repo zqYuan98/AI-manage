@@ -38,7 +38,7 @@ class LibreOfficeProcessRunnerProcessTreeTest {
                 new LibreOfficeProcessRunner.ProcessTreeSession() {
                     @Override public List<LibreOfficeProcessRunner.ProcessIdentity> snapshot(Process process)
                             throws ReportExportException {
-                        try { ProcessTestSupport.awaitFile(temp.resolve("root.pid"), 10L); }
+                        try { ProcessTestSupport.awaitPid(temp.resolve("root.pid"), 10L); }
                         catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
                         throw new ReportExportException("snapshot failed", true);
                     }
@@ -52,7 +52,7 @@ class LibreOfficeProcessRunnerProcessTreeTest {
                         System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()),
                 null, failing);
         assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "snapshotfail"));
-        long pid = ProcessTestSupport.readPid(temp.resolve("root.pid"));
+        long pid = ProcessTestSupport.awaitPid(temp.resolve("root.pid"), 10L);
         ProcessTestSupport.awaitDead(pid, 10L);
         assertTrue(!ProcessTestSupport.isAlive(pid));
     }
@@ -109,6 +109,63 @@ class LibreOfficeProcessRunnerProcessTreeTest {
         List<LibreOfficeProcessRunner.ProcessIdentity> found = session.snapshot(DEAD_PROCESS);
 
         assertEquals(Arrays.asList(root, child, grandchild), found);
+    }
+
+    @Test
+    void snapshotRetriesAnEmptyCommandLineAndFindsTheSameIdentityOnTheNextSnapshot() throws Exception {
+        LibreOfficeProcessRunner.ProcessIdentity root = identity(13, 130L, 1, "");
+        CommandLineInventory inventory = new CommandLineInventory(root, "", "office retry-token");
+        LibreOfficeProcessRunner.OshiProcessTreeSession session = session("retry-token", inventory,
+                new RecordingTerminator(), new ManualClock());
+
+        assertTrue(session.snapshot(DEAD_PROCESS).isEmpty());
+        assertEquals(Collections.singletonList(root), session.snapshot(DEAD_PROCESS));
+    }
+
+    @Test
+    void snapshotFailsClosedAfterThreeEmptyCommandLineAttempts() throws Exception {
+        LibreOfficeProcessRunner.ProcessIdentity root = identity(14, 140L, 1, "");
+        CommandLineInventory inventory = new CommandLineInventory(root, "", "", "");
+        LibreOfficeProcessRunner.OshiProcessTreeSession session = session("never-visible-token", inventory,
+                new RecordingTerminator(), new ManualClock());
+
+        assertTrue(session.snapshot(DEAD_PROCESS).isEmpty());
+        assertTrue(session.snapshot(DEAD_PROCESS).isEmpty());
+        ReportExportException failure = assertThrows(ReportExportException.class,
+                () -> session.snapshot(DEAD_PROCESS));
+
+        assertTrue(failure.isRetryable());
+        assertTrue(failure.getMessage().contains("pid=14@140"));
+        assertTrue(failure.getMessage().contains("3"));
+    }
+
+    @Test
+    void snapshotRetriesATemporaryCommandLineReadFailureAndCanThenMatch() throws Exception {
+        LibreOfficeProcessRunner.ProcessIdentity root = identity(15, 150L, 1, "");
+        ReportExportException temporary = new ReportExportException("WMI temporarily unavailable", true);
+        CommandLineInventory inventory = new CommandLineInventory(root, temporary, "office exception-token");
+        LibreOfficeProcessRunner.OshiProcessTreeSession session = session("exception-token", inventory,
+                new RecordingTerminator(), new ManualClock());
+
+        assertTrue(session.snapshot(DEAD_PROCESS).isEmpty());
+        assertEquals(Collections.singletonList(root), session.snapshot(DEAD_PROCESS));
+    }
+
+    @Test
+    void snapshotFailsClosedWhenAnUnresolvedCommandLineOutlivesTheStartupWindow() throws Exception {
+        LibreOfficeProcessRunner.ProcessIdentity root = identity(16, 160L, 1, "");
+        CommandLineInventory inventory = new CommandLineInventory(root, "", "office window-token");
+        ManualClock clock = new ManualClock();
+        LibreOfficeProcessRunner.OshiProcessTreeSession session = session("window-token", inventory,
+                new RecordingTerminator(), clock);
+        assertTrue(session.snapshot(DEAD_PROCESS).isEmpty());
+
+        clock.sleep(6000L);
+        ReportExportException failure = assertThrows(ReportExportException.class,
+                () -> session.snapshot(DEAD_PROCESS));
+
+        assertTrue(failure.isRetryable());
+        assertTrue(failure.getMessage().contains("startup window"));
     }
 
     @Test
@@ -218,6 +275,36 @@ class LibreOfficeProcessRunnerProcessTreeTest {
 
         @Override public String commandLine(LibreOfficeProcessRunner.ProcessIdentity identity) {
             return identity.commandLine;
+        }
+    }
+
+    private static final class CommandLineInventory implements LibreOfficeProcessRunner.ProcessInventory {
+        private final LibreOfficeProcessRunner.ProcessIdentity identity;
+        private final Queue<Object> commandLines = new ArrayDeque<Object>();
+        private boolean baseline = true;
+
+        CommandLineInventory(LibreOfficeProcessRunner.ProcessIdentity identity, Object... commandLines) {
+            this.identity = identity;
+            this.commandLines.addAll(Arrays.asList(commandLines));
+        }
+
+        @Override public Map<Integer, LibreOfficeProcessRunner.ProcessIdentity> snapshot() {
+            if (baseline) {
+                baseline = false;
+                return empty();
+            }
+            return map(identity);
+        }
+
+        @Override public LibreOfficeProcessRunner.ProcessIdentity current(int pid) {
+            return pid == identity.pid ? identity : null;
+        }
+
+        @Override public String commandLine(LibreOfficeProcessRunner.ProcessIdentity ignored)
+                throws ReportExportException {
+            Object result = commandLines.isEmpty() ? "" : commandLines.remove();
+            if (result instanceof ReportExportException) throw (ReportExportException) result;
+            return (String) result;
         }
     }
 

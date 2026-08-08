@@ -36,6 +36,8 @@ import oshi.software.os.OperatingSystem;
 public final class LibreOfficeProcessRunner {
     private static final int MAX_LOG = 64 * 1024;
     private static final int MAX_TERMINATOR_LOG = 2048;
+    private static final int MAX_COMMAND_LINE_ATTEMPTS = 3;
+    private static final long COMMAND_LINE_STARTUP_WINDOW_NANOS = TimeUnit.SECONDS.toNanos(5L);
     private static final long TERMINATION_DEADLINE_NANOS = TimeUnit.SECONDS.toNanos(5L);
     private static final long TERMINATION_GRACE_MILLIS = 200L;
 
@@ -275,6 +277,8 @@ public final class LibreOfficeProcessRunner {
         private final Set<ProcessIdentity> baseline;
         private final Set<ProcessIdentity> roots = new LinkedHashSet<ProcessIdentity>();
         private final Set<ProcessIdentity> inspected = new HashSet<ProcessIdentity>();
+        private final Map<ProcessIdentity, CommandLineAttempt> attempts =
+                new LinkedHashMap<ProcessIdentity, CommandLineAttempt>();
 
         OshiProcessTreeSession(String token, ProcessInventory inventory, ProcessTerminator terminator,
                 ProcessClock clock) throws ReportExportException {
@@ -290,8 +294,8 @@ public final class LibreOfficeProcessRunner {
         @Override public List<ProcessIdentity> snapshot(Process ignored) throws ReportExportException {
             Map<Integer, ProcessIdentity> current = inventory.snapshot();
             for (ProcessIdentity identity : current.values()) {
-                if (!baseline.contains(identity) && !roots.contains(identity) && inspected.add(identity)
-                        && inventory.commandLine(identity).contains(token)) roots.add(identity);
+                if (!baseline.contains(identity) && !roots.contains(identity) && !inspected.contains(identity))
+                    inspectNewIdentity(identity);
             }
             LinkedHashSet<ProcessIdentity> found = new LinkedHashSet<ProcessIdentity>();
             for (ProcessIdentity root : roots) {
@@ -309,6 +313,59 @@ public final class LibreOfficeProcessRunner {
                 }
             } while (changed);
             return new ArrayList<ProcessIdentity>(found);
+        }
+
+        private void inspectNewIdentity(ProcessIdentity identity) throws ReportExportException {
+            long now = clock.nanoTime();
+            CommandLineAttempt attempt = attempts.get(identity);
+            if (attempt == null) {
+                attempt = new CommandLineAttempt(now);
+                attempts.put(identity, attempt);
+            } else if (outsideStartupWindow(attempt, now)) {
+                throw commandLineUnavailable(identity, attempt, "startup window expired");
+            }
+
+            attempt.count++;
+            String commandLine = null;
+            try {
+                commandLine = inventory.commandLine(identity);
+                attempt.lastFailure = null;
+            } catch (ReportExportException temporary) {
+                attempt.lastFailure = temporary;
+            }
+
+            if (commandLine != null && commandLine.trim().length() > 0) {
+                attempts.remove(identity);
+                inspected.add(identity);
+                if (commandLine.contains(token)) roots.add(identity);
+                return;
+            }
+            if (attempt.count >= MAX_COMMAND_LINE_ATTEMPTS)
+                throw commandLineUnavailable(identity, attempt, "retry budget exhausted");
+        }
+
+        private boolean outsideStartupWindow(CommandLineAttempt attempt, long now) {
+            return now >= attempt.firstSeenNanos
+                    && now - attempt.firstSeenNanos >= COMMAND_LINE_STARTUP_WINDOW_NANOS;
+        }
+
+        private ReportExportException commandLineUnavailable(ProcessIdentity identity,
+                CommandLineAttempt attempt, String reason) {
+            String message = "Cannot safely identify newly started process " + identity
+                    + ": command line unavailable after " + attempt.count + " attempts; " + reason;
+            return attempt.lastFailure == null
+                    ? new ReportExportException(message, true)
+                    : new ReportExportException(message, true, attempt.lastFailure);
+        }
+
+        private static final class CommandLineAttempt {
+            final long firstSeenNanos;
+            int count;
+            ReportExportException lastFailure;
+
+            CommandLineAttempt(long firstSeenNanos) {
+                this.firstSeenNanos = firstSeenNanos;
+            }
         }
 
         @Override public void terminate(Process root, List<ProcessIdentity> tracked)

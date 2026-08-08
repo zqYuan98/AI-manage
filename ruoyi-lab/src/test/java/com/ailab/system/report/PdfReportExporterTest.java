@@ -120,14 +120,13 @@ class PdfReportExporterTest {
         Process broker = null;
         try {
             Future<byte[]> conversion = pool.submit(() -> runner(properties).convert(new byte[] {1}, "late-tree"));
-            ProcessTestSupport.awaitFile(temp.resolve("late-tree.root.pid"), 10L);
+            ProcessTestSupport.awaitPid(temp.resolve("late-tree.root.pid"), 10L);
             ProcessTestSupport.awaitFile(temp.resolve("late-tree.token"), 10L);
             broker = fakeProcess("late-broker", temp.toString(), "late-tree").start();
             assertRetryableFailure(conversion);
             assertTrue(broker.waitFor(10L, TimeUnit.SECONDS));
             assertTrue(broker.exitValue() == 0);
-            ProcessTestSupport.awaitFile(temp.resolve("late-tree.late.pid"), 10L);
-            long late = ProcessTestSupport.readPid(temp.resolve("late-tree.late.pid"));
+            long late = ProcessTestSupport.awaitPid(temp.resolve("late-tree.late.pid"), 10L);
             ProcessTestSupport.awaitDead(late, 10L);
             removeTreeFiles(temp, "late-tree");
             assertEmpty(temp);
@@ -217,8 +216,7 @@ class PdfReportExporterTest {
     private void assertTreeDead(Path base, String tag) throws Exception {
         for (String role : Arrays.asList("root", "child", "grandchild")) {
             Path file = base.resolve(tag + "." + role + ".pid");
-            ProcessTestSupport.awaitFile(file, 10L);
-            ProcessTestSupport.awaitDead(ProcessTestSupport.readPid(file), 10L);
+            ProcessTestSupport.awaitDead(ProcessTestSupport.awaitPid(file, 10L), 10L);
         }
     }
 
