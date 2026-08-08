@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabDashboardMapper">
+    <resultMap id="ReminderResult" type="com.ailab.system.domain.LabReminder">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/>
+        <result property="businessType" column="business_type"/><result property="businessId" column="business_id"/>
+        <result property="episodeNo" column="episode_no"/><result property="recipientId" column="recipient_id"/>
+        <result property="reminderType" column="reminder_type"/><result property="reminderLevel" column="reminder_level"/>
+        <result property="reminderDate" column="reminder_date"/><result property="title" column="title"/>
+        <result property="reminderContent" column="reminder_content"/><result property="readFlag" column="read_flag"/>
+        <result property="readTime" column="read_time"/><result property="sendTime" column="send_time"/>
+        <result property="idempotencyKey" column="idempotency_key"/><result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="ReminderCandidateResult" type="com.ailab.system.dto.ReminderCandidate">
+        <result property="taskId" column="task_id"/><result property="taskTitle" column="task_title"/>
+        <result property="episodeNo" column="episode_no"/><result property="blockStartTime" column="block_start_time"/>
+        <result property="recipientId" column="recipient_id"/><result property="audience" column="audience"/>
+        <result property="missingFields" column="missing_fields"/><result property="period" column="period"/>
+    </resultMap>
+    <resultMap id="GoalHealthFactResult" type="com.ailab.system.dto.GoalHealthFact">
+        <id property="goalId" column="goal_id"/><result property="goalTitle" column="goal_title"/>
+        <result property="year" column="year"/><result property="expectedProgress" column="expected_progress"/>
+        <result property="actualProgress" column="actual_progress"/><result property="maxOpenBlockDays" column="max_open_block_days"/>
+        <result property="delayedFocusTask" column="delayed_focus_task"/><result property="overdueUnsubmittedFocusTask" column="overdue_unsubmitted_focus_task"/>
+    </resultMap>
+    <resultMap id="GoalTrendResult" type="com.ailab.system.dto.GoalTrendPoint">
+        <result property="period" column="period"/><result property="expectedProgress" column="expected_progress"/>
+        <result property="actualProgress" column="actual_progress"/>
+    </resultMap>
+    <resultMap id="KpiFactResult" type="com.ailab.system.dto.DashboardKpiFact">
+        <result property="keyTaskCompletionRate" column="key_task_completion_rate"/>
+        <result property="overdueOrPendingCount" column="overdue_or_pending_count"/>
+        <result property="blockedOverSevenCount" column="blocked_over_seven_count"/>
+        <result property="assetsWithoutBackupCount" column="assets_without_backup_count"/>
+    </resultMap>
+    <resultMap id="CountResult" type="com.ailab.system.dto.DashboardCountItem">
+        <result property="code" column="code"/><result property="name" column="name"/><result property="count" column="item_count"/>
+    </resultMap>
+    <resultMap id="MemberLoadResult" type="com.ailab.system.dto.MemberLoad">
+        <id property="memberId" column="member_id"/><result property="memberName" column="member_name"/>
+        <result property="bizLine" column="biz_line"/><result property="keyTaskWeight" column="key_task_weight"/>
+        <result property="activeTaskCount" column="active_task_count"/><result property="recentWeekTaskCount" column="recent_week_task_count"/>
+        <result property="overdueCount" column="overdue_count"/><result property="blockedCount" column="blocked_count"/>
+        <result property="coordinationCount" column="coordination_count"/>
+    </resultMap>
+    <resultMap id="ActionResult" type="com.ailab.system.dto.DashboardActionItem">
+        <id property="id" column="id"/><result property="type" column="item_type"/>
+        <result property="title" column="title"/><result property="status" column="item_status"/>
+        <result property="dueDate" column="due_date"/>
+    </resultMap>
+
+    <sql id="taskScope">
+        <choose>
+            <when test="scope.roleKey == 'lab_lead'">and t.biz_line=#{scope.bizLine}</when>
+            <when test="scope.roleKey == 'lab_member'">and t.owner_id=#{scope.memberId}</when>
+        </choose>
+    </sql>
+
+    <select id="selectOpenBlockReminderCandidates" resultMap="ReminderCandidateResult">
+        select e.task_id,t.title task_title,e.episode_no,e.block_start_time,t.owner_id recipient_id,'OWNER' audience,null missing_fields,t.period
+        from lab_task_block_event e join lab_task t on t.id=e.task_id and t.del_flag='0' and t.current_block_flag='1'
+        join lab_member owner on owner.id=t.owner_id and owner.member_status='ACTIVE' and owner.del_flag='0'
+        join sys_user owner_user on owner_user.user_id=owner.user_id and owner_user.status='0' and owner_user.del_flag='0'
+        where e.block_status='OPEN' and e.del_flag='0'
+        union all
+        select distinct e.task_id,t.title,e.episode_no,e.block_start_time,t.coordination_owner_id,'COORDINATOR',null,t.period
+        from lab_task_block_event e join lab_task t on t.id=e.task_id and t.del_flag='0' and t.current_block_flag='1'
+        join lab_member coordinator on coordinator.id=t.coordination_owner_id and coordinator.member_status='ACTIVE' and coordinator.del_flag='0'
+        join sys_user coordinator_user on coordinator_user.user_id=coordinator.user_id and coordinator_user.status='0' and coordinator_user.del_flag='0'
+        join sys_user_role coordinator_link on coordinator_link.user_id=coordinator_user.user_id
+        join sys_role coordinator_role on coordinator_role.role_id=coordinator_link.role_id and coordinator_role.status='0' and coordinator_role.del_flag='0'
+        where e.block_status='OPEN' and e.del_flag='0' and t.coordination_required='1' and t.coordination_owner_id&lt;&gt;t.owner_id
+        and (coordinator_role.role_key='lab_manager' or (coordinator_role.role_key='lab_lead' and coordinator.biz_line=t.biz_line))
+        union all
+        select e.task_id,t.title,e.episode_no,e.block_start_time,manager_member.id,'MANAGER',null,t.period
+        from lab_task_block_event e join lab_task t on t.id=e.task_id and t.del_flag='0' and t.current_block_flag='1'
+        join sys_role manager_role on manager_role.role_key='lab_manager' and manager_role.status='0' and manager_role.del_flag='0'
+        join sys_user_role manager_link on manager_link.role_id=manager_role.role_id
+        join sys_user manager_user on manager_user.user_id=manager_link.user_id and manager_user.status='0' and manager_user.del_flag='0'
+        join lab_member manager_member on manager_member.user_id=manager_user.user_id and manager_member.member_status='ACTIVE' and manager_member.del_flag='0'
+        where e.block_status='OPEN' and e.del_flag='0'
+        order by task_id,episode_no,recipient_id,audience
+    </select>
+
+    <sql id="pendingMissingExpression">
+        concat_ws('、',if(t.plan_date is null,'计划完成日期',null),
+        if(t.deliverable is null or trim(t.deliverable)='','交付物',null),
+        if(t.workflow_status='ACTIVE' and coalesce(t.result_status,'DOING')&lt;&gt;'UNDONE' and t.actual_finish_time is null,'实际完成时间',null),
+        if(t.workflow_status='ACTIVE' and coalesce(t.result_status,'DOING')&lt;&gt;'UNDONE' and (t.result_desc is null or trim(t.result_desc)=''),'结果说明',null),
+        if(t.workflow_status='ACTIVE' and coalesce(t.result_status,'DOING')&lt;&gt;'UNDONE' and not exists(select 1 from lab_task_evidence pe where pe.task_id=t.id and pe.del_flag='0'),'交付证据',null),
+        if(t.workflow_status='ACTIVE' and coalesce(t.result_status,'DOING')='UNDONE' and (t.fail_reason is null or trim(t.fail_reason)=''),'未完成原因',null),
+        if(t.workflow_status='ACTIVE' and coalesce(t.result_status,'DOING')='UNDONE' and (t.next_action is null or trim(t.next_action)=''),'下一步行动',null),
+        if(t.coordination_required='1' and t.coordination_owner_id is null,'协同负责人',null),
+        if(t.coordination_required='1' and t.coordination_dept_id is null,'协同部门',null),
+        if(t.coordination_required='1' and (t.coordination_content is null or trim(t.coordination_content)=''),'协同内容',null),
+        if(t.coordination_required='1' and (t.coordination_support is null or trim(t.coordination_support)=''),'所需支持',null))
+    </sql>
+    <sql id="pendingFieldPredicate">
+        (t.plan_date is null or t.deliverable is null or trim(t.deliverable)=''
+        or (t.workflow_status='ACTIVE' and coalesce(t.result_status,'DOING')&lt;&gt;'UNDONE'
+            and (t.actual_finish_time is null or t.result_desc is null or trim(t.result_desc)=''
+                or not exists(select 1 from lab_task_evidence pe where pe.task_id=t.id and pe.del_flag='0')))
+        or (t.workflow_status='ACTIVE' and coalesce(t.result_status,'DOING')='UNDONE'
+            and (t.fail_reason is null or trim(t.fail_reason)='' or t.next_action is null or trim(t.next_action)=''))
+        or (t.coordination_required='1' and (t.coordination_owner_id is null or t.coordination_dept_id is null
+            or t.coordination_content is null or trim(t.coordination_content)=''
+            or t.coordination_support is null or trim(t.coordination_support)='')))
+    </sql>
+    <sql id="pendingTaskPredicate">
+        t.period=#{period} and t.workflow_status in ('DRAFT','ACTIVE') and t.period_lock_flag='0' and t.del_flag='0'
+        and not exists(select 1 from lab_period_close pc where pc.period=t.period and pc.close_status='CLOSED' and pc.del_flag='0')
+        and <include refid="pendingFieldPredicate"/>
+    </sql>
+    <select id="selectPendingTaskReminderCandidates" resultMap="ReminderCandidateResult">
+        select t.id task_id,t.title task_title,null episode_no,null block_start_time,t.owner_id recipient_id,'OWNER' audience,
+        <include refid="pendingMissingExpression"/> missing_fields,t.period
+        from lab_task t join lab_member owner on owner.id=t.owner_id and owner.member_status='ACTIVE' and owner.del_flag='0'
+        join sys_user owner_user on owner_user.user_id=owner.user_id and owner_user.status='0' and owner_user.del_flag='0'
+        where <include refid="pendingTaskPredicate"/>
+        union all
+        select t.id,t.title,null,null,manager_member.id,'MANAGER',<include refid="pendingMissingExpression"/>,t.period
+        from lab_task t
+        join sys_role manager_role on manager_role.role_key='lab_manager' and manager_role.status='0' and manager_role.del_flag='0'
+        join sys_user_role manager_link on manager_link.role_id=manager_role.role_id
+        join sys_user manager_user on manager_user.user_id=manager_link.user_id and manager_user.status='0' and manager_user.del_flag='0'
+        join lab_member manager_member on manager_member.user_id=manager_user.user_id and manager_member.member_status='ACTIVE' and manager_member.del_flag='0'
+        where #{managerEscalation}=true and <include refid="pendingTaskPredicate"/>
+        order by task_id,recipient_id,audience
+    </select>
+
+    <insert id="insertReminderIfAbsent" parameterType="com.ailab.system.domain.LabReminder" useGeneratedKeys="true" keyProperty="id">
+        insert ignore into lab_reminder(task_id,business_type,business_id,episode_no,recipient_id,reminder_type,reminder_level,reminder_date,title,
+        reminder_content,read_flag,read_time,send_time,idempotency_key,version,del_flag,create_by,create_time,remark)
+        values(#{taskId},#{businessType},#{businessId},#{episodeNo},#{recipientId},#{reminderType},#{reminderLevel},#{reminderDate},#{title},
+        #{reminderContent},#{readFlag},#{readTime},#{sendTime},#{idempotencyKey},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <select id="selectReminderList" resultMap="ReminderResult">
+        select r.id,r.task_id,r.business_type,r.business_id,r.episode_no,r.recipient_id,r.reminder_type,r.reminder_level,r.reminder_date,
+        r.title,r.reminder_content,r.read_flag,r.read_time,r.send_time,r.idempotency_key,r.version,r.del_flag,r.create_by,r.create_time,
+        r.update_by,r.update_time,r.remark
+        from lab_reminder r join lab_member recipient on recipient.id=r.recipient_id and recipient.del_flag='0'
+        where r.del_flag='0'
+        <choose>
+            <when test="scope.roleKey == 'lab_lead'">and recipient.biz_line=#{scope.bizLine}</when>
+            <when test="scope.roleKey == 'lab_member'">and r.recipient_id=#{scope.memberId}</when>
+        </choose>
+        <if test="unreadOnly != null and unreadOnly">and r.read_flag='0'</if>
+        order by r.read_flag,r.reminder_date desc,r.id desc
+    </select>
+    <update id="markReminderRead">
+        update lab_reminder set read_flag='1',read_time=#{readTime},update_by=#{actor},update_time=sysdate(),version=version+1
+        where id=#{id} and recipient_id=#{recipientId} and version=#{version} and read_flag='0' and del_flag='0'
+    </update>
+    <update id="markAllRemindersRead">
+        update lab_reminder set read_flag='1',read_time=#{readTime},update_by=#{actor},update_time=sysdate(),version=version+1
+        where recipient_id=#{recipientId} and read_flag='0' and del_flag='0'
+    </update>
+
+    <select id="selectGoalHealthFacts" resultMap="GoalHealthFactResult">
+        select g.id goal_id,g.title goal_title,g.year,
+        coalesce(sum(case when t.task_level='month' and t.task_type='key' and t.plan_date&lt;=date(#{asOf}) then t.goal_weight*milestone.weight/100 else 0 end),0) expected_progress,
+        coalesce(sum(case when t.task_level='month' and t.task_type='key' and t.workflow_status='CONFIRMED'
+            and t.result_status in ('EXCEEDED','ONTIME','DELAYED') then t.goal_weight*milestone.weight/100 else 0 end),0) actual_progress,
+        coalesce(max(case when blocks.block_start_time is not null then datediff(date(#{asOf}),date(blocks.block_start_time)) else 0 end),0) max_open_block_days,
+        max(case when t.task_level='month' and t.task_type='key' and t.result_status='DELAYED' then 1 else 0 end) delayed_focus_task,
+        max(case when t.task_level='month' and t.task_type='key' and t.plan_date&lt;date(#{asOf}) and t.workflow_status in ('DRAFT','ACTIVE') then 1 else 0 end) overdue_unsubmitted_focus_task
+        from lab_goal g
+        left join lab_task t on t.goal_id=g.id and t.del_flag='0'
+        left join lab_goal milestone on milestone.id=t.milestone_id and milestone.parent_id=g.id and milestone.goal_level='QUARTER' and milestone.del_flag='0'
+        left join (select task_id,min(block_start_time) block_start_time from lab_task_block_event where block_status='OPEN' and del_flag='0' group by task_id) blocks on blocks.task_id=t.id
+        where g.goal_level='YEAR' and g.year=#{year} and g.status='ACTIVE' and g.del_flag='0'
+        group by g.id,g.title,g.year order by g.id
+    </select>
+    <select id="selectGoalProgressTrend" resultMap="GoalTrendResult">
+        select monthly.period,
+        round(sum(monthly.expected_delta) over(order by monthly.period),2) expected_progress,
+        round(sum(monthly.actual_delta) over(order by monthly.period),2) actual_progress
+        from (
+            select t.period,
+            sum(t.goal_weight*milestone.weight/100) expected_delta,
+            sum(case when t.workflow_status='CONFIRMED' and t.result_status in ('EXCEEDED','ONTIME','DELAYED')
+                then t.goal_weight*milestone.weight/100 else 0 end) actual_delta
+            from lab_task t join lab_goal annual on annual.id=t.goal_id and annual.goal_level='YEAR' and annual.year=#{year} and annual.status='ACTIVE' and annual.del_flag='0'
+            join lab_goal milestone on milestone.id=t.milestone_id and milestone.parent_id=annual.id and milestone.goal_level='QUARTER' and milestone.del_flag='0'
+            where t.task_level='month' and t.task_type='key' and t.del_flag='0'
+            group by t.period
+        ) monthly order by monthly.period
+    </select>
+
+    <select id="selectKpiFact" resultMap="KpiFactResult">
+        select
+        (select coalesce(round(100*sum(case when t.workflow_status='CONFIRMED' and t.result_status in ('EXCEEDED','ONTIME','DELAYED') then t.perf_weight else 0 end)
+            /nullif(sum(t.perf_weight),0),2),0) from lab_task t where t.period=#{period} and t.task_level='month' and t.task_type='key' and t.del_flag='0' <include refid="taskScope"/>) key_task_completion_rate,
+        (select count(1) from lab_task t where t.period=#{period} and t.workflow_status in ('DRAFT','ACTIVE') and t.period_lock_flag='0' and t.del_flag='0'
+            and (t.plan_date&lt;date(#{asOf}) or <include refid="pendingFieldPredicate"/>)
+            <include refid="taskScope"/>) overdue_or_pending_count,
+        (select count(1) from lab_task t join lab_task_block_event be on be.task_id=t.id and be.block_status='OPEN' and be.del_flag='0'
+            where t.period=#{period} and t.current_block_flag='1' and t.del_flag='0' and datediff(date(#{asOf}),date(be.block_start_time))&gt;=7 <include refid="taskScope"/>) blocked_over_seven_count,
+        (select count(1) from lab_asset a join lab_member asset_owner on asset_owner.id=a.primary_owner_id and asset_owner.del_flag='0'
+            where a.status='ACTIVE' and a.del_flag='0' and (a.backup_owner_id is null or not exists(select 1 from lab_member backup where backup.id=a.backup_owner_id and backup.member_status='ACTIVE' and backup.del_flag='0'))
+            and (#{scope.roleKey}='lab_manager' or (#{scope.roleKey}='lab_lead' and asset_owner.biz_line=#{scope.bizLine}) or (#{scope.roleKey}='lab_member' and a.primary_owner_id=#{scope.memberId}))) assets_without_backup_count
+    </select>
+    <select id="selectTaskStatusDistribution" resultMap="CountResult">
+        select t.workflow_status code,t.workflow_status name,count(1) item_count from lab_task t
+        where t.period=#{period} and t.del_flag='0' <include refid="taskScope"/>
+        group by t.workflow_status order by t.workflow_status
+    </select>
+    <select id="selectMemberLoads" resultMap="MemberLoadResult">
+        select m.id member_id,u.nick_name member_name,m.biz_line,
+        coalesce(sum(case when t.period=#{period} and t.task_level='month' and t.task_type='key' then t.perf_weight else 0 end),0) key_task_weight,
+        sum(case when t.period=#{period} and t.workflow_status='ACTIVE' then 1 else 0 end) active_task_count,
+        sum(case when t.task_level='week' and t.plan_date between date(#{twoWeekStart}) and date(#{asOf}) then 1 else 0 end) recent_week_task_count,
+        sum(case when t.period=#{period} and t.plan_date&lt;date(#{asOf}) and t.workflow_status in ('DRAFT','ACTIVE') then 1 else 0 end) overdue_count,
+        sum(case when t.period=#{period} and t.current_block_flag='1' then 1 else 0 end) blocked_count,
+        sum(case when t.period=#{period} and t.coordination_required='1' and t.workflow_status in ('DRAFT','ACTIVE') then 1 else 0 end) coordination_count
+        from lab_member m join sys_user u on u.user_id=m.user_id and u.status='0' and u.del_flag='0'
+        left join lab_task t on t.owner_id=m.id and t.del_flag='0'
+        where m.member_status='ACTIVE' and m.del_flag='0'
+        <if test="scope.roleKey == 'lab_lead'">and m.biz_line=#{scope.bizLine}</if>
+        group by m.id,u.nick_name,m.biz_line order by m.biz_line,m.id
+    </select>
+    <select id="selectCoordinationItems" resultMap="ActionResult">
+        select t.id,'TASK' item_type,t.title,t.workflow_status item_status,t.plan_date due_date from lab_task t
+        where t.period=#{period} and t.coordination_required='1' and t.workflow_status in ('DRAFT','ACTIVE') and t.del_flag='0'
+        <include refid="taskScope"/> order by t.plan_date,t.id limit 50
+    </select>
+    <select id="selectRecentIpr" resultMap="ActionResult">
+        select i.id,'IPR' item_type,i.ipr_name title,i.ipr_stage item_status,i.planned_submit_date due_date
+        from lab_ipr i where i.status='ACTIVE' and i.del_flag='0' and i.planned_submit_date between date_sub(date(#{asOf}),interval 30 day) and date_add(date(#{asOf}),interval 90 day)
+        order by i.planned_submit_date,i.id limit 20
+    </select>
+    <select id="selectRecentReports" resultMap="ActionResult">
+        select ri.id,'REPORT' item_type,ri.report_no title,
+        concat(ri.lifecycle_status,'/',ri.json_status,'/',ri.markdown_status,'/',ri.word_status,'/',ri.pdf_status) item_status,coalesce(ri.update_time,ri.create_time) due_date
+        from lab_report_instance ri where ri.period=#{period} and ri.del_flag='0'
+        and (#{scope.roleKey}='lab_manager' or (ri.lifecycle_status in ('FINALIZED','SUPERSEDED') and ri.sensitive_flag='0'))
+        order by coalesce(ri.update_time,ri.create_time) desc,ri.id desc limit 20
+    </select>
+    <select id="selectLatestReport" resultMap="ActionResult">
+        select ri.id,'REPORT' item_type,ri.report_no title,
+        concat(ri.lifecycle_status,'/',ri.json_status,'/',ri.markdown_status,'/',ri.word_status,'/',ri.pdf_status) item_status,coalesce(ri.update_time,ri.create_time) due_date
+        from lab_report_instance ri where ri.period=#{period} and ri.del_flag='0'
+        and (#{scope.roleKey}='lab_manager' or (ri.lifecycle_status in ('FINALIZED','SUPERSEDED') and ri.sensitive_flag='0'))
+        order by coalesce(ri.update_time,ri.create_time) desc,ri.id desc limit 1
+    </select>
+    <select id="selectPerformanceSummary" resultMap="CountResult">
+        select p.result_status code,p.result_status name,count(1) item_count from lab_perf_score p
+        where p.period=#{period} and p.current_flag='1' and p.del_flag='0' and #{scope.roleKey}='lab_manager'
+        group by p.result_status order by p.result_status
+    </select>
+    <select id="selectActiveManagerUserIds" resultType="long">
+        select distinct u.user_id from sys_user u join sys_user_role ur on ur.user_id=u.user_id
+        join sys_role r on r.role_id=ur.role_id and r.role_key='lab_manager' and r.status='0' and r.del_flag='0'
+        join lab_member m on m.user_id=u.user_id and m.member_status='ACTIVE' and m.del_flag='0'
+        where u.status='0' and u.del_flag='0' order by u.user_id
+    </select>
+</mapper>

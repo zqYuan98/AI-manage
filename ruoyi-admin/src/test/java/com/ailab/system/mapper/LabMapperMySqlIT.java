@@ -17,7 +17,9 @@ import com.ailab.system.domain.LabTask;
 import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.domain.LabPerfScore;
 import com.ailab.system.domain.LabCollaborationRecord;
+import com.ailab.system.domain.LabReminder;
 import com.ailab.system.dto.CollaborationReviewCommand;
+import com.ailab.system.dto.DashboardOverview;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.PerformanceAssetFact;
 import com.ailab.system.dto.PerformanceCalculationInput;
@@ -31,6 +33,8 @@ import com.ailab.system.service.LabMemberService;
 import com.ailab.system.service.LabPerformanceCalculator;
 import com.ailab.system.service.LabTaskService;
 import com.ailab.system.service.LabPerformanceService;
+import com.ailab.system.service.LabDashboardService;
+import com.ailab.system.service.LabReminderService;
 import com.ruoyi.RuoYiApplication;
 import com.ruoyi.common.core.domain.entity.SysRole;
 import com.ruoyi.common.core.domain.entity.SysUser;
@@ -90,8 +94,53 @@ class LabMapperMySqlIT {
     @Autowired private LabAccessService accessService;
     @Autowired private LabPerformanceMapper performanceMapper;
     @Autowired private LabPerformanceService performanceService;
+    @Autowired private LabDashboardMapper dashboardMapper;
+    @Autowired private LabDashboardService dashboardService;
+    @Autowired private LabReminderService reminderService;
     @Autowired private ISysUserService userService;
     @Autowired private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void remindersDashboardScopeAndAggregatesUseRealMySqlContracts() {
+        long taskId = 39890L;
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,result_desc,coordination_required,coordination_owner_id,current_block_flag,current_block_start,period_lock_flag,version,del_flag,create_by,create_time) values(?,0,39001,39002,'month','2026-08','algorithm','key','IT dashboard blocked task',39203,101,current_date,'IT artifact',20,10,'ACTIVE','DOING','working','1',39202,'1',date_sub(now(),interval 14 day),'0',0,'0','it',now())", taskId);
+        jdbcTemplate.update("insert into lab_task_block_event(task_id,episode_no,block_type,block_reason,block_start_time,block_status,del_flag,create_by,create_time) values(?,1,'DEPENDENCY','IT blocker',date_sub(now(),interval 14 day),'OPEN','0','it',now())", taskId);
+
+        int first = reminderService.scanBlocks();
+        int second = reminderService.scanBlocks();
+        assertTrue(first >= 2, "14-day episode must create owner/coordination warnings and manager critical reminders");
+        assertEquals(0, second, "same date/episode/recipient/level must be idempotent");
+        assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=? and episode_no=1 and recipient_id=39203 and reminder_level='WARNING' and del_flag='0'", Integer.class, taskId));
+        assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=? and episode_no=1 and recipient_id=39201 and reminder_level='CRITICAL' and del_flag='0'", Integer.class, taskId));
+
+        LabReminder ownerReminder = dashboardMapper.selectReminderList(accessService.context(39103L), true).stream()
+                .filter(reminder -> Long.valueOf(taskId).equals(reminder.getTaskId())).findFirst().orElseThrow(() -> new AssertionError("owner reminder missing"));
+        assertThrows(ServiceException.class, () -> reminderService.markRead(ownerReminder.getId(), ownerReminder.getVersion(), 39101L),
+                "manager cannot mark another recipient's notification read");
+        reminderService.markRead(ownerReminder.getId(), ownerReminder.getVersion(), 39103L);
+        assertEquals("1", jdbcTemplate.queryForObject("select read_flag from lab_reminder where id=?", String.class, ownerReminder.getId()));
+
+        jdbcTemplate.update("update lab_task_block_event set block_status='CLOSED',block_end_time=now() where task_id=? and episode_no=1", taskId);
+        jdbcTemplate.update("update lab_task set current_block_flag='0',current_block_start=null where id=?", taskId);
+        int beforeResolvedScan = jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=?", Integer.class, taskId);
+        reminderService.scanBlocks();
+        assertEquals(beforeResolvedScan, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=?", Integer.class, taskId));
+
+        jdbcTemplate.update("update lab_task set current_block_flag='1',current_block_start=date_sub(now(),interval 7 day) where id=?", taskId);
+        jdbcTemplate.update("insert into lab_task_block_event(task_id,episode_no,block_type,block_reason,block_start_time,block_status,del_flag,create_by,create_time) values(?,2,'DEPENDENCY','new IT blocker',date_sub(now(),interval 7 day),'OPEN','0','it',now())", taskId);
+        reminderService.scanBlocks();
+        assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=? and episode_no=2 and recipient_id=39203 and reminder_level='WARNING' and del_flag='0'", Integer.class, taskId));
+
+        DashboardOverview manager = dashboardService.getOverview("2026-08", 39101L);
+        DashboardOverview lead = dashboardService.getOverview("2026-08", 39102L);
+        DashboardOverview member = dashboardService.getOverview("2026-08", 39103L);
+        assertEquals(5, manager.getKpis().size());
+        assertTrue(manager.getMemberLoads().size() >= lead.getMemberLoads().size());
+        assertTrue(lead.getMemberLoads().stream().allMatch(load -> "algorithm".equals(load.getBizLine())));
+        assertTrue(member.getMemberLoads().isEmpty() && member.getRecentReports().isEmpty() && member.getPerformanceSummary().isEmpty());
+        assertTrue(manager.getTaskStatusDistribution().stream().anyMatch(item -> "ACTIVE".equals(item.getCode())));
+        assertEquals(taskId, manager.getCoordinationItems().stream().filter(item -> Long.valueOf(taskId).equals(item.getId())).findFirst().orElseThrow(() -> new AssertionError("coordination item missing")).getId().longValue());
+    }
 
     @AfterEach
     void clearSecurityContext() { SecurityContextHolder.clearContext(); }
