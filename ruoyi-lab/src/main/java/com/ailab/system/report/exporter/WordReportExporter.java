@@ -57,6 +57,7 @@ public final class WordReportExporter implements ReportExporter {
     @Override public byte[] export(ReportData data) throws IOException {
         if (data == null) throw new IllegalArgumentException("report data is required");
         if (data.getSections().size() > MAX_SECTIONS) throw new ReportExportException("DOCX section limit exceeded", false);
+        preflight(data);
         try (XWPFDocument document = new XWPFDocument()) {
             document.getProperties().getCoreProperties().setTitle("人工智能实验室月报");
             document.getProperties().getCoreProperties().setCreator("AI Lab");
@@ -67,7 +68,7 @@ public final class WordReportExporter implements ReportExporter {
             paragraph(document, data.getContext().getPeriod() + " · " + data.getContext().getBizLine(), "ReportBody", ParagraphAlignment.CENTER, false);
             Limits limits = new Limits();
             for (ReportSectionData section : data.getSections()) render(document, section, limits);
-            ByteArrayOutputStream raw = new ByteArrayOutputStream(); document.write(raw);
+            ByteArrayOutputStream raw = new ByteArrayOutputStream(); document.write(new BoundedOutputStream(raw, MAX_OUTPUT));
             byte[] stable = normalizeZip(raw.toByteArray());
             if (stable.length > MAX_OUTPUT) throw new ReportExportException("DOCX output byte limit exceeded", false);
             return stable;
@@ -144,7 +145,7 @@ public final class WordReportExporter implements ReportExporter {
         java.util.LinkedHashMap<String,Object> summary = new java.util.LinkedHashMap<String,Object>(); summary.put("headers", java.util.Arrays.asList("分类", "数值")); summary.put("alignments", java.util.Arrays.asList("left", "right")); table(document, new ReportSectionData(section.getSectionCode(), "TABLE", section.getTitle(), rows, summary), limits);
     }
     private void run(XWPFParagraph paragraph, String value, double points, boolean bold) { XWPFRun run = paragraph.createRun(); fonts(run, points, bold); run.setText(value == null || value.length() == 0 ? "暂无数据" : value); }
-    private void fonts(XWPFRun run, double points, boolean bold) { run.setFontFamily(FONT); run.setFontSize((int) Math.floor(points)); run.setBold(bold); run.getCTR().getRPr().addNewRFonts().setEastAsia(FONT); CTHpsMeasure size = run.getCTR().getRPr().addNewSz(); size.setVal(BigInteger.valueOf(Math.round(points * 2))); }
+    private void fonts(XWPFRun run, double points, boolean bold) { org.openxmlformats.schemas.wordprocessingml.x2006.main.CTRPr props = run.getCTR().isSetRPr() ? run.getCTR().getRPr() : run.getCTR().addNewRPr(); CTFonts fonts = props.isSetRFonts() ? props.getRFonts() : props.addNewRFonts(); fonts.setAscii(FONT); fonts.setHAnsi(FONT); fonts.setEastAsia(FONT); CTHpsMeasure size = props.isSetSz() ? props.getSz() : props.addNewSz(); size.setVal(BigInteger.valueOf(Math.round(points * 2))); CTHpsMeasure complex = props.isSetSzCs() ? props.getSzCs() : props.addNewSzCs(); complex.setVal(BigInteger.valueOf(Math.round(points * 2))); if (bold && !props.isSetB()) props.addNewB(); }
     private void margins(XWPFTableCell cell) {
         XmlCursor cursor = cell.getCTTc().getTcPr().newCursor(); try {
             cursor.toEndToken(); cursor.beginElement(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "tcMar", "w"));
@@ -158,6 +159,11 @@ public final class WordReportExporter implements ReportExporter {
     private String safe(String value) throws IOException { return safe(value, new Limits()); }
     private String safe(String value, Limits limits) throws IOException { String cleaned = value == null ? "暂无数据" : value.replace('\u0000', ' '); limits.text += cleaned.length(); if (limits.text > MAX_TEXT) throw new ReportExportException("DOCX text limit exceeded", false); return cleaned; }
     private static final class Limits { int rows, cells, text; }
+
+    private void preflight(ReportData data) throws IOException { Limits limits = new Limits(); addText(limits, "人工智能实验室月报"); addText(limits, data.getContext().getPeriod()); addText(limits, data.getContext().getBizLine()); for (ReportSectionData section : data.getSections()) { addText(limits, section.getTitle()); for (Map<String,Object> row : section.getRows()) { if (++limits.rows > MAX_ROWS) throw new ReportExportException("DOCX row limit exceeded", false); for (Map.Entry<String,Object> entry : row.entrySet()) { if (++limits.cells > MAX_CELLS) throw new ReportExportException("DOCX cell limit exceeded", false); addText(limits, entry.getKey()); addText(limits, text(entry.getValue())); } } scan(limits, section.getSummary()); } }
+    private void scan(Limits limits, Object value) throws IOException { if (value == null) return; if (value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character) { addText(limits, String.valueOf(value)); return; } if (value instanceof Map) { for (Map.Entry<?,?> entry : ((Map<?,?>) value).entrySet()) { addText(limits, String.valueOf(entry.getKey())); scan(limits, entry.getValue()); } return; } if (value instanceof Iterable) for (Object item : (Iterable<?>) value) scan(limits, item); }
+    private void addText(Limits limits, String value) throws IOException { int bytes = (value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length); limits.text += bytes; if (limits.text > MAX_TEXT) throw new ReportExportException("DOCX text limit exceeded", false); }
+    private static final class BoundedOutputStream extends java.io.OutputStream { private final java.io.OutputStream target; private final int maximum; private int size; BoundedOutputStream(java.io.OutputStream target,int maximum){this.target=target;this.maximum=maximum;} @Override public void write(int value)throws IOException{check(1);target.write(value);} @Override public void write(byte[] value,int offset,int length)throws IOException{check(length);target.write(value,offset,length);} private void check(int count)throws IOException{if(count>maximum-size)throw new ReportExportException("DOCX output byte limit exceeded",false);size+=count;} }
 
     private byte[] png(Object raw) throws IOException {
         if (!(raw instanceof String) || ((String) raw).length() > 700000) return null; try { byte[] bytes = Base64.getDecoder().decode((String) raw); if (bytes.length > MAX_IMAGE || !pngStructure(bytes)) return null; BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes)); return image != null && image.getWidth() == 640 && image.getHeight() == 320 ? bytes : null; } catch (IllegalArgumentException ex) { return null; }
