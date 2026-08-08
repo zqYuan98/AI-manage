@@ -2,6 +2,8 @@ package com.ailab.system.report.model;
 
 import com.ailab.system.report.exporter.JsonReportExporter;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
@@ -17,6 +19,7 @@ import java.util.Map;
 @org.springframework.stereotype.Component
 public final class ReportDataCodec {
     private static final int MAX_BYTES = 2 * 1024 * 1024;
+    private static final int MAX_JSON_DEPTH = 64, MAX_JSON_TOKENS = 100000, MAX_STRING_CHARS = 262144, MAX_TOTAL_STRING_CHARS = 1048576;
     private static final ObjectMapper JSON = new ObjectMapper();
 
     public String encode(ReportData data) {
@@ -29,6 +32,7 @@ public final class ReportDataCodec {
             throw new IllegalArgumentException("Report data JSON is missing or too large");
         }
         try {
+            validateJsonStream(source, "report data");
             JsonNode root = JSON.readTree(source); requiredObject(root, "report data");
             JsonNode contextNode = root.get("context"); requiredObject(contextNode, "report context");
             String period = text(contextNode, "period"); String bizLine = text(contextNode, "bizLine");
@@ -66,6 +70,7 @@ public final class ReportDataCodec {
     public List<ReportPerformancePin> decodePerformancePins(String source) {
         if (source == null || source.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) throw new IllegalArgumentException("Performance snapshot is missing or too large");
         try {
+            validateJsonStream(source,"performance snapshot");
             JsonNode root=JSON.readTree(source);requiredObject(root,"performance snapshot");
             if(root.size()==1&&root.has("performanceRevision")&&root.get("performanceRevision").canConvertToInt())return null;
             if(root.size()!=1||!root.has("performancePins")||!root.get("performancePins").isArray()||root.get("performancePins").size()>5000)throw new IllegalArgumentException("Invalid performance snapshot");
@@ -80,7 +85,7 @@ public final class ReportDataCodec {
 
     public Map<String,Object> decodeObject(String source, String name) {
         if (source == null || source.getBytes(StandardCharsets.UTF_8).length > 32000) throw new IllegalArgumentException(name + " is missing or too large");
-        try { JsonNode root=JSON.readTree(source);requiredObject(root,name);return object(root); }
+        try { validateJsonStream(source,name);JsonNode root=JSON.readTree(source);requiredObject(root,name);return object(root); }
         catch(IOException ex){throw new IllegalArgumentException("Invalid " + name,ex);}
     }
 
@@ -96,5 +101,14 @@ public final class ReportDataCodec {
     }
     private static void requiredObject(JsonNode node, String name) {
         if (node == null || !node.isObject()) throw new IllegalArgumentException("Invalid " + name);
+    }
+    private static void validateJsonStream(String source,String name) throws IOException {
+        JsonParser parser=JSON.getFactory().createParser(source);int depth=0,tokens=0,totalStrings=0;
+        try{JsonToken token;while((token=parser.nextToken())!=null){
+            if(++tokens>MAX_JSON_TOKENS)throw new IllegalArgumentException(name+" exceeds JSON token limit");
+            if(token==JsonToken.START_OBJECT||token==JsonToken.START_ARRAY){if(++depth>MAX_JSON_DEPTH)throw new IllegalArgumentException(name+" exceeds JSON depth limit");}
+            else if(token==JsonToken.END_OBJECT||token==JsonToken.END_ARRAY)depth--;
+            if(token==JsonToken.FIELD_NAME||token==JsonToken.VALUE_STRING){int length=parser.getTextLength();if(length>MAX_STRING_CHARS||(totalStrings+=length)>MAX_TOTAL_STRING_CHARS)throw new IllegalArgumentException(name+" exceeds JSON string limit");}
+        }}finally{parser.close();}
     }
 }

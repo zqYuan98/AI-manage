@@ -38,7 +38,11 @@ public final class ReportConfigValidator {
         if ("MANUAL".equals(section.getSectionType())) { if (provider != null && !provider.trim().isEmpty()) throw invalid("MANUAL sections cannot have a provider"); }
         else if (provider == null || !ReportConfigCatalog.compatibleProviders(section.getSectionType()).contains(provider)) throw invalid("Provider is not compatible with section type");
         validateQuery(parse(section.getQueryConfigJson(), "query configuration"));
-        validateRender(parse(section.getRenderConfigJson(), "render configuration"));
+        JsonNode render=parse(section.getRenderConfigJson(), "render configuration");validateRender(render);
+        if("MANUAL".equals(section.getSectionType())){
+            if(!"1".equals(section.getManualFlag())||!render.has("required")||!render.get("required").isBoolean())throw invalid("MANUAL sections must declare a boolean required setting");
+            if(!render.get("required").booleanValue()&&(!render.has("placeholder")||!render.get("placeholder").isTextual()||render.get("placeholder").asText().trim().isEmpty()))throw invalid("Optional MANUAL sections require a placeholder");
+        }
         validateSectionStyle(parse(section.getStyleConfigJson(), "section style configuration"));
         if (section.getSensitivePermission() != null && section.getSensitivePermission().length() > 128) throw invalid("Invalid sensitive permission");
         if (sensitive(section)) {
@@ -74,6 +78,7 @@ public final class ReportConfigValidator {
     private ReportSectionConfig validateSerialized(String input) {
         JsonNode root = parse(input, "section"); requireObject(root, "section"); assertOnly(root, set("sectionType", "dataSource", "queryConfig", "renderConfig", "styleConfig", "sensitivePermission"), "section");
         LabReportSection section = new LabReportSection(); section.setSectionType(text(root, "sectionType", true)); section.setDataSource(text(root, "dataSource", false));
+        section.setManualFlag("MANUAL".equals(section.getSectionType()) ? "1" : "0");
         section.setQueryConfigJson(root.has("queryConfig") ? root.get("queryConfig").toString() : "{}"); section.setRenderConfigJson(root.has("renderConfig") ? root.get("renderConfig").toString() : "{}"); section.setStyleConfigJson(root.has("styleConfig") ? root.get("styleConfig").toString() : "{}"); section.setSensitivePermission(text(root, "sensitivePermission", false)); validateSection(section);
         return new ReportSectionConfig(section);
     }
@@ -121,10 +126,11 @@ public final class ReportConfigValidator {
         if (!"BETWEEN".equals(operator) && !"IN".equals(operator) && !scalar(value)) throw invalid("Scalar operator requires a scalar value");
     }
     private void validateRender(JsonNode node) {
-        requireObject(node, "render configuration"); assertOnly(node, set("columns", "limit", "template", "metrics", "chart", "groupBy", "placeholder"), "render configuration");
+        requireObject(node, "render configuration"); assertOnly(node, set("columns", "limit", "template", "metrics", "chart", "groupBy", "placeholder", "required"), "render configuration");
         if (node.has("columns")) { if (!node.get("columns").isArray() || node.get("columns").size() > MAX_COLUMNS) throw invalid("Invalid columns"); for (JsonNode column : node.get("columns")) validateColumn(column); }
         if (node.has("limit") && (!integralInt(node.get("limit")) || node.get("limit").asInt() < 1 || node.get("limit").asInt() > 1000)) throw invalid("Invalid render limit");
         for (String name : Arrays.asList("template", "chart", "placeholder")) if (node.has(name) && (!node.get(name).isTextual() || node.get(name).asText().length() > MAX_STRING)) throw invalid("Invalid " + name);
+        if(node.has("required")&&!node.get("required").isBoolean())throw invalid("Invalid required setting");
         if (node.has("metrics")) { if (!node.get("metrics").isArray() || node.get("metrics").size() == 0 || node.get("metrics").size() > 10) throw invalid("Invalid metrics"); for (JsonNode metric : node.get("metrics")) if (!metric.isTextual() || metric.asText().length() > 64) throw invalid("Invalid metric"); }
         if (node.has("groupBy")) allowedField(node.get("groupBy"), "groupBy");
     }
@@ -178,7 +184,7 @@ public final class ReportConfigValidator {
     }
     private void validateJsonTokens(String source, String name) throws IOException {
         JsonParser parser = JSON.getFactory().createParser(source);
-        int depth = 0, tokens = 0;
+        int depth = 0, tokens = 0, stringChars = 0;
         try {
             JsonToken token;
             while ((token = parser.nextToken()) != null) {
@@ -187,6 +193,9 @@ public final class ReportConfigValidator {
                     if (++depth > MAX_JSON_DEPTH) throw invalid("Invalid " + name + ": nesting is too deep");
                 } else if (token == JsonToken.END_OBJECT || token == JsonToken.END_ARRAY) {
                     depth--;
+                }
+                if (token == JsonToken.FIELD_NAME || token == JsonToken.VALUE_STRING) {
+                    int length=parser.getTextLength();if(length>MAX_STRING || (stringChars+=length)>MAX_JSON_CHARS) throw invalid("Invalid " + name + ": string budget exceeded");
                 }
             }
         } finally {

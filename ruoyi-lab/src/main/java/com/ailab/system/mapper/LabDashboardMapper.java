@@ -40,8 +40,9 @@ public interface LabDashboardMapper {
             @Param("scope") LabAccessContext scope);
     List<DashboardActionItem> selectRecentIpr(@Param("asOf") Date asOf, @Param("scope") LabAccessContext scope);
     List<DashboardActionItem> selectRecentReports(@Param("period") String period,
-            @Param("scope") LabAccessContext scope);
-    DashboardActionItem selectLatestReport(@Param("period") String period, @Param("scope") LabAccessContext scope);
+            @Param("scope") LabAccessContext scope,@Param("sensitive") boolean sensitive);
+    DashboardActionItem selectLatestReport(@Param("period") String period, @Param("scope") LabAccessContext scope,
+            @Param("sensitive") boolean sensitive);
     List<DashboardCountItem> selectPerformanceSummary(@Param("period") String period,
             @Param("scope") LabAccessContext scope);
     List<Long> selectActiveManagerUserIds();

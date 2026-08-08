@@ -14,6 +14,7 @@ import com.ailab.system.mapper.LabDashboardMapper;
 import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.LabDashboardService;
 import com.ruoyi.common.exception.ServiceException;
+import com.ruoyi.system.service.ISysMenuService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -39,14 +40,18 @@ public class LabDashboardServiceImpl implements LabDashboardService {
     private static final String HEALTH_DEFINITION = "期望进度为截至口径日期计划到期子项权重累计；实际进度按已确认月任务结果或执行中月任务的已确认周任务完成比例计算，再按目标与季度权重聚合；风险颜色取最严重值";
     private final LabDashboardMapper mapper;
     private final LabAccessService access;
+    private final ISysMenuService menus;
     private final Clock clock;
 
     @Autowired
-    public LabDashboardServiceImpl(LabDashboardMapper mapper, LabAccessService access) {
-        this(mapper, access, Clock.system(ZoneId.of("Asia/Shanghai")));
+    public LabDashboardServiceImpl(LabDashboardMapper mapper, LabAccessService access,ISysMenuService menus) {
+        this(mapper, access,menus, Clock.system(ZoneId.of("Asia/Shanghai")));
     }
     public LabDashboardServiceImpl(LabDashboardMapper mapper, LabAccessService access, Clock clock) {
-        this.mapper = mapper; this.access = access; this.clock = clock;
+        this(mapper,access,null,clock);
+    }
+    public LabDashboardServiceImpl(LabDashboardMapper mapper, LabAccessService access,ISysMenuService menus, Clock clock) {
+        this.mapper = mapper; this.access = access;this.menus=menus; this.clock = clock;
     }
 
     @Override
@@ -54,6 +59,7 @@ public class LabDashboardServiceImpl implements LabDashboardService {
     public DashboardOverview getOverview(String period, Long actorUserId) {
         YearMonth requestedMonth = requireMonth(period);
         LabAccessContext scope = access.context(actorUserId);
+        java.util.Set<String> permissions=menus==null?Collections.<String>emptySet():menus.selectMenuPermsByUserId(actorUserId);boolean sensitive=permissions!=null&&permissions.contains("lab:report:sensitive");
         Date now = Date.from(clock.instant());
         LocalDate localToday = LocalDate.now(clock);
         boolean historical = requestedMonth.isBefore(YearMonth.from(localToday));
@@ -86,9 +92,9 @@ public class LabDashboardServiceImpl implements LabDashboardService {
                 "按当前任务工作流状态计数", now, "workflowStatus"));
         result.setRecentIpr(decorateActions(safeActions(mapper.selectRecentIpr(asOf, scope)), period,
                 "按计划提交日期展示公开的知识产权基础信息", now, "status", "ACTIVE"));
-        result.setRecentReports(decorateActions(safeActions(mapper.selectRecentReports(period, scope)), period,
+        result.setRecentReports(decorateActions(safeActions(mapper.selectRecentReports(period, scope,sensitive)), period,
                 "当前周期有权读取的非敏感已定稿报告及制品状态", now, "period", period));
-        DashboardActionItem latestReport = mapper.selectLatestReport(period, scope);
+        DashboardActionItem latestReport = mapper.selectLatestReport(period, scope,sensitive);
         if (latestReport != null) {
             decorateActions(Collections.singletonList(latestReport), period,
                     "当前周期最近更新且有权读取的报告", now, "period", period);

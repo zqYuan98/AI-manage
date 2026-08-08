@@ -110,6 +110,14 @@ class LabScheduleTaskTest {
     }
 
     @Test
+    void cleanupRemovesTheEmptyOwnedLibreOfficeResidueDirectory() throws Exception {
+        Path output=Files.createDirectories(directory.resolve("reports"));Path temp=Files.createDirectories(output.resolve("tmp"));Path residue=Files.createDirectories(temp.resolve("lo-report-31-job-77-run-token-1234567890-12345").resolve("out"));Path old=Files.write(residue.resolve("report.pdf"),new byte[]{1});Instant oldTime=Instant.parse("2026-08-30T00:00:00Z");Files.setLastModifiedTime(old,FileTime.from(oldTime));Files.setLastModifiedTime(residue,FileTime.from(oldTime));Files.setLastModifiedTime(residue.getParent(),FileTime.from(oldTime));
+        LabReportTempFileEligibility eligibility=relative->relative.getName(0).toString().startsWith("lo-report-31-job-77-");LabScheduleTask task=new LabScheduleTask(reminders,performance,mapper,properties(output,temp),Clock.fixed(Instant.parse("2026-09-01T02:00:00Z"),ZoneId.of("Asia/Shanghai")),null,eligibility);
+        task.cleanReportTempFiles();
+        assertFalse(Files.exists(residue.getParent()),"terminal LibreOffice work directory should be removed, not left empty forever");
+    }
+
+    @Test
     void cleanupRejectsTempDirectoryOutsideReportRoot() throws Exception {
         Path output = Files.createDirectories(directory.resolve("reports"));
         Path outside = Files.createDirectories(directory.resolve("outside"));
@@ -117,6 +125,12 @@ class LabScheduleTaskTest {
         LabScheduleTask task = task(Clock.systemUTC(), properties(output, outside));
         assertThrows(ServiceException.class, task::cleanReportTempFiles);
         assertTrue(Files.exists(valuable));
+    }
+
+    @Test
+    void scheduledCleanupAlsoReconcilesOldUnreferencedArchiveRuns() throws Exception {
+        String source=new String(Files.readAllBytes(java.nio.file.Paths.get("src/main/java/com/ailab/system/quartz/LabScheduleTask.java")),java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(source.contains("cleanOrphanRuns")&&source.contains("selectReferencedReportArtifactPaths"),"the scheduled cleanup must reconcile conservative archive run orphans against DB references");
     }
 
     private LabScheduleTask task(Clock clock, LabProperties properties) {

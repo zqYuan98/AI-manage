@@ -98,7 +98,7 @@ public final class LibreOfficeProcessRunner {
         try {
             Path configured = Paths.get(properties.getTempDirectory()).toAbsolutePath().normalize();
             Files.createDirectories(configured);
-            root = Files.createTempDirectory(configured, "lo-").toAbsolutePath().normalize();
+            root = Files.createTempDirectory(configured, "lo-" + safeName(name) + "-").toAbsolutePath().normalize();
             requireInside(configured, root);
             Path profile = Files.createDirectory(root.resolve("profile"));
             Path input = root.resolve(safeName(name) + ".docx");

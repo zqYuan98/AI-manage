@@ -197,7 +197,13 @@ class SectionRendererContractTest {
     private ReportSectionConfig section(String type, String render) {
         LabReportSection source = new LabReportSection(); source.setSectionCode("s1"); source.setSectionName("本月进展"); source.setSectionType(type);
         source.setDataSource("MANUAL".equals(type) ? null : provider(type)); source.setSortNo(1); source.setManualFlag("MANUAL".equals(type) ? "1" : "0"); source.setVisibleFlag("1");
-        source.setQueryConfigJson("{\"filters\":[]}"); source.setRenderConfigJson(render); source.setStyleConfigJson("{\"titleLevel\":\"H2\"}");
+        source.setQueryConfigJson("{\"filters\":[]}");
+        if ("MANUAL".equals(type)) {
+            if ("{}".equals(render)) render = "{\"required\":false,\"placeholder\":\"暂无人工填写内容\"}";
+            else if (!render.contains("\"required\"")) render = "{\"required\":false," + render.substring(1);
+        }
+        source.setRenderConfigJson(render);
+        source.setStyleConfigJson("{\"titleLevel\":\"H2\"}");
         return new ReportSectionConfig(source);
     }
     private String provider(String type) { if ("TABLE".equals(type)) return "TASK_DETAIL"; if ("STAT".equals(type)) return "TASK_STAT"; if ("TEXT".equals(type) || "CHART".equals(type)) return "GOAL_PROGRESS"; return "TASK_COORD"; }

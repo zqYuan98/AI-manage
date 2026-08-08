@@ -84,7 +84,7 @@ class LabReportTemplateServiceTest {
     @Test
     void saveAsNewStartsIndependentFamilyAtRevisionOne() {
         LabReportTemplate source = template(7L, "monthly", 3, 8, "1", "1");
-        when(mapper.selectTemplateForUpdate(7L)).thenReturn(source);
+        when(mapper.selectTemplateById(7L)).thenReturn(source);when(mapper.lockTemplateType("MONTH")).thenReturn(Collections.singletonList(source));when(mapper.selectTemplateForUpdate(7L)).thenReturn(source);
         LabReportTemplate draft = template(null, "management-monthly", 9, 0, "1", "0");
 
         LabReportTemplate saved = service.saveRevision(7L, draft,
@@ -94,6 +94,50 @@ class LabReportTemplateServiceTest {
         assertNotEquals(source.getTemplateCode(), saved.getTemplateCode());
         assertEquals(1, saved.getRevisionNo());
         verify(mapper, never()).clearLatestTemplate("monthly", "1001");
+    }
+
+    @Test
+    void saveAsNewStillOptimisticallyLocksTheSourceRevision() {
+        LabReportTemplate source=template(7L,"monthly",3,9,"1","1");when(mapper.selectTemplateById(7L)).thenReturn(source);when(mapper.selectTemplateForUpdate(7L)).thenReturn(source);when(mapper.lockTemplateType("MONTH")).thenReturn(Collections.singletonList(source));
+        assertThrows(ServiceException.class,()->service.saveRevision(7L,template(null,"copy",1,0,"1","0"),Collections.singletonList(section("A")),true,8,1001L));
+        verify(mapper,never()).insertTemplate(any());
+    }
+
+    @Test
+    void saveAsNewLocksSourceAndDestinationTypesBeforeTheSourceRow() {
+        LabReportTemplate source=template(7L,"monthly",3,8,"1","1");LabReportTemplate weekly=template(null,"weekly-copy",1,0,"1","0");weekly.setPeriodType("WEEK");LabReportSection section=section("A");section.setSectionType("TABLE");section.setDataSource("TASK_DETAIL");when(mapper.selectTemplateById(7L)).thenReturn(source);when(mapper.selectTemplateForUpdate(7L)).thenReturn(source);when(mapper.lockTemplateType("MONTH")).thenReturn(Collections.singletonList(source));when(mapper.lockTemplateType("WEEK")).thenReturn(Collections.<LabReportTemplate>emptyList());
+
+        service.saveRevision(7L,weekly,Collections.singletonList(section),true,8,1001L);
+
+        InOrder ordered=inOrder(mapper);ordered.verify(mapper).selectTemplateById(7L);ordered.verify(mapper).lockTemplateType("MONTH");ordered.verify(mapper).lockTemplateType("WEEK");ordered.verify(mapper).selectTemplateForUpdate(7L);
+    }
+
+    @Test
+    void firstFamilyForAReportTypeMustBecomeItsEnabledLatestDefault() {
+        LabReportTemplate first=template(null,"weekly",1,0,"1","0");first.setPeriodType("WEEK");when(mapper.lockTemplateType("WEEK")).thenReturn(Collections.<LabReportTemplate>emptyList());LabReportSection weekly=section("A");weekly.setSectionType("TABLE");weekly.setDataSource("TASK_DETAIL");
+        LabReportTemplate saved=service.saveRevision(null,first,Collections.singletonList(weekly),true,0,1001L);
+        assertEquals("1",saved.getDefaultFlag());assertEquals("1",saved.getLatestFlag());assertEquals("ENABLED",saved.getStatus());verify(mapper).clearDefaultTemplate("WEEK",91L,"1001");
+    }
+
+    @Test
+    void firstEnabledFamilyRepairsAReportTypeThatOnlyHasDisabledFamilies() {
+        LabReportTemplate disabled=template(8L,"retired-weekly",2,3,"1","0");disabled.setPeriodType("WEEK");disabled.setStatus("DISABLED");
+        when(mapper.lockTemplateType("WEEK")).thenReturn(Collections.singletonList(disabled));
+        LabReportTemplate candidate=template(null,"new-weekly",1,0,"1","0");candidate.setPeriodType("WEEK");
+        LabReportSection weekly=section("A");weekly.setSectionType("TABLE");weekly.setDataSource("TASK_DETAIL");
+
+        LabReportTemplate saved=service.saveRevision(null,candidate,Collections.singletonList(weekly),true,0,1001L);
+
+        assertEquals("1",saved.getDefaultFlag(),"the first enabled family must repair a zero-default report type");
+        verify(mapper).clearDefaultTemplate("WEEK",91L,"1001");
+    }
+
+    @Test
+    void providerMustSupportTheTemplatePeriodAndManualCompletenessMustBeConfigured() {
+        LabReportTemplate yearly=template(null,"yearly",1,0,"1","0");yearly.setPeriodType("YEAR");LabReportSection performance=section("PERF");performance.setSectionType("STAT");performance.setDataSource("PERF_SUMMARY");
+        assertThrows(ServiceException.class,()->service.saveRevision(null,yearly,Collections.singletonList(performance),true,0,1001L));
+        LabReportSection manual=section("MANUAL");manual.setSectionType("MANUAL");manual.setDataSource(null);manual.setManualFlag("1");manual.setRenderConfigJson("{}");
+        assertThrows(ServiceException.class,()->service.saveRevision(null,template(null,"manual",1,0,"1","0"),Collections.singletonList(manual),true,0,1001L));
     }
 
     @Test
@@ -176,6 +220,16 @@ class LabReportTemplateServiceTest {
     }
 
     @Test
+    void olderSourceRevisionUsesTheCurrentLatestAsItsSecurityBaseline() {
+        LabReportTemplate oldSource=template(7L,"monthly",2,8,"0","0");LabReportTemplate latest=template(8L,"monthly",3,4,"1","0");when(mapper.selectTemplateById(7L)).thenReturn(oldSource);when(mapper.lockTemplateType("MONTH")).thenReturn(java.util.Arrays.asList(oldSource,latest));when(mapper.selectTemplateForUpdate(7L)).thenReturn(oldSource);when(mapper.selectMaxTemplateRevisionForUpdate("monthly")).thenReturn(3);
+        LabReportSection oldPublic=section("PRIVATE");when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(oldPublic));LabReportSection latestSensitive=section("PRIVATE");latestSensitive.setSensitiveFlag("1");latestSensitive.setSensitivePermission("lab:report:sensitive");when(mapper.selectSections(8L)).thenReturn(Collections.singletonList(latestSensitive));LabReportSection downgraded=section("PRIVATE");
+
+        assertThrows(IllegalStateException.class,()->service.saveRevision(7L,template(null,"monthly",4,0,"1","0"),Collections.singletonList(downgraded),false,8,1001L));
+
+        verify(mapper).selectSections(8L);verify(mapper,never()).insertTemplate(any());
+    }
+
+    @Test
     void previewIsHumanReadableMarkdownAndDoesNotExposeRawConfiguration() {
         when(mapper.selectTemplateById(7L)).thenReturn(template(7L, "monthly", 3, 8, "1", "1"));
         when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(section("DELIVERY")));
@@ -192,6 +246,8 @@ class LabReportTemplateServiceTest {
         assertTrue(LabReportTemplateServiceImpl.class
                 .getMethod("importJson", String.class, String.class, Long.class)
                 .isAnnotationPresent(Transactional.class));
+        String source=new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/java/com/ailab/system/service/impl/LabReportTemplateServiceImpl.java")),java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(source.contains("validateImportJsonStream")&&source.indexOf("validateImportJsonStream(source)")<source.indexOf("JSON.readTree(source)"),"template imports must be stream-budgeted before readTree");
     }
 
     private LabReportTemplate template(Long id, String code, int revision, int version, String latest, String defaultFlag) {

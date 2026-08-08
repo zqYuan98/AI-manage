@@ -32,8 +32,8 @@ public class ReportManualImportPersistence {
         target.setSensitiveFlag(source.getSensitiveFlag()); target.setSourceType("MANUAL_IMPORT");
         target.setSourcePerfRevision(source.getSourcePerfRevision()); target.setSourceDataJson(source.getSourceDataJson());
         target.setContentJson(contentJson); target.setContentMarkdown(markdown);
-        target.setJsonStatus("PENDING"); target.setMarkdownStatus("PENDING");
-        target.setWordStatus("PENDING"); target.setPdfStatus("PENDING");
+        target.setJsonStatus("SUCCESS"); target.setMarkdownStatus("SUCCESS");
+        target.setWordStatus("PENDING"); target.setPdfStatus("NOT_REQUESTED");
         target.setVersion(0); target.setDelFlag("0"); target.setCreateBy(String.valueOf(actorUserId));
         if (mapper.insertReportInstance(target) != 1 || target.getId() == null) {
             throw new ServiceException("Markdown import version was not created");

@@ -89,9 +89,11 @@ class MarkdownReportExporterTest {
     @Test
     void markdownRejectsOversizeInputAtTheUtf8AppendBoundary() throws Exception {
         Map<String, Object> huge = Collections.<String, Object>singletonMap("text", repeat("界", 800000));
-        ReportData oversized = new ReportData(report().getContext(), "t", 1, Collections.singletonList(new ReportSectionData("x", "TEXT", "x", Collections.<Map<String, Object>>emptyList(), huge)), Collections.<String, Object>emptyMap());
-        IOException markdown = org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () -> new MarkdownReportExporter().export(oversized));
-        assertTrue(markdown.getMessage().contains("UTF-8 byte limit"));
+        IllegalArgumentException markdown = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> new ReportData(report().getContext(), "t", 1,
+                        Collections.singletonList(new ReportSectionData("x", "TEXT", "x", Collections.<Map<String, Object>>emptyList(), huge)),
+                        Collections.<String, Object>emptyMap()));
+        assertTrue(markdown.getMessage().contains("text byte limit"));
     }
 
     @Test
@@ -108,8 +110,10 @@ class MarkdownReportExporterTest {
 
     @Test
     void jsonRejectsOversizeUtf8OutputAndModelCyclesWithControlledErrors() throws Exception {
-        ReportData oversized = new ReportData(report().getContext(), "t", 1, Collections.<ReportSectionData>emptyList(), Collections.<String, Object>singletonMap("text", repeat("界", 800000)));
-        IOException json = org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () -> new JsonReportExporter().export(oversized)); assertTrue(json.getMessage().contains("UTF-8 byte limit"));
+        IllegalArgumentException json = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> new ReportData(report().getContext(), "t", 1, Collections.<ReportSectionData>emptyList(),
+                        Collections.<String, Object>singletonMap("text", repeat("界", 800000))));
+        assertTrue(json.getMessage().contains("text byte limit"));
         Map<String, Object> cycle = new LinkedHashMap<String, Object>(); cycle.put("self", cycle);
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> new ReportData(report().getContext(), "t", 1, Collections.<ReportSectionData>emptyList(), cycle));
     }

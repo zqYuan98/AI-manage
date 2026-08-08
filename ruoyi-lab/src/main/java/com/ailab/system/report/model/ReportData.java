@@ -12,6 +12,7 @@ public final class ReportData {
     private final List<ReportSectionData> sections; private final Map<String, Object> metadata;
     public ReportData(ReportContext context, String templateCode, int templateRevision, List<ReportSectionData> sections, Map<String, Object> metadata) {
         if (context == null) throw new IllegalArgumentException("context is required"); if (templateCode == null || templateCode.trim().isEmpty()) throw new IllegalArgumentException("templateCode is required"); if (templateRevision < 1) throw new IllegalArgumentException("templateRevision must be positive");
+        ReportDataBudget.validate(context, sections, metadata);
         this.context = context; this.templateCode = templateCode; this.templateRevision = templateRevision;
         this.sections = Collections.unmodifiableList(new ArrayList<ReportSectionData>(sections == null ? Collections.<ReportSectionData>emptyList() : sections));
         this.metadata = ImmutableReportValue.map(metadata);

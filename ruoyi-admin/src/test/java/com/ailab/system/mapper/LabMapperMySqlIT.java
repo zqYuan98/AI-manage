@@ -18,6 +18,9 @@ import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.domain.LabPerfScore;
 import com.ailab.system.domain.LabCollaborationRecord;
 import com.ailab.system.domain.LabReminder;
+import com.ailab.system.domain.LabReportInstance;
+import com.ailab.system.domain.LabReportJob;
+import com.ailab.system.report.ReportJobQueuePersistence;
 import com.ailab.system.dto.CollaborationReviewCommand;
 import com.ailab.system.dto.DashboardOverview;
 import com.ailab.system.dto.GoalHealthFact;
@@ -106,6 +109,8 @@ class LabMapperMySqlIT {
     @Autowired private LabDashboardService dashboardService;
     @Autowired private LabReminderService reminderService;
     @Autowired private LabReportDataMapper reportDataMapper;
+    @Autowired private LabReportMapper reportMapper;
+    @Autowired private ReportJobQueuePersistence reportJobQueuePersistence;
     @Autowired private ISysUserService userService;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -192,6 +197,29 @@ class LabMapperMySqlIT {
         assertNotNull(reportDataMapper.selectAssets(criteria));
         assertNotNull(reportDataMapper.selectIprs(criteria));
         assertNotNull(reportDataMapper.selectCurrentPerfScores(criteria));
+    }
+
+    @Test
+    void reportLifecycleFencesArtifactsEnforcesActiveUniquenessAndRecoversOnlyTheStaleRun() {
+        long reportId=39830L,dataJobId=39831L,wordJobId=39832L;String token="it-run-token-1234567890";
+        jdbcTemplate.update("insert into lab_report_instance(id,report_no,template_id,template_code,template_revision,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,source_type,json_status,markdown_status,word_status,pdf_status,version,del_flag,create_by,create_time) values(?,?,?,?,?,?,?,1,'DRAFT','0','0','0','AUTO','PENDING','PENDING','NOT_REQUESTED','NOT_REQUESTED',0,'0','it',now())",reportId,"IT-RPT-39830",30001L,"it-report-lifecycle",1,"2099-02","ALL");
+        jdbcTemplate.update("insert into lab_report_job(id,job_no,report_id,job_type,job_status,progress_rate,attempt_count,idempotency_key,version,del_flag,create_by,create_time) values(?,?,?,'DATA','QUEUED',0,1,?,0,'0','it',now())",dataJobId,"IT-RPJ-39831",reportId,"it-report-39830-data");
+        LabReportJob queued=reportMapper.selectReportJobById(dataJobId);assertEquals(1,reportMapper.claimReportJob(dataJobId,queued.getVersion(),token,"it",new Date()));
+        assertEquals(0,reportMapper.markDataPending(reportId,dataJobId,"wrong-run-token-1234","it"));assertEquals(1,reportMapper.markDataPending(reportId,dataJobId,token,"it"));
+        assertEquals(1,reportMapper.completeJson(reportId,dataJobId,token,"{}","archive/report-39830/runs/it/report.json","it"));assertEquals(1,reportMapper.completeMarkdown(reportId,dataJobId,token,"# report","archive/report-39830/runs/it/report.md","it"));assertEquals(1,reportMapper.activateWordAfterData(reportId,dataJobId,token,"it"));assertEquals(1,reportMapper.completeReportJob(dataJobId,token,"it",new Date()));
+        jdbcTemplate.update("insert into lab_report_job(id,job_no,report_id,job_type,job_status,progress_rate,attempt_count,idempotency_key,run_token,version,del_flag,create_by,create_time,started_time,update_time) values(?,?,?,'WORD','RUNNING',1,1,?,?,0,'0','it',now(),date_sub(now(),interval 20 minute),date_sub(now(),interval 20 minute))",wordJobId,"IT-RPJ-39832",reportId,"it-report-39830-word","stale-run-token-1234");
+        assertThrows(org.springframework.dao.DuplicateKeyException.class,()->jdbcTemplate.update("insert into lab_report_job(job_no,report_id,job_type,job_status,idempotency_key,version,del_flag,create_by,create_time) values(?,?,'WORD','QUEUED',?,0,'0','it',now())","IT-RPJ-DUP",reportId,"it-report-39830-word-dup"));
+        Date cutoff=new Date(System.currentTimeMillis()-10L*60L*1000L);List<LabReportJob> recoverable=reportMapper.selectRecoverableReportJobs(cutoff,0L,100);assertTrue(recoverable.stream().anyMatch(value->Long.valueOf(wordJobId).equals(value.getId())));assertEquals(1,reportMapper.resetStaleReportJob(wordJobId,0,"stale-run-token-1234",cutoff,"it"));
+        assertEquals(1,reportMapper.claimReportJob(wordJobId,1,"fresh-run-token-1234","it",new Date()));assertEquals(1,reportMapper.heartbeatReportJob(wordJobId,"fresh-run-token-1234","it"));assertEquals(0,reportMapper.resetStaleReportJob(wordJobId,2,"fresh-run-token-1234",cutoff,"it"),"an old recovery read cannot reset a freshly heartbeating run");
+        LabReportInstance report=reportMapper.selectReportById(reportId);assertEquals("SUCCESS",report.getJsonStatus());assertEquals("SUCCESS",report.getMarkdownStatus());assertEquals("PENDING",report.getWordStatus());assertEquals("NOT_REQUESTED",report.getPdfStatus());
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrentDurableQueueCreationUsesTheReportRowLockAndReturnsOneWinner() throws Exception {
+        long reportId=39840L;jdbcTemplate.update("delete from lab_report_job where report_id=?",reportId);jdbcTemplate.update("delete from lab_report_instance where id=?",reportId);
+        jdbcTemplate.update("insert into lab_report_instance(id,report_no,template_id,template_code,template_revision,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,source_type,json_status,markdown_status,word_status,pdf_status,version,del_flag,create_by,create_time) values(?,?,?,?,?,?,?,1,'DRAFT','0','0','0','AUTO','PENDING','PENDING','NOT_REQUESTED','NOT_REQUESTED',0,'0','it',now())",reportId,"IT-RPT-39840",30001L,"it-report-concurrent",1,"2099-03","ALL");
+        ExecutorService pool=Executors.newFixedThreadPool(2);try{CountDownLatch start=new CountDownLatch(1);Future<Long> first=pool.submit(()->{start.await();return reportJobQueuePersistence.createOrGet(reportId,"DATA","it").getJob().getId();});Future<Long> second=pool.submit(()->{start.await();return reportJobQueuePersistence.createOrGet(reportId,"DATA","it").getJob().getId();});start.countDown();Long firstId=first.get(10,TimeUnit.SECONDS),secondId=second.get(10,TimeUnit.SECONDS);assertEquals(firstId,secondId);assertEquals(1,jdbcTemplate.queryForObject("select count(1) from lab_report_job where report_id=? and job_type='DATA' and job_status in ('QUEUED','RUNNING')",Integer.class,reportId));}finally{shutdownExecutor(pool);jdbcTemplate.update("delete from lab_report_job where report_id=?",reportId);jdbcTemplate.update("delete from lab_report_instance where id=?",reportId);}
     }
 
     @Test
@@ -827,12 +855,18 @@ class LabMapperMySqlIT {
                 requireLegacyReportTemplatePin(connection);
                 requireLegacySensitivePermission(connection);
                 requireAllSensitiveSectionsPinned(connection);
+                requireLegacySensitiveInstance(connection);
+                requireLegacyReportArtifactDefaults(connection);
                 insertPermissionOnlySensitiveSection(connection);
+                insertNullableLifecycleActiveJob(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ailab.sql")));
                 requireLegacyReportTemplatePin(connection);
                 requireLegacySensitivePermission(connection);
                 requireAllSensitiveSectionsPinned(connection);
+                requireLegacySensitiveInstance(connection);
+                requireLegacyReportArtifactDefaults(connection);
                 requirePermissionDrivenSensitiveUpgrade(connection);
+                requireNullableLifecycleActiveJobTerminalized(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-mapper-fixture.sql")));
             } catch (Exception exception) {
                 throw new IllegalStateException("Real MySQL 8 integration database is unavailable or could not be initialized. Configure LAB_IT_DB_URL/LAB_IT_DB_USERNAME/LAB_IT_DB_PASSWORD.", exception);
@@ -882,8 +916,8 @@ class LabMapperMySqlIT {
         private static void requireLegacySensitivePermission(Connection connection) throws Exception {
             try (java.sql.Statement statement = connection.createStatement();
                     java.sql.ResultSet result = statement.executeQuery(
-                            "select count(1) from lab_report_section where id in (39990,39991) and sensitive_flag='1' and sensitive_permission='lab:report:sensitive'")) {
-                if (!result.next() || result.getInt(1) != 2) {
+                            "select count(1) from lab_report_section where id in (39990,39991,39993) and sensitive_flag='1' and sensitive_permission='lab:report:sensitive'")) {
+                if (!result.next() || result.getInt(1) != 3) {
                     throw new IllegalStateException("Legacy provider- and flag-sensitive sections must receive irreversible permission snapshots");
                 }
             }
@@ -906,6 +940,25 @@ class LabMapperMySqlIT {
             }
         }
 
+        private static void insertNullableLifecycleActiveJob(Connection connection) throws Exception {
+            try (java.sql.Statement statement = connection.createStatement()) {
+                statement.executeUpdate("insert into lab_report_instance(id,report_no,template_id,template_code,template_revision,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,source_type,version,del_flag,create_by,create_time) values "
+                        + "(39996,'RPT-NULL-LIFECYCLE-39996',39990,'legacy-report-template-39990',7,'2098-12','ALL',1,NULL,'0','0','0','AUTO',0,'0','it',NOW())");
+                statement.executeUpdate("insert into lab_report_job(id,job_no,report_id,job_type,job_status,idempotency_key,version,del_flag,create_by,create_time) values "
+                        + "(39996,'JOB-NULL-LIFECYCLE-39996',39996,'DATA','QUEUED','NULL-LIFECYCLE-39996',0,'0','it',NOW())");
+            }
+        }
+
+        private static void requireNullableLifecycleActiveJobTerminalized(Connection connection) throws Exception {
+            try (java.sql.Statement statement = connection.createStatement();
+                    java.sql.ResultSet result = statement.executeQuery("select job_status,error_message from lab_report_job where id=39996")) {
+                if (!result.next() || !"FAILED".equals(result.getString(1))
+                        || result.getString(2) == null || !result.getString(2).startsWith("REPORT_JOB_ORPHANED")) {
+                    throw new IllegalStateException("A legacy active job with a nullable report lifecycle must be terminalized");
+                }
+            }
+        }
+
         private static void requireAllSensitiveSectionsPinned(Connection connection) throws Exception {
             try (java.sql.Statement statement = connection.createStatement();
                     java.sql.ResultSet result = statement.executeQuery(
@@ -915,6 +968,16 @@ class LabMapperMySqlIT {
                     throw new IllegalStateException("Every sensitive report section must retain a permission snapshot");
                 }
             }
+        }
+
+        private static void requireLegacySensitiveInstance(Connection connection)throws Exception{
+            try(java.sql.Statement statement=connection.createStatement();java.sql.ResultSet result=statement.executeQuery("select count(1) from lab_report_instance where id in (39990,39993) and sensitive_flag='1'")){if(!result.next()||result.getInt(1)!=2)throw new IllegalStateException("Every report pinned to a legacy sensitive section must receive a sensitive snapshot");}
+        }
+
+        private static void requireLegacyReportArtifactDefaults(Connection connection)throws Exception{
+            try(java.sql.Statement statement=connection.createStatement();java.sql.ResultSet result=statement.executeQuery("select count(1) from information_schema.columns where table_schema=database() and table_name='lab_report_instance' and column_name in ('word_status','pdf_status') and column_default='NOT_REQUESTED'")){if(!result.next()||result.getInt(1)!=2)throw new IllegalStateException("Legacy Word and PDF status defaults must be upgraded idempotently");}
+            try(java.sql.Statement statement=connection.createStatement();java.sql.ResultSet result=statement.executeQuery("select default_flag from lab_report_template where id=39994")){if(!result.next()||!"1".equals(result.getString(1)))throw new IllegalStateException("An enabled legacy report type with zero defaults must receive one default");}
+            try(java.sql.Statement statement=connection.createStatement();java.sql.ResultSet result=statement.executeQuery("select default_flag from lab_report_template where id=39995")){if(!result.next()||!"0".equals(result.getString(1)))throw new IllegalStateException("A nullable non-latest legacy default must be cleared");}
         }
 
         private static String value(String name, String fallback) {

@@ -8,6 +8,7 @@ import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.SecurityUtils;
+import javax.servlet.http.HttpServletResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -28,7 +29,8 @@ public class LabDashboardController extends BaseController {
 
     @PreAuthorize("@ss.hasPermi('lab:dashboard:view')")
     @GetMapping
-    public AjaxResult overview(@RequestParam String period) {
+    public AjaxResult overview(@RequestParam String period, HttpServletResponse response) {
+        preventCaching(response);
         return success(dashboardService.getOverview(period, SecurityUtils.getUserId()));
     }
 
@@ -54,5 +56,11 @@ public class LabDashboardController extends BaseController {
     @PutMapping("/reminders/read-all")
     public AjaxResult markAllRead() {
         return success(reminderService.markAllRead(SecurityUtils.getUserId()));
+    }
+
+    private void preventCaching(HttpServletResponse response) {
+        response.setHeader("Cache-Control", "private, no-store");
+        response.setHeader("Pragma", "no-cache");
+        response.setHeader("X-Content-Type-Options", "nosniff");
     }
 }

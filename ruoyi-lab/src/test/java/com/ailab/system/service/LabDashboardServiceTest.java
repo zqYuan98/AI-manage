@@ -38,16 +38,18 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.ruoyi.system.service.ISysMenuService;
 
 @ExtendWith(MockitoExtension.class)
 class LabDashboardServiceTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-08-15T01:00:00Z"), ZoneId.of("Asia/Shanghai"));
     @Mock private LabDashboardMapper mapper;
     @Mock private LabAccessService access;
+    @Mock private ISysMenuService menus;
     private LabDashboardService service;
 
     @BeforeEach
-    void setUp() { service = new LabDashboardServiceImpl(mapper, access, CLOCK); }
+    void setUp() { service = new LabDashboardServiceImpl(mapper, access, menus, CLOCK); }
 
     @Test
     void healthThresholdsUseMostSevereRiskAtFiveAndFifteenPointBoundaries() {
@@ -158,16 +160,16 @@ class LabDashboardServiceTest {
         when(mapper.selectKpiFact(eq("2026-08"), any(), eq(member))).thenReturn(new DashboardKpiFact());
         when(mapper.selectTaskStatusDistribution("2026-08", member)).thenReturn(Collections.emptyList());
         when(mapper.selectRecentIpr(any(), eq(member))).thenReturn(Collections.emptyList());
-        when(mapper.selectRecentReports("2026-08", member)).thenReturn(Collections.emptyList());
-        when(mapper.selectLatestReport("2026-08", member)).thenReturn(null);
+        when(mapper.selectRecentReports("2026-08", member,false)).thenReturn(Collections.emptyList());
+        when(mapper.selectLatestReport("2026-08", member,false)).thenReturn(null);
 
         DashboardOverview result = service.getOverview("2026-08", 3L);
 
         assertTrue(result.getMemberLoads().isEmpty());
         assertTrue(result.getRecentReports().isEmpty());
         verify(mapper, never()).selectMemberLoads(any(), any(), any(), any());
-        verify(mapper).selectRecentReports("2026-08", member);
-        verify(mapper).selectLatestReport("2026-08", member);
+        verify(mapper).selectRecentReports("2026-08", member,false);
+        verify(mapper).selectLatestReport("2026-08", member,false);
         verify(mapper, never()).selectPerformanceSummary(any(), any());
         verify(mapper).selectRecentIpr(any(), eq(member));
         verify(mapper, never()).selectCoordinationItems(any(), any());
@@ -231,7 +233,7 @@ class LabDashboardServiceTest {
         when(mapper.selectKpiFact(eq("2026-08"), any(), eq(manager))).thenReturn(new DashboardKpiFact());
         emptyDashboardQueriesFor(manager);
         DashboardActionItem latest = new DashboardActionItem(); latest.setId(77L); latest.setTitle("R-2026-08");
-        when(mapper.selectLatestReport("2026-08", manager)).thenReturn(latest);
+        when(mapper.selectLatestReport("2026-08", manager,false)).thenReturn(latest);
 
         DashboardActionItem result = service.getOverview("2026-08", 1L).getLatestReport();
 
@@ -240,6 +242,15 @@ class LabDashboardServiceTest {
         assertEquals(Instant.parse("2026-08-15T01:00:00Z"), result.getLastUpdated().toInstant());
         assertEquals(77L, result.getDrillDownFilters().get("id"));
         assertEquals("2026-08", result.getDrillDownFilters().get("period"));
+    }
+
+    @Test
+    void managerDashboardReportQueriesReceiveTheCurrentSensitivePermissionSnapshot() {
+        LabAccessContext manager=manager();when(menus.selectMenuPermsByUserId(1L)).thenReturn(Collections.<String>emptySet());when(mapper.selectGoalHealthFacts(eq(2026),any(),eq(manager),eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS+1))).thenReturn(Collections.<GoalHealthFact>emptyList());when(mapper.selectKpiFact(eq("2026-08"),any(),eq(manager))).thenReturn(new DashboardKpiFact());emptyDashboardQueriesFor(manager);
+
+        service.getOverview("2026-08",1L);
+
+        verify(mapper).selectRecentReports("2026-08",manager,false);verify(mapper).selectLatestReport("2026-08",manager,false);
     }
 
     private GoalHealthFact fact(String expected, String actual, int blockDays, boolean delayed, boolean overdue) {
@@ -261,8 +272,8 @@ class LabDashboardServiceTest {
         when(mapper.selectMemberLoads(eq(period), any(), any(), eq(context))).thenReturn(Collections.emptyList());
         when(mapper.selectCoordinationItems(eq(period), eq(context))).thenReturn(Collections.emptyList());
         when(mapper.selectRecentIpr(any(), eq(context))).thenReturn(Collections.emptyList());
-        when(mapper.selectRecentReports(eq(period), eq(context))).thenReturn(Collections.emptyList());
-        when(mapper.selectLatestReport(eq(period), eq(context))).thenReturn(null);
+        when(mapper.selectRecentReports(eq(period), eq(context),eq(false))).thenReturn(Collections.emptyList());
+        when(mapper.selectLatestReport(eq(period), eq(context),eq(false))).thenReturn(null);
         if (LabAccessServiceImpl.MANAGER.equals(context.getRoleKey())) {
             when(mapper.selectPerformanceSummary(eq(period), eq(context))).thenReturn(Collections.emptyList());
         }

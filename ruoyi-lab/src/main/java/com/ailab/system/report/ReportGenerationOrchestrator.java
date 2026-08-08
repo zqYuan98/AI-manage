@@ -11,6 +11,8 @@ import com.ailab.system.report.model.ReportDataCodec;
 import com.ailab.system.report.model.ReportPeriod;
 import com.ailab.system.report.model.ReportPerformancePin;
 import com.ailab.system.report.model.ReportSectionData;
+import com.ailab.system.report.config.ReportSectionConfig;
+import com.ailab.system.domain.LabReportSummary;
 import com.ailab.system.service.LabAccessService;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.system.service.ISysMenuService;
@@ -30,7 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** Short database lifecycle operations. File work is deliberately performed outside transaction methods. */
 @Component
 public class ReportGenerationOrchestrator {
-    private static final int MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
+    private static final int MAX_MARKDOWN_BYTES = 1024 * 1024;
     private final LabReportMapper mapper; private final LabAccessService access; private final ISysMenuService menus;
     private final ReportArtifactStore store; private final ReportDataCodec codec; private final ReportManualImportPersistence manualImports; private final Clock clock;
 
@@ -57,8 +59,9 @@ public class ReportGenerationOrchestrator {
         mapper.selectMaxTemplateRevisionForUpdate(snapshot.getTemplateCode());
         LabReportTemplate template = requiredTemplate(mapper.selectTemplateForUpdate(templateId));
         if(!snapshot.getTemplateCode().equals(template.getTemplateCode()))throw new ServiceException("Template family changed concurrently");
-        if (!"ENABLED".equals(template.getStatus()) || !parsed.getKind().name().equals(template.getPeriodType())) throw new ServiceException("Template is not enabled for the requested period type");
+        if (!template.isLatest() || !"ENABLED".equals(template.getStatus()) || !parsed.getKind().name().equals(template.getPeriodType())) throw new ServiceException("Only the latest enabled template can generate the requested report type");
         List<LabReportSection> sections = safe(mapper.selectSections(templateId));
+        requireManualCompleteness(sections,period,bizLine);
         Integer max = mapper.selectMaxReportRevisionForUpdate(template.getTemplateCode(), period, bizLine);
         String performancePeriod=parsed.getKind()==ReportPeriod.Kind.QUARTER?period.substring(0,4)+"-Q"+period.charAt(5):period;
         List<ReportPerformancePin> performancePins = safe(mapper.selectSourcePerformancePins(performancePeriod, bizLine));
@@ -91,7 +94,10 @@ public class ReportGenerationOrchestrator {
         LabReportInstance report = requiredReport(mapper.selectReportForUpdate(reportId));
         if (report.getVersion() == null || report.getVersion().intValue() != expectedVersion) throw new ServiceException("Report changed concurrently; reload before finalizing");
         if (!"DRAFT".equals(report.getLifecycleStatus())) throw new ServiceException("Finalized and superseded reports are immutable");
+        requireManualCompleteness(safe(mapper.selectSections(report.getTemplateId())),report.getPeriod(),report.getBizLine());
         for (String status : statuses(report)) if (!"SUCCESS".equals(status)) throw new ServiceException("JSON, Markdown, Word and PDF must all succeed before finalization");
+        for (String path : paths(report)) if (!hasText(path)) throw new ServiceException("JSON, Markdown, Word and PDF must all have durable artifacts before finalization");
+        if(mapper.countActiveReportJobs(reportId)!=0)throw new ServiceException("Report generation jobs must finish before finalization");
         mapper.supersedeCurrentReport(report.getTemplateCode(), report.getPeriod(), report.getBizLine(), reportId, actor(actorUserId));
         affected(mapper.finalizeReport(reportId, expectedVersion, actor(actorUserId)), "Report finalization changed concurrently");
         report.setLifecycleStatus("FINALIZED"); report.setCurrentFlag("1"); report.setFinalFlag("1"); report.setVersion(expectedVersion + 1); return report;
@@ -129,10 +135,14 @@ public class ReportGenerationOrchestrator {
         LabReportInstance value = new LabReportInstance(); value.setReportNo(reportNo(period, bizLine)); value.setTemplateId(template.getId());
         value.setTemplateCode(template.getTemplateCode()); value.setTemplateRevision(template.getRevisionNo()); value.setPeriod(period); value.setBizLine(bizLine);
         value.setRevisionNo(revision); value.setLifecycleStatus("DRAFT"); value.setCurrentFlag("0"); value.setFinalFlag("0");
-        value.setJsonStatus("PENDING"); value.setMarkdownStatus("PENDING"); value.setWordStatus("PENDING"); value.setPdfStatus("PENDING");
+        value.setJsonStatus("PENDING"); value.setMarkdownStatus("PENDING"); value.setWordStatus("NOT_REQUESTED"); value.setPdfStatus("NOT_REQUESTED");
         value.setVersion(0); value.setDelFlag("0"); value.setCreateBy(actor(actorUserId)); return value;
     }
     private boolean sensitive(List<LabReportSection> sections) { for (LabReportSection section : sections) if (!"0".equals(section.getVisibleFlag()) && (section.isSensitive() || "PERF_SUMMARY".equals(section.getDataSource()) || hasText(section.getSensitivePermission()))) return true; return false; }
+    private void requireManualCompleteness(List<LabReportSection> sections,String period,String bizLine){
+        Map<String,LabReportSummary> summaries=new LinkedHashMap<String,LabReportSummary>();for(LabReportSummary value:safe(mapper.selectSummaries(period,bizLine)))summaries.put(value.getSectionCode(),value);
+        for(LabReportSection section:sections){if("0".equals(section.getVisibleFlag())||!"MANUAL".equals(section.getSectionType()))continue;ReportSectionConfig config=new ReportSectionConfig(section);if(!Boolean.TRUE.equals(config.getRenderConfig().get("required")))continue;LabReportSummary summary=summaries.get(section.getSectionCode());if(summary==null||!hasText(summary.getSummaryText()))throw new ServiceException("Required manual report section is incomplete: "+section.getSectionCode());}
+    }
     private String reportNo(String period, String bizLine) { String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12); return "RPT-" + period.replaceAll("[^A-Za-z0-9]", "") + "-" + bizLine + "-" + suffix; }
     private void validateMarkdown(String value) { if (value == null || value.indexOf('\0') >= 0 || value.getBytes(StandardCharsets.UTF_8).length > MAX_MARKDOWN_BYTES) throw new ServiceException("Markdown is missing, invalid or too large"); }
     private void requireBizLine(String value) { if (value == null || !value.matches("[A-Za-z0-9_-]{1,32}")) throw new ServiceException("Invalid business line"); }
@@ -141,6 +151,7 @@ public class ReportGenerationOrchestrator {
     private String extension(String format) { return "JSON".equals(format) ? ".json" : "MARKDOWN".equals(format) ? ".md" : "WORD".equals(format) ? ".docx" : ".pdf"; }
     private String contentType(String format) { return "JSON".equals(format) ? "application/json" : "MARKDOWN".equals(format) ? "text/markdown;charset=UTF-8" : "WORD".equals(format) ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/pdf"; }
     private List<String> statuses(LabReportInstance value) { List<String> result = new ArrayList<String>(); result.add(value.getJsonStatus()); result.add(value.getMarkdownStatus()); result.add(value.getWordStatus()); result.add(value.getPdfStatus()); return result; }
+    private List<String> paths(LabReportInstance value) { List<String> result = new ArrayList<String>(); result.add(value.getJsonPath()); result.add(value.getMarkdownPath()); result.add(value.getWordPath()); result.add(value.getPdfPath()); return result; }
     private boolean successful(String... values) { for (String value : values) if (!"SUCCESS".equals(value)) return false; return true; }
     private LabReportTemplate requiredTemplate(LabReportTemplate value) { if (value == null) throw new ServiceException("Report template does not exist"); return value; }
     private LabReportInstance requiredReport(LabReportInstance value) { if (value == null) throw new ServiceException("Report does not exist"); return value; }

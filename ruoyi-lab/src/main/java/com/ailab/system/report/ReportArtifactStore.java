@@ -8,12 +8,24 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.LinkOption;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 
 /** Contained artifact storage with isolated temporary directories and atomic publication. */
 @Component
 public class ReportArtifactStore {
+    private static final Pattern RUN_ARTIFACT=Pattern.compile("^(archive/report-[0-9]+/runs/[A-Za-z0-9_-]{16,128})/[^/]+$");
     private final Path outputRoot; private final Path tempRoot;
     public ReportArtifactStore(LabProperties properties) {
         if (properties == null) throw new IllegalArgumentException("Lab report properties are required");
@@ -24,8 +36,9 @@ public class ReportArtifactStore {
         }
     }
 
-    public String publish(Long reportId, String safeName, String format, byte[] bytes) {
+    public String publish(Long reportId, String runToken, String safeName, String format, byte[] bytes) {
         if (reportId == null || reportId.longValue() <= 0 || bytes == null) throw new ServiceException("Artifact identity and bytes are required");
+        if (runToken == null || !runToken.matches("[A-Za-z0-9_-]{16,128}")) throw new ServiceException("Artifact run identity is invalid");
         if (safeName == null || !safeName.matches("[A-Za-z0-9_-]{1,96}")) throw new ServiceException("Unsafe report artifact name");
         String extension = extension(format); if (bytes.length > 50L * 1024L * 1024L) throw new ServiceException("Report artifact exceeds the storage limit");
         try {
@@ -33,7 +46,7 @@ public class ReportArtifactStore {
             Path realOutput = outputRoot.toRealPath(); Path realTemp = tempRoot.toRealPath();
             if (!realTemp.startsWith(realOutput)) throw new ServiceException("Report temporary directory escapes the output directory");
             Path temporaryDirectory = contained(tempRoot, "report-" + reportId); Files.createDirectories(temporaryDirectory);
-            Path archiveDirectory = contained(outputRoot, "archive/report-" + reportId); Files.createDirectories(archiveDirectory);
+            Path archiveDirectory = contained(outputRoot, "archive/report-" + reportId + "/runs/" + runToken); Files.createDirectories(archiveDirectory);
             realDirectory(temporaryDirectory, realTemp); realDirectory(archiveDirectory, realOutput);
             Path target = contained(archiveDirectory, safeName + "." + extension);
             if (Files.exists(target)) throw new ServiceException("Successful report artifacts are immutable");
@@ -70,15 +83,6 @@ public class ReportArtifactStore {
         catch (IOException ex) { throw new ServiceException("Could not read report artifact"); }
     }
 
-    /** Deletes only the deterministic target for an artifact whose DB status is not SUCCESS. */
-    public void discardOrphan(Long reportId, String safeName, String format) {
-        if (reportId == null || reportId.longValue() <= 0 || safeName == null
-                || !safeName.matches("[A-Za-z0-9_-]{1,96}")) {
-            throw new ServiceException("Artifact identity is invalid");
-        }
-        deleteUncommitted("archive/report-" + reportId + "/" + safeName + "." + extension(format));
-    }
-
     /** Removes only an artifact published by the current operation before its DB success marker. */
     public void deleteUncommitted(String relativePath) {
         if (relativePath == null) return;
@@ -92,6 +96,16 @@ public class ReportArtifactStore {
             }
         } catch (ServiceException ex) { throw ex; }
         catch (IOException ex) { throw new ServiceException("Could not clean an uncommitted report artifact"); }
+    }
+
+    /** Deletes only old immutable run directories with no path reference in the report-instance table. */
+    public int cleanOrphanRuns(List<String> referencedPaths, Instant cutoff) {
+        if(cutoff==null)throw new ServiceException("Report artifact cleanup cutoff is required");
+        Set<String> retained=new HashSet<String>();for(String reference:referencedPaths==null?Collections.<String>emptyList():referencedPaths){if(reference==null)continue;Path raw=Paths.get(reference);if(raw.isAbsolute())throw new ServiceException("Stored report artifact path must be relative");Path resolved=contained(outputRoot,reference);String normalized=outputRoot.relativize(resolved).toString().replace('\\','/');Matcher match=RUN_ARTIFACT.matcher(normalized);if(match.matches())retained.add(match.group(1));}
+        Path archive=contained(outputRoot,"archive");if(!Files.exists(archive))return 0;
+        try{Path realOutput=outputRoot.toRealPath();Path realArchive=archive.toRealPath();if(!realArchive.startsWith(realOutput))throw new ServiceException("Report archive escapes the output directory");List<Path> candidates=new ArrayList<Path>();try(Stream<Path> paths=Files.walk(realArchive,4)){Path[] values=paths.filter(path->Files.isDirectory(path,LinkOption.NOFOLLOW_LINKS)).toArray(Path[]::new);for(Path directory:values){String relative=realOutput.relativize(directory).toString().replace('\\','/');if(RUN_ARTIFACT.matcher(relative+"/artifact").matches()&&!retained.contains(relative)&&Files.getLastModifiedTime(directory,LinkOption.NOFOLLOW_LINKS).toInstant().isBefore(cutoff))candidates.add(directory);}}
+            List<List<Path>> plans=new ArrayList<List<Path>>();for(Path candidate:candidates){List<Path> plan=new ArrayList<Path>();try(Stream<Path> tree=Files.walk(candidate)){Path[] values=tree.toArray(Path[]::new);for(Path value:values){if(Files.isSymbolicLink(value)||!value.toRealPath().startsWith(realOutput))throw new ServiceException("Refusing to clean an unsafe report archive run");plan.add(value);}}Collections.sort(plan,Comparator.reverseOrder());plans.add(plan);}for(List<Path> plan:plans)for(Path value:plan)Files.deleteIfExists(value);return candidates.size();
+        }catch(ServiceException ex){throw ex;}catch(IOException ex){throw new ServiceException("Could not reconcile report artifact archives");}
     }
 
     private Path contained(Path root, String child) {

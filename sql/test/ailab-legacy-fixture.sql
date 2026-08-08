@@ -201,9 +201,14 @@ CREATE TABLE `lab_report_instance` (
  `pdf_status` varchar(16), `pdf_path` varchar(1000), `pdf_error` varchar(2000), `version` int, `del_flag` char(1) DEFAULT '0', `create_by` varchar(64), `create_time` datetime, `update_by` varchar(64), `update_time` datetime, `remark` varchar(500), PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 INSERT INTO `lab_report_template` (`id`,`template_code`,`template_name`,`period_type`,`revision_no`,`latest_flag`,`default_flag`,`status`,`version`,`del_flag`,`create_by`,`create_time`) VALUES
- (39990,'legacy-report-template-39990','Legacy report template','MONTH',7,'1','1','ENABLED',0,'0','it',NOW());
+ (39990,'legacy-report-template-39990','Legacy report template','MONTH',7,'1','1','ENABLED',0,'0','it',NOW()),
+ (39993,'legacy-sensitive-only-39993','Legacy sensitive-only report template','MONTH',1,'1','0','ENABLED',0,'2','it',NOW()),
+ (39994,'legacy-year-no-default','Legacy report type without a default','YEAR',1,'1','0','ENABLED',0,'0','it',NOW()),
+ (39995,'legacy-null-default','Legacy invalid nullable default','QUARTER',1,NULL,'1',NULL,0,'0','it',NOW());
 INSERT INTO `lab_report_section` (`id`,`template_id`,`section_code`,`section_name`,`section_type`,`sort_no`,`data_source`,`query_config_json`,`render_config_json`,`style_config_json`,`manual_flag`,`visible_flag`,`sensitive_flag`,`version`,`del_flag`,`create_by`,`create_time`) VALUES
  (39990,39990,'LEGACY_PERF','Legacy performance','STAT',10,'PERF_SUMMARY',JSON_OBJECT(),JSON_OBJECT('metrics',JSON_ARRAY('average')),JSON_OBJECT(),'0','1','0',0,'0','it',NOW()),
- (39991,39990,'LEGACY_FLAGGED','Legacy flagged sensitive section','STAT',20,'TASK_STAT',JSON_OBJECT(),JSON_OBJECT('metrics',JSON_ARRAY('average')),JSON_OBJECT(),'0','1','1',0,'0','it',NOW());
+ (39991,39990,'LEGACY_FLAGGED','Legacy flagged sensitive section','STAT',20,'TASK_STAT',JSON_OBJECT(),JSON_OBJECT('metrics',JSON_ARRAY('average')),JSON_OBJECT(),'0','1','1',0,'0','it',NOW()),
+ (39993,39993,'LEGACY_FLAG_ONLY','Legacy non-PERF sensitive section','TEXT',10,'GOAL_PROGRESS',JSON_OBJECT(),JSON_OBJECT(),JSON_OBJECT(),'0','1','1',0,'2','it',NOW());
 INSERT INTO `lab_report_instance` (`id`,`report_no`,`template_id`,`period`,`biz_line`,`revision_no`,`lifecycle_status`,`current_flag`,`final_flag`,`sensitive_flag`,`version`,`del_flag`,`create_by`,`create_time`) VALUES
- (39990,'RPT-LEGACY-39990',39990,'2026-06','ALL',1,'FINAL','1','1','0',0,'0','it',NOW());
+ (39990,'RPT-LEGACY-39990',39990,'2026-06','ALL',1,'FINAL','1','1','0',0,'0','it',NOW()),
+ (39993,'RPT-LEGACY-SENSITIVE-39993',39993,'2026-06','ALL',1,'FINAL','1','1',NULL,0,'0','it',NOW());

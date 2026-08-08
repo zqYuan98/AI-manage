@@ -9,7 +9,7 @@ public class LabReportJob extends BaseEntity {
     private static final long serialVersionUID = 1L;
     private Long id; private String jobNo; private Long reportId; private String jobType; private String jobStatus;
     private BigDecimal progressRate; private Integer attemptCount; private String errorMessage; private Date startedTime; private Date finishedTime;
-    private String idempotencyKey; private Integer version; private String delFlag;
+    private String idempotencyKey; private String runToken; private Integer version; private String delFlag;
     public Long getId() { return id; } public void setId(Long value) { id = value; }
     public String getJobNo() { return jobNo; } public void setJobNo(String value) { jobNo = value; }
     public Long getReportId() { return reportId; } public void setReportId(Long value) { reportId = value; }
@@ -21,6 +21,7 @@ public class LabReportJob extends BaseEntity {
     public Date getStartedTime() { return copy(startedTime); } public void setStartedTime(Date value) { startedTime = copy(value); }
     public Date getFinishedTime() { return copy(finishedTime); } public void setFinishedTime(Date value) { finishedTime = copy(value); }
     public String getIdempotencyKey() { return idempotencyKey; } public void setIdempotencyKey(String value) { idempotencyKey = value; }
+    public String getRunToken() { return runToken; } public void setRunToken(String value) { runToken = value; }
     public Integer getVersion() { return version; } public void setVersion(Integer value) { version = value; }
     public String getDelFlag() { return delFlag; } public void setDelFlag(String value) { delFlag = value; }
     private Date copy(Date value) { return value == null ? null : new Date(value.getTime()); }

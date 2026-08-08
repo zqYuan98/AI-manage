@@ -49,7 +49,7 @@ public class ReportGenerationWorker {
     public ReportGenerationWorker(LabReportMapper mapper, ReportJobLock lock, TrustedReportContextFactory contexts,
             DataSourceProviderRegistry providers, SectionRendererRegistry renderers, ReportExporterRegistry exporters,
             ReportArtifactStore store, ReportDataCodec codec, @Lazy ReportJobDispatcher dispatcher,
-            @Qualifier("scheduledExecutorService") ScheduledExecutorService heartbeatExecutor) {
+            @Qualifier("reportHeartbeatExecutor") ScheduledExecutorService heartbeatExecutor) {
         this(mapper, lock, contexts, providers, renderers, exporters, store, codec, dispatcher, heartbeatExecutor, Clock.systemDefaultZone());
     }
     public ReportGenerationWorker(LabReportMapper mapper, ReportJobLock lock, TrustedReportContextFactory contexts,
@@ -57,7 +57,7 @@ public class ReportGenerationWorker {
             ReportArtifactStore store, ReportDataCodec codec, ReportJobDispatcher dispatcher, Clock clock) {
         this(mapper,lock,contexts,providers,renderers,exporters,store,codec,dispatcher,null,clock);
     }
-    private ReportGenerationWorker(LabReportMapper mapper, ReportJobLock lock, TrustedReportContextFactory contexts,
+    ReportGenerationWorker(LabReportMapper mapper, ReportJobLock lock, TrustedReportContextFactory contexts,
             DataSourceProviderRegistry providers, SectionRendererRegistry renderers, ReportExporterRegistry exporters,
             ReportArtifactStore store, ReportDataCodec codec, ReportJobDispatcher dispatcher,
             ScheduledExecutorService heartbeatExecutor, Clock clock) {
@@ -67,27 +67,39 @@ public class ReportGenerationWorker {
 
     public void execute(Long jobId) {
         LabReportJob job = mapper.selectReportJobById(jobId); if (job == null || !"QUEUED".equals(job.getJobStatus())) return;
-        String token = null; ScheduledFuture<?> heartbeat=null;AtomicBoolean heartbeatHealthy=new AtomicBoolean(true); String actor = hasText(job.getCreateBy()) ? job.getCreateBy() : "report-worker";
+        String token = null; ScheduledFuture<?> heartbeat=null;AtomicBoolean heartbeatHealthy=new AtomicBoolean(true); boolean claimed=false;
+        String actor = hasText(job.getCreateBy()) ? job.getCreateBy() : "report-worker";
         try {
             token = lock.tryAcquire(job.getReportId(), job.getJobType());
             if (token == null) return;
-            if (mapper.claimReportJob(jobId, job.getVersion(), actor, Date.from(clock.instant())) != 1) return;
+            if (mapper.claimReportJob(jobId, job.getVersion(), token, actor, Date.from(clock.instant())) != 1) return;
+            claimed=true; job.setRunToken(token);
             heartbeat=startHeartbeat(job,actor,token,heartbeatHealthy);
+            requireHealthy(heartbeatHealthy);
             LabReportInstance report = required(mapper.selectReportById(job.getReportId()));
             if (!"DRAFT".equals(report.getLifecycleStatus())) throw new ServiceException("Immutable report cannot run generation jobs");
             if (!successful(report, job.getJobType())) {
-                if ("DATA".equals(job.getJobType())) data(report, actor);
-                else if ("WORD".equals(job.getJobType())) word(report, actor);
-                else if ("PDF".equals(job.getJobType())) pdf(report, actor);
+                if ("DATA".equals(job.getJobType())) data(job, report, token, actor, heartbeatHealthy);
+                else if ("WORD".equals(job.getJobType())) word(job, report, token, actor, heartbeatHealthy);
+                else if ("PDF".equals(job.getJobType())) pdf(job, report, token, actor, heartbeatHealthy);
                 else throw new ServiceException("Unsupported report generation step");
             }
-            if(!heartbeatHealthy.get())throw new ServiceException("Report job heartbeat was lost; retry is required");
-            try { dispatcher.advance(jobId, report.getId(), next(job.getJobType()), actor, Date.from(clock.instant())); }
+            requireHealthy(heartbeatHealthy);
+            try { dispatcher.advance(jobId, report.getId(), next(job.getJobType()), token, actor, Date.from(clock.instant())); }
             catch(RuntimeException progressionFailure){LOG.error("AI Lab report job {} progression remains RUNNING for stale recovery",jobId,progressionFailure);return;}
+        } catch (OwnershipLostException ex) {
+            LOG.warn("AI Lab report job {} stopped because its durable run fence was lost", jobId);
+        } catch (LeaseLostException ex) {
+            LOG.warn("AI Lab report job {} stopped because its distributed lease was lost", jobId);
+        } catch (CompletionUnknownException ex) {
+            LOG.error("AI Lab report job {} completion outcome is unknown; it remains RUNNING for stale recovery", jobId, ex.getCause());
         } catch (RuntimeException ex) {
             String error = error(ex);
-            try { failArtifact(job, error, actor); } catch (RuntimeException stateError) { LOG.error("Could not persist report artifact failure for job {}", jobId, stateError); }
-            try { mapper.failReportJob(jobId, error, actor, Date.from(clock.instant())); } catch (RuntimeException stateError) { LOG.error("Could not persist report job failure for {}", jobId, stateError); }
+            if (claimed) {
+                boolean artifactFailurePersisted=false;
+                try { artifactFailurePersisted=failArtifact(job, token, error, actor)==1; } catch (RuntimeException stateError) { LOG.error("Could not persist report artifact failure for job {}; it remains RUNNING for stale recovery", jobId, stateError); }
+                if(artifactFailurePersisted)try { requireOwned(mapper.failReportJob(jobId, token, error, actor, Date.from(clock.instant()))); } catch (RuntimeException stateError) { LOG.error("Could not persist report job failure for {}", jobId, stateError); }
+            }
             LOG.error("AI Lab report job {} failed: {}", jobId, error, ex);
         } finally {
             if(heartbeat!=null)heartbeat.cancel(false);
@@ -97,54 +109,56 @@ public class ReportGenerationWorker {
 
     private ScheduledFuture<?> startHeartbeat(final LabReportJob job,final String actor,final String token,final AtomicBoolean healthy){
         if(heartbeatExecutor==null)return null;
-        try{return heartbeatExecutor.scheduleAtFixedRate(new Runnable(){@Override public void run(){try{if(mapper.heartbeatReportJob(job.getId(),actor)!=1){healthy.set(false);return;}if(!lock.renew(job.getReportId(),job.getJobType(),token))LOG.warn("AI Lab report lock lease could not be renewed for job {}",job.getId());}catch(RuntimeException ex){healthy.set(false);LOG.error("AI Lab report heartbeat failed for job {}",job.getId(),ex);}}},60,60,TimeUnit.SECONDS);}
+        try{return heartbeatExecutor.scheduleAtFixedRate(new Runnable(){@Override public void run(){try{if(!lock.renew(job.getReportId(),job.getJobType(),token)){healthy.set(false);LOG.warn("AI Lab report lock lease could not be renewed for job {}",job.getId());return;}if(mapper.heartbeatReportJob(job.getId(),token,actor)!=1){healthy.set(false);}}catch(RuntimeException ex){healthy.set(false);LOG.error("AI Lab report heartbeat failed for job {}",job.getId(),ex);}}},60,60,TimeUnit.SECONDS);}
         catch(RejectedExecutionException ex){throw new ServiceException("Report job heartbeat could not be scheduled");}
     }
 
-    private void data(LabReportInstance report, String actor) {
-        boolean needJson = !"SUCCESS".equals(report.getJsonStatus());
-        boolean needMarkdown = !"SUCCESS".equals(report.getMarkdownStatus());
-        if (mapper.markDataPending(report.getId(), actor) != 1) throw new ServiceException("Data artifacts are already successful or report changed");
+    private void data(LabReportJob job, LabReportInstance report, String runToken, String actor, AtomicBoolean healthy) {
+        boolean needJson = !"SUCCESS".equals(report.getJsonStatus()) || !hasText(report.getJsonPath());
+        boolean needMarkdown = !"SUCCESS".equals(report.getMarkdownStatus()) || !hasText(report.getMarkdownPath());
+        requireHealthy(healthy); requireOwned(mapper.markDataPending(report.getId(), job.getId(), runToken, actor));
         boolean manual="MANUAL_IMPORT".equals(report.getSourceType());
         ReportData value = needJson && !manual ? build(report, actor) : codec.decode(report.getContentJson());
         String name = "report-" + report.getId();
         if (needJson) {
             byte[] json; try { json = exporters.require("JSON").export(value); } catch (Exception ex) { throw failure(ex); }
-            store.discardOrphan(report.getId(), name, "JSON");
-            String path = store.publish(report.getId(), name, "JSON", json);
-            try { if (mapper.completeJson(report.getId(), new String(json, StandardCharsets.UTF_8), path, actor) != 1) throw new ServiceException("JSON artifact state changed concurrently"); }
-            catch (RuntimeException ex) { cleanup(path); throw ex; }
+            requireHealthy(healthy); String path = store.publish(report.getId(), runToken, name, "JSON", json);
+            try { requireHealthy(healthy); requireOwned(mapper.completeJson(report.getId(), job.getId(), runToken, new String(json, StandardCharsets.UTF_8), path, actor)); }
+            catch (OwnershipLostException | LeaseLostException ex) { cleanup(path); throw ex; }
+            catch (RuntimeException ex) { throw new CompletionUnknownException(ex); }
         }
         if (needMarkdown) {
             byte[] markdown; try { markdown = manual ? report.getContentMarkdown().getBytes(StandardCharsets.UTF_8) : exporters.require("MARKDOWN").export(value); } catch (Exception ex) { throw failure(ex); }
-            store.discardOrphan(report.getId(), name, "MARKDOWN");
-            String path = store.publish(report.getId(), name, "MARKDOWN", markdown);
-            try { if (mapper.completeMarkdown(report.getId(), new String(markdown, StandardCharsets.UTF_8), path, actor) != 1) throw new ServiceException("Markdown artifact state changed concurrently"); }
-            catch (RuntimeException ex) { cleanup(path); throw ex; }
+            requireHealthy(healthy); String path = store.publish(report.getId(), runToken, name, "MARKDOWN", markdown);
+            try { requireHealthy(healthy); requireOwned(mapper.completeMarkdown(report.getId(), job.getId(), runToken, new String(markdown, StandardCharsets.UTF_8), path, actor)); }
+            catch (OwnershipLostException | LeaseLostException ex) { cleanup(path); throw ex; }
+            catch (RuntimeException ex) { throw new CompletionUnknownException(ex); }
         }
     }
 
-    private void word(LabReportInstance report, String actor) {
-        if (mapper.markWordPending(report.getId(), actor) != 1) throw new ServiceException("Word artifact is not retryable or its dependencies are incomplete");
+    private void word(LabReportJob job, LabReportInstance report, String runToken, String actor, AtomicBoolean healthy) {
+        requireHealthy(healthy); requireOwned(mapper.markWordPending(report.getId(), job.getId(), runToken, actor));
         ReportData value = codec.decode(report.getContentJson()); byte[] bytes;
         try { bytes = exporters.require("WORD").export(value); } catch (Exception ex) { throw failure(ex); }
-        String name = "report-" + report.getId(); store.discardOrphan(report.getId(), name, "WORD");
-        String path = store.publish(report.getId(), name, "WORD", bytes);
-        try { if (mapper.completeWord(report.getId(), path, actor) != 1) throw new ServiceException("Word artifact state changed concurrently"); }
-        catch (RuntimeException ex) { cleanup(path); throw ex; }
+        requireHealthy(healthy); String name = "report-" + report.getId();
+        String path = store.publish(report.getId(), runToken, name, "WORD", bytes);
+        try { requireHealthy(healthy); requireOwned(mapper.completeWord(report.getId(), job.getId(), runToken, path, actor)); }
+        catch (OwnershipLostException | LeaseLostException ex) { cleanup(path); throw ex; }
+        catch (RuntimeException ex) { throw new CompletionUnknownException(ex); }
     }
 
-    private void pdf(LabReportInstance report, String actor) {
-        if (mapper.markPdfPending(report.getId(), actor) != 1) throw new ServiceException("PDF artifact is not retryable or Word is incomplete");
+    private void pdf(LabReportJob job, LabReportInstance report, String runToken, String actor, AtomicBoolean healthy) {
+        requireHealthy(healthy); requireOwned(mapper.markPdfPending(report.getId(), job.getId(), runToken, actor));
         byte[] word = store.read(report.getWordPath(), "WORD"); byte[] bytes;
         try {
             if (!(exporters.require("PDF") instanceof PdfReportExporter)) throw new ServiceException("PDF exporter cannot reuse the successful Word artifact");
-            bytes = ((PdfReportExporter) exporters.require("PDF")).exportFromWord(word, "report-" + report.getId());
+            bytes = ((PdfReportExporter) exporters.require("PDF")).exportFromWord(word, "report-" + report.getId() + "-job-" + job.getId() + "-run-" + runToken);
         } catch (Exception ex) { throw failure(ex); }
-        String name = "report-" + report.getId(); store.discardOrphan(report.getId(), name, "PDF");
-        String path = store.publish(report.getId(), name, "PDF", bytes);
-        try { if (mapper.completePdf(report.getId(), path, actor) != 1) throw new ServiceException("PDF artifact state changed concurrently"); }
-        catch (RuntimeException ex) { cleanup(path); throw ex; }
+        requireHealthy(healthy); String name = "report-" + report.getId();
+        String path = store.publish(report.getId(), runToken, name, "PDF", bytes);
+        try { requireHealthy(healthy); requireOwned(mapper.completePdf(report.getId(), job.getId(), runToken, path, actor)); }
+        catch (OwnershipLostException | LeaseLostException ex) { cleanup(path); throw ex; }
+        catch (RuntimeException ex) { throw new CompletionUnknownException(ex); }
     }
 
     private ReportData build(LabReportInstance report, String actor) {
@@ -174,16 +188,31 @@ public class ReportGenerationWorker {
     private List<Map<String,Object>> pinValues(List<com.ailab.system.report.model.ReportPerformancePin> pins) { List<Map<String,Object>> result=new ArrayList<Map<String,Object>>();for(com.ailab.system.report.model.ReportPerformancePin pin:pins){Map<String,Object> value=new LinkedHashMap<String,Object>();value.put("memberId",pin.getMemberId());value.put("revisionNo",pin.getRevisionNo());result.add(value);}return result; }
     private String next(String step) { return "DATA".equals(step) ? "WORD" : "WORD".equals(step) ? "PDF" : null; }
     private boolean successful(LabReportInstance report, String step) {
-        if ("DATA".equals(step)) return "SUCCESS".equals(report.getJsonStatus()) && "SUCCESS".equals(report.getMarkdownStatus());
-        if ("WORD".equals(step)) return "SUCCESS".equals(report.getWordStatus());
-        if ("PDF".equals(step)) return "SUCCESS".equals(report.getPdfStatus());
+        if ("DATA".equals(step)) return "SUCCESS".equals(report.getJsonStatus()) && hasText(report.getJsonPath()) && "SUCCESS".equals(report.getMarkdownStatus()) && hasText(report.getMarkdownPath());
+        if ("WORD".equals(step)) return "SUCCESS".equals(report.getWordStatus()) && hasText(report.getWordPath());
+        if ("PDF".equals(step)) return "SUCCESS".equals(report.getPdfStatus()) && hasText(report.getPdfPath());
         throw new ServiceException("Unsupported report generation step");
     }
-    private void failArtifact(LabReportJob job, String error, String actor) { if ("DATA".equals(job.getJobType())) mapper.failData(job.getReportId(), error, actor); else if ("WORD".equals(job.getJobType())) mapper.failWord(job.getReportId(), error, actor); else if ("PDF".equals(job.getJobType())) mapper.failPdf(job.getReportId(), error, actor); }
-    private RuntimeException failure(Exception value) { return value instanceof RuntimeException ? (RuntimeException) value : new ServiceException(error(value)); }
+    private int failArtifact(LabReportJob job, String runToken, String error, String actor) { if ("DATA".equals(job.getJobType())) return mapper.failData(job.getReportId(),job.getId(),runToken,error,actor); else if ("WORD".equals(job.getJobType())) return mapper.failWord(job.getReportId(),job.getId(),runToken,error,actor); else if ("PDF".equals(job.getJobType())) return mapper.failPdf(job.getReportId(),job.getId(),runToken,error,actor); return 0; }
+    private RuntimeException failure(Exception value) { return value instanceof RuntimeException ? (RuntimeException) value : new ReportGenerationFailure(value); }
     private LabReportInstance required(LabReportInstance value) { if (value == null) throw new ServiceException("Report does not exist"); return value; }
-    private String error(Throwable value) { String text = value == null ? "Unknown report failure" : value.getMessage(); if (!hasText(text)) text = value.getClass().getSimpleName(); text = text.replaceAll("[\\r\\n\\p{Cntrl}]", " ").trim(); return text.length() <= 1000 ? text : text.substring(0, 1000); }
+    private String error(Throwable value) {
+        Throwable cause=value;while(cause!=null){
+            String type=cause.getClass().getSimpleName();String message=cause.getMessage()==null?"":cause.getMessage().toLowerCase(java.util.Locale.ROOT);
+            if(cause instanceof IllegalArgumentException||message.contains("limit")||message.contains("too large")||message.contains("exceed"))return "REPORT_DATA_LIMIT: Report data exceeds a configured safety limit.";
+            if(type.contains("LibreOffice")||message.contains("libreoffice"))return "REPORT_PDF_UNAVAILABLE: PDF conversion is temporarily unavailable; the Word file remains available.";
+            if(cause instanceof java.io.IOException)return "REPORT_EXPORT_FAILED: An artifact could not be generated; retry is available.";
+            cause=cause.getCause();
+        }
+        return "REPORT_GENERATION_FAILED: Report generation failed; retry the failed step or contact an administrator.";
+    }
     private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
     private void cleanup(String path) { if (path != null) try { store.deleteUncommitted(path); } catch (RuntimeException ex) { LOG.error("Could not clean an uncommitted report artifact", ex); } }
+    private void requireHealthy(AtomicBoolean healthy) { if (!healthy.get()) throw new LeaseLostException(); }
+    private void requireOwned(int affected) { if (affected != 1) throw new OwnershipLostException(); }
     private <T> List<T> safe(List<T> value) { return value == null ? Collections.<T>emptyList() : value; }
+    private static final class OwnershipLostException extends RuntimeException { private static final long serialVersionUID = 1L; }
+    private static final class LeaseLostException extends RuntimeException { private static final long serialVersionUID = 1L; }
+    private static final class CompletionUnknownException extends RuntimeException { private static final long serialVersionUID = 1L; CompletionUnknownException(Throwable cause){super(cause);} }
+    private static final class ReportGenerationFailure extends RuntimeException { private static final long serialVersionUID = 1L; ReportGenerationFailure(Throwable cause){super("Report artifact exporter failed",cause);} }
 }

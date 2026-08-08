@@ -51,6 +51,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.io.TempDir;
@@ -92,7 +96,7 @@ class ReportGenerationOrchestratorTest {
         assertEquals("1", instance.getSensitiveFlag()); assertEquals("AUTO", instance.getSourceType());
         assertEquals("DRAFT", instance.getLifecycleStatus());
         assertTrue(instance.getSourceDataJson().contains("\"memberId\":11") && instance.getSourceDataJson().contains("\"memberId\":12"));
-        assertEquals("PENDING", instance.getJsonStatus()); assertEquals("PENDING", instance.getPdfStatus());
+        assertEquals("PENDING", instance.getJsonStatus()); assertEquals("NOT_REQUESTED", instance.getWordStatus()); assertEquals("NOT_REQUESTED", instance.getPdfStatus());
     }
 
     @Test
@@ -102,6 +106,33 @@ class ReportGenerationOrchestratorTest {
         orchestrator.createGeneration(7L,"2026Q3","ALL",1001L);
 
         verify(mapper).selectSourcePerformancePins("2026-Q3","ALL");
+    }
+
+    @Test
+    void historicalTemplateRevisionCannotGenerateANewReport() {
+        LabReportTemplate historical=template();historical.setLatestFlag("0");when(mapper.selectTemplateById(7L)).thenReturn(historical);when(mapper.selectTemplateForUpdate(7L)).thenReturn(historical);
+
+        assertThrows(ServiceException.class,()->orchestrator.createGeneration(7L,"2026-07","ALL",1001L));
+
+        verify(mapper,never()).insertReportInstance(any());
+    }
+
+    @Test
+    void requiredManualSectionsMustBeCompleteBeforeGeneration() {
+        LabReportTemplate template=template();when(mapper.selectTemplateById(7L)).thenReturn(template);when(mapper.selectTemplateForUpdate(7L)).thenReturn(template);
+        LabReportSection manual=section("EXEC_SUMMARY",false);manual.setSectionType("MANUAL");manual.setDataSource(null);manual.setManualFlag("1");manual.setRenderConfigJson("{\"required\":true}");when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(manual));when(mapper.selectSummaries("2026-07","ALL")).thenReturn(Collections.<LabReportSummary>emptyList());
+        assertThrows(ServiceException.class,()->orchestrator.createGeneration(7L,"2026-07","ALL",1001L));verify(mapper,never()).insertReportInstance(any());
+    }
+
+    @Test
+    void requiredManualSectionsNeedRenderableTextRatherThanUnusedJson() {
+        LabReportTemplate template=template();when(mapper.selectTemplateById(7L)).thenReturn(template);when(mapper.selectTemplateForUpdate(7L)).thenReturn(template);
+        LabReportSection manual=section("EXEC_SUMMARY",false);manual.setSectionType("MANUAL");manual.setDataSource(null);manual.setManualFlag("1");manual.setRenderConfigJson("{\"required\":true}");when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(manual));
+        LabReportSummary summary=new LabReportSummary();summary.setSectionCode("EXEC_SUMMARY");summary.setSummaryText(" ");summary.setSummaryJson("{\"unused\":\"cannot be rendered\"}");when(mapper.selectSummaries("2026-07","ALL")).thenReturn(Collections.singletonList(summary));
+
+        assertThrows(ServiceException.class,()->orchestrator.createGeneration(7L,"2026-07","ALL",1001L));
+
+        verify(mapper,never()).insertReportInstance(any());
     }
 
     @Test
@@ -121,6 +152,25 @@ class ReportGenerationOrchestratorTest {
         LabReportInstance finalized = orchestrator.finalizeReport(31L, 4, 1001L);
         assertEquals("FINALIZED", finalized.getLifecycleStatus()); assertEquals("1", finalized.getCurrentFlag());
         verify(mapper).supersedeCurrentReport("monthly", "2026-07", "ALL", 31L, "1001");
+    }
+
+    @Test
+    void finalizationRejectsSuccessMarkersWithoutDurableArtifactPaths() {
+        LabReportInstance incomplete=draft(31L,4);incomplete.setMarkdownPath(null);
+        when(mapper.selectReportById(31L)).thenReturn(incomplete);when(mapper.lockReportFamily("monthly","2026-07","ALL")).thenReturn(Collections.singletonList(incomplete));when(mapper.selectReportForUpdate(31L)).thenReturn(incomplete);
+
+        assertThrows(ServiceException.class,()->orchestrator.finalizeReport(31L,4,1001L));
+
+        verify(mapper,never()).finalizeReport(any(),any(),any());
+    }
+
+    @Test
+    void finalizationWaitsForTheLastDurableJobToFinishProgression() {
+        LabReportInstance complete=draft(31L,4);when(mapper.selectReportById(31L)).thenReturn(complete);when(mapper.lockReportFamily("monthly","2026-07","ALL")).thenReturn(Collections.singletonList(complete));when(mapper.selectReportForUpdate(31L)).thenReturn(complete);when(mapper.countActiveReportJobs(31L)).thenReturn(1);
+
+        assertThrows(ServiceException.class,()->orchestrator.finalizeReport(31L,4,1001L));
+
+        verify(mapper,never()).finalizeReport(any(),any(),any());
     }
 
     @Test
@@ -145,11 +195,11 @@ class ReportGenerationOrchestratorTest {
         assertEquals("MANUAL_IMPORT", imported.getSourceType()); assertEquals(8, imported.getRevisionNo());
         assertEquals(source.getSensitiveFlag(), imported.getSensitiveFlag());
         assertEquals(source.getTemplateCode(), imported.getTemplateCode());
-        assertEquals("PENDING", imported.getJsonStatus()); assertEquals("PENDING", imported.getMarkdownStatus());
-        assertEquals("PENDING", imported.getWordStatus()); assertEquals("PENDING", imported.getPdfStatus());
+        assertEquals("SUCCESS", imported.getJsonStatus()); assertEquals("SUCCESS", imported.getMarkdownStatus());
+        assertEquals("PENDING", imported.getWordStatus()); assertEquals("NOT_REQUESTED", imported.getPdfStatus());
         assertEquals(edited, imported.getContentMarkdown());
         verify(mapper).lockReportFamily("monthly", "2026-07", "ALL");
-        assertTrue(imported.getContentJson().contains("MANUAL_IMPORT"));verify(store,never()).publish(any(),any(),any(),any());
+        assertTrue(imported.getContentJson().contains("MANUAL_IMPORT"));verify(store,never()).publish(any(),any(),any(),any(),any());
     }
 
     @Test
@@ -199,14 +249,14 @@ class ReportGenerationOrchestratorTest {
     @Test
     void workerCommitsDataArtifactsThenDurablyQueuesWordWithoutAnHttpThread() throws Exception {
         LabReportJob job = job(51L, "DATA"); LabReportInstance report = draft(31L, 0); report.setJsonStatus("PENDING"); report.setMarkdownStatus("PENDING");
-        when(mapper.selectReportJobById(51L)).thenReturn(job); when(mapper.claimReportJob(any(),any(),any(),any())).thenReturn(1);
-        when(mapper.selectReportById(31L)).thenReturn(report); when(mapper.markDataPending(31L,"1001")).thenReturn(1);
+        when(mapper.selectReportJobById(51L)).thenReturn(job); when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);
+        when(mapper.selectReportById(31L)).thenReturn(report); when(mapper.markDataPending(31L,51L,"run-token-1234567890","1001")).thenReturn(1);
         when(mapper.selectTemplateById(7L)).thenReturn(template()); LabReportSection configured=section("TASKS",false);
         when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(configured)); when(mapper.selectSummaries("2026-07","ALL")).thenReturn(Collections.emptyList());
-        when(mapper.completeJson(eq(31L),any(),any(),eq("1001"))).thenReturn(1);
-        when(mapper.completeMarkdown(eq(31L),any(),any(),eq("1001"))).thenReturn(1);
-        when(store.publish(eq(31L),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/report-31.json");
-        when(store.publish(eq(31L),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/report-31.md");
+        when(mapper.completeJson(eq(31L),eq(51L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);
+        when(mapper.completeMarkdown(eq(31L),eq(51L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);
+        when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.json");
+        when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
         DataSourceProvider provider=new DataSourceProvider(){public String getId(){return "GOAL_PROGRESS";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData load(ReportContext c,ReportSectionConfig s){return new ReportSectionData(s.getSectionCode(),s.getSectionType(),s.getTitle(),Collections.<java.util.Map<String,Object>>emptyList(),Collections.<String,Object>singletonMap("text","data"));}};
         SectionRenderer renderer=new SectionRenderer(){public String getId(){return "TEXT";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData render(ReportContext c,ReportSectionConfig s,ReportSectionData d){return d;}};
         LabAccessContext manager=new LabAccessContext();manager.setUserId(1001L);manager.setMemberId(11L);manager.setRoleKey("lab_manager");manager.setBizLine("manage");when(access.context(1001L)).thenReturn(manager);when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.singleton("lab:report:sensitive"));
@@ -215,64 +265,126 @@ class ReportGenerationOrchestratorTest {
 
         worker.execute(51L);
 
-        verify(mapper).completeJson(eq(31L),any(),eq("archive/report-31/report-31.json"),eq("1001"));
-        verify(mapper).completeMarkdown(eq(31L),any(),eq("archive/report-31/report-31.md"),eq("1001"));
-        verify(downstream).advance(eq(51L),eq(31L),eq("WORD"),eq("1001"),any());
+        verify(mapper).completeJson(eq(31L),eq(51L),eq("run-token-1234567890"),any(),eq("archive/report-31/runs/run-token-1234567890/report-31.json"),eq("1001"));
+        verify(mapper).completeMarkdown(eq(31L),eq(51L),eq("run-token-1234567890"),any(),eq("archive/report-31/runs/run-token-1234567890/report-31.md"),eq("1001"));
+        verify(downstream).advance(eq(51L),eq(31L),eq("WORD"),eq("run-token-1234567890"),eq("1001"),any());
     }
 
     @Test
     void pdfFailureKeepsSuccessfulWordAndPersistsBoundedRetryableDiagnostics() {
         LabReportJob job=job(52L,"PDF");LabReportInstance report=draft(31L,0);report.setPdfStatus("PENDING");report.setWordPath("archive/report-31/report-31.docx");
-        when(mapper.selectReportJobById(52L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markPdfPending(31L,"1001")).thenReturn(1);when(store.read(report.getWordPath(),"WORD")).thenReturn(new byte[]{1,2,3});
+        when(mapper.selectReportJobById(52L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markPdfPending(31L,52L,"run-token-1234567890","1001")).thenReturn(1);when(mapper.failPdf(eq(31L),eq(52L),eq("run-token-1234567890"),any(),eq("1001"))).thenReturn(1);when(mapper.failReportJob(eq(52L),eq("run-token-1234567890"),any(),eq("1001"),any())).thenReturn(1);when(store.read(report.getWordPath(),"WORD")).thenReturn(new byte[]{1,2,3});
         LabProperties properties=new LabProperties();properties.setLibreOfficeExecutable("definitely-missing-office");
         ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.<ReportExporter>singletonList(new PdfReportExporter(properties))),store,new ReportDataCodec(),mock(ReportJobDispatcher.class),Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
 
         worker.execute(52L);
 
-        verify(mapper).failPdf(eq(31L),any(),eq("1001"));verify(mapper).failReportJob(eq(52L),any(),eq("1001"),any());verify(mapper,never()).failWord(any(),any(),any());
+        verify(mapper).failPdf(eq(31L),eq(52L),eq("run-token-1234567890"),any(),eq("1001"));verify(mapper).failReportJob(eq(52L),eq("run-token-1234567890"),any(),eq("1001"),any());verify(mapper,never()).failWord(any(),any(),any(),any(),any());
     }
 
     @Test
     void artifactStoreRejectsTraversalAndCannotOverwritePublishedSuccess(@TempDir Path root) throws Exception {
         LabProperties properties=new LabProperties();properties.setOutputDirectory(root.resolve("reports").toString());properties.setTempDirectory(root.resolve("reports/tmp").toString());ReportArtifactStore actual=new ReportArtifactStore(properties);
-        String relative=actual.publish(9L,"report-9","JSON","{}".getBytes(StandardCharsets.UTF_8));assertTrue(Files.isRegularFile(actual.resolve(relative,"JSON")));
-        assertThrows(ServiceException.class,()->actual.publish(9L,"report-9","JSON","new".getBytes(StandardCharsets.UTF_8)));
+        String relative=actual.publish(9L,"run-token-11111111","report-9","JSON","{}".getBytes(StandardCharsets.UTF_8));assertTrue(Files.isRegularFile(actual.resolve(relative,"JSON")));
+        assertThrows(ServiceException.class,()->actual.publish(9L,"run-token-11111111","report-9","JSON","new".getBytes(StandardCharsets.UTF_8)));
         assertThrows(ServiceException.class,()->actual.resolve("../secret.json","JSON"));
     }
 
     @Test
-    void crashRecoveryCanDiscardOnlyTheDeterministicOrphanBeforeDatabaseSuccess(@TempDir Path root) throws Exception {
-        LabProperties properties=new LabProperties();properties.setOutputDirectory(root.resolve("reports").toString());properties.setTempDirectory(root.resolve("reports/tmp").toString());ReportArtifactStore actual=new ReportArtifactStore(properties);
-        actual.publish(9L,"report-9","JSON","orphan".getBytes(StandardCharsets.UTF_8));
+    void artifactStoreDeletesOnlyOldUnreferencedRunDirectories(@TempDir Path root) throws Exception {
+        LabProperties properties=new LabProperties();properties.setOutputDirectory(root.resolve("reports").toString());properties.setTempDirectory(root.resolve("reports/tmp").toString());ReportArtifactStore actual=new ReportArtifactStore(properties);String referenced=actual.publish(9L,"run-token-reference-1111","report-9","JSON","{}".getBytes(StandardCharsets.UTF_8));String orphan=actual.publish(10L,"run-token-orphan-222222","report-10","JSON","{}".getBytes(StandardCharsets.UTF_8));Path referencedFile=actual.resolve(referenced,"JSON");Path orphanFile=actual.resolve(orphan,"JSON");java.nio.file.attribute.FileTime old=java.nio.file.attribute.FileTime.from(Instant.parse("2026-07-01T00:00:00Z"));Files.setLastModifiedTime(referencedFile.getParent(),old);Files.setLastModifiedTime(orphanFile.getParent(),old);
 
-        actual.discardOrphan(9L,"report-9","JSON");
+        assertEquals(1,actual.cleanOrphanRuns(Collections.singletonList(referenced),Instant.parse("2026-08-01T00:00:00Z")));
 
-        String relative=actual.publish(9L,"report-9","JSON","recovered".getBytes(StandardCharsets.UTF_8));
-        assertEquals("recovered",new String(actual.read(relative,"JSON"),StandardCharsets.UTF_8));
+        assertTrue(Files.exists(referencedFile));assertTrue(!Files.exists(orphanFile.getParent()));
     }
 
     @Test
     void recoveredSuccessfulDataStepQueuesWordWithoutOverwritingArtifacts() {
         LabReportJob job=job(53L,"DATA");LabReportInstance report=draft(31L,0);
-        when(mapper.selectReportJobById(53L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);
+        when(mapper.selectReportJobById(53L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);
         ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);
         ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.<ReportExporter>emptyList()),store,new ReportDataCodec(),downstream,Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
 
         worker.execute(53L);
 
-        verify(mapper,never()).markDataPending(any(),any());verify(store,never()).publish(any(),any(),any(),any());
-        verify(downstream).advance(eq(53L),eq(31L),eq("WORD"),eq("1001"),any());
+        verify(mapper,never()).markDataPending(any(),any(),any(),any());verify(store,never()).publish(any(),any(),any(),any(),any());
+        verify(downstream).advance(eq(53L),eq(31L),eq("WORD"),eq("run-token-1234567890"),eq("1001"),any());
     }
 
     @Test
     void progressionFailureLeavesRunningJobForStaleRecoveryInsteadOfBreakingTheChain() {
-        LabReportJob job=job(55L,"DATA");LabReportInstance report=draft(31L,0);when(mapper.selectReportJobById(55L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);
-        ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);org.mockito.Mockito.doThrow(new ServiceException("database unavailable")).when(downstream).advance(any(),any(),any(),any(),any());
+        LabReportJob job=job(55L,"DATA");LabReportInstance report=draft(31L,0);when(mapper.selectReportJobById(55L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);
+        ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);org.mockito.Mockito.doThrow(new ServiceException("database unavailable")).when(downstream).advance(any(),any(),any(),any(),any(),any());
         ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.<ReportExporter>emptyList()),store,new ReportDataCodec(),downstream,Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
 
         worker.execute(55L);
 
-        verify(mapper,never()).failReportJob(any(),any(),any(),any());verify(mapper,never()).failData(any(),any(),any());
+        verify(mapper,never()).failReportJob(any(),any(),any(),any(),any());verify(mapper,never()).failData(any(),any(),any(),any(),any());
+    }
+
+    @Test
+    void redisRenewalFailureStopsTheRunBeforeItCanPublishOrWriteFailureState() throws Exception {
+        LabReportJob job=job(57L,"WORD");LabReportInstance report=draft(31L,0);report.setWordStatus("PENDING");
+        ReportContext persistedContext=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());
+        report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(persistedContext,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
+        when(mapper.selectReportJobById(57L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markWordPending(31L,57L,"run-token-1234567890","1001")).thenReturn(1);
+        final AtomicReference<Runnable> heartbeat=new AtomicReference<Runnable>();ScheduledExecutorService executor=mock(ScheduledExecutorService.class);
+        org.mockito.Mockito.doAnswer(call->{heartbeat.set((Runnable)call.getArgument(0));return mock(ScheduledFuture.class);}).when(executor).scheduleAtFixedRate(any(Runnable.class),org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.anyLong(),eq(TimeUnit.SECONDS));
+        ReportJobLock lost=new ReportJobLock(){public String tryAcquire(Long id,String step){return "run-token-1234567890";}public boolean renew(Long id,String step,String token){return false;}public void release(Long id,String step,String token){}};
+        ReportExporter word=new ReportExporter(){public String getId(){return "WORD";}public boolean supports(String format){return "WORD".equals(format);}public byte[] export(com.ailab.system.report.model.ReportData value){heartbeat.get().run();return new byte[]{1};}};
+        ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lost,null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.singletonList(word)),store,new ReportDataCodec(),mock(ReportJobDispatcher.class),executor,Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
+
+        worker.execute(57L);
+
+        verify(store,never()).publish(any(),any(),any(),any(),any());verify(mapper,never()).completeWord(any(),any(),any(),any(),any());verify(mapper,never()).failWord(any(),any(),any(),any(),any());verify(mapper,never()).failReportJob(any(),any(),any(),any(),any());
+    }
+
+    @Test
+    void staleWorkerDeletesOnlyItsOwnUncommittedPathWhenFenceRejectsCompletion() throws Exception {
+        LabReportJob job=job(58L,"WORD");LabReportInstance report=draft(31L,0);report.setWordStatus("PENDING");
+        ReportContext persistedContext=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());
+        report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(persistedContext,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
+        when(mapper.selectReportJobById(58L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markWordPending(31L,58L,"run-token-1234567890","1001")).thenReturn(1);
+        when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("WORD"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.docx");
+        ReportExporter word=new ReportExporter(){public String getId(){return "WORD";}public boolean supports(String format){return "WORD".equals(format);}public byte[] export(com.ailab.system.report.model.ReportData value){return new byte[]{1};}};
+        ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.singletonList(word)),store,new ReportDataCodec(),mock(ReportJobDispatcher.class),Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
+
+        worker.execute(58L);
+
+        verify(store).deleteUncommitted("archive/report-31/runs/run-token-1234567890/report-31.docx");verify(mapper,never()).failWord(any(),any(),any(),any(),any());verify(mapper,never()).failReportJob(any(),any(),any(),any(),any());
+    }
+
+    @Test
+    void ambiguousDatabaseCompletionFailureNeverDeletesAPossiblyReferencedArtifact() throws Exception {
+        LabReportJob job=job(60L,"WORD");LabReportInstance report=draft(31L,0);report.setWordStatus("PENDING");
+        ReportContext persistedContext=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());
+        report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(persistedContext,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
+        when(mapper.selectReportJobById(60L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markWordPending(31L,60L,"run-token-1234567890","1001")).thenReturn(1);
+        String path="archive/report-31/runs/run-token-1234567890/report-31.docx";when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("WORD"),any())).thenReturn(path);
+        when(mapper.completeWord(31L,60L,"run-token-1234567890",path,"1001")).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("commit outcome unknown"));
+        ReportExporter word=new ReportExporter(){public String getId(){return "WORD";}public boolean supports(String format){return "WORD".equals(format);}public byte[] export(com.ailab.system.report.model.ReportData value){return new byte[]{1};}};
+        ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.singletonList(word)),store,new ReportDataCodec(),mock(ReportJobDispatcher.class),Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
+
+        worker.execute(60L);
+
+        verify(store,never()).deleteUncommitted(path);
+        verify(mapper,never()).failWord(any(),any(),any(),any(),any());
+        verify(mapper,never()).failReportJob(any(),any(),any(),any(),any());
+    }
+
+    @Test
+    void persistedUserErrorUsesAWhitelistedCodeAndNeverLeaksTheInternalException() throws Exception {
+        LabReportJob job=job(59L,"WORD");LabReportInstance report=draft(31L,0);report.setWordStatus("PENDING");
+        ReportContext persistedContext=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());
+        report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(persistedContext,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
+        when(mapper.selectReportJobById(59L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markWordPending(31L,59L,"run-token-1234567890","1001")).thenReturn(1);when(mapper.failWord(eq(31L),eq(59L),eq("run-token-1234567890"),any(),eq("1001"))).thenReturn(1);when(mapper.failReportJob(eq(59L),eq("run-token-1234567890"),any(),eq("1001"),any())).thenReturn(1);
+        ReportExporter word=new ReportExporter(){public String getId(){return "WORD";}public boolean supports(String format){return "WORD".equals(format);}public byte[] export(com.ailab.system.report.model.ReportData value)throws java.io.IOException{throw new java.io.IOException("jdbc:mysql://private-host password=hunter2");}};
+        ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.singletonList(word)),store,new ReportDataCodec(),mock(ReportJobDispatcher.class),Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
+
+        worker.execute(59L);
+
+        org.mockito.ArgumentCaptor<String> error=org.mockito.ArgumentCaptor.forClass(String.class);verify(mapper).failWord(eq(31L),eq(59L),eq("run-token-1234567890"),error.capture(),eq("1001"));assertTrue(error.getValue().startsWith("REPORT_")&&!error.getValue().contains("private-host")&&!error.getValue().contains("hunter2"));
     }
 
     @Test
@@ -280,30 +392,13 @@ class ReportGenerationOrchestratorTest {
         LabReportJob job=job(54L,"DATA");LabReportInstance report=draft(31L,0);report.setMarkdownStatus("FAILED");
         ReportContext persistedContext=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());
         report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(persistedContext,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
-        when(mapper.selectReportJobById(54L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markDataPending(31L,"1001")).thenReturn(1);when(mapper.completeMarkdown(eq(31L),any(),any(),eq("1001"))).thenReturn(1);when(store.publish(eq(31L),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/report-31.md");
+        when(mapper.selectReportJobById(54L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markDataPending(31L,54L,"run-token-1234567890","1001")).thenReturn(1);when(mapper.completeMarkdown(eq(31L),eq(54L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
         ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);
         ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.<ReportExporter>singletonList(new MarkdownReportExporter())),store,new ReportDataCodec(),downstream,Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
 
         worker.execute(54L);
 
-        verify(mapper,never()).completeJson(any(),any(),any(),any());verify(mapper).completeMarkdown(eq(31L),any(),eq("archive/report-31/report-31.md"),eq("1001"));verify(downstream).advance(eq(54L),eq(31L),eq("WORD"),eq("1001"),any());
-    }
-
-    @Test
-    void manualImportDataStepPublishesAndPersistsTheExactUploadedMarkdown() {
-        String raw="---\ndataSource: ignored\n---\n# Edited *body* [link](https://example.test)";
-        LabReportJob job=job(56L,"DATA");LabReportInstance report=draft(31L,0);report.setSourceType("MANUAL_IMPORT");report.setJsonStatus("PENDING");report.setMarkdownStatus("PENDING");report.setContentMarkdown(raw);
-        ReportContext persistedContext=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());
-        report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(persistedContext,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>singletonMap("sourceType","MANUAL_IMPORT"))));
-        when(mapper.selectReportJobById(56L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markDataPending(31L,"1001")).thenReturn(1);
-        when(mapper.completeJson(eq(31L),any(),any(),eq("1001"))).thenReturn(1);when(mapper.completeMarkdown(eq(31L),any(),any(),eq("1001"))).thenReturn(1);
-        when(store.publish(eq(31L),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/report-31.json");when(store.publish(eq(31L),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/report-31.md");
-        ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Arrays.<ReportExporter>asList(new JsonReportExporter(),new MarkdownReportExporter())),store,new ReportDataCodec(),mock(ReportJobDispatcher.class),Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
-
-        worker.execute(56L);
-
-        org.mockito.ArgumentCaptor<byte[]> bytes=org.mockito.ArgumentCaptor.forClass(byte[].class);verify(store).publish(eq(31L),eq("report-31"),eq("MARKDOWN"),bytes.capture());
-        assertEquals(raw,new String(bytes.getValue(),StandardCharsets.UTF_8));verify(mapper).completeMarkdown(31L,raw,"archive/report-31/report-31.md","1001");
+        verify(mapper,never()).completeJson(any(),any(),any(),any(),any(),any());verify(mapper).completeMarkdown(eq(31L),eq(54L),eq("run-token-1234567890"),any(),eq("archive/report-31/runs/run-token-1234567890/report-31.md"),eq("1001"));verify(downstream).advance(eq(54L),eq(31L),eq("WORD"),eq("run-token-1234567890"),eq("1001"),any());
     }
 
     @Test
@@ -313,30 +408,95 @@ class ReportGenerationOrchestratorTest {
     }
 
     @Test
-    void markdownImportAndItsFirstDataJobShareOneRollbackBoundary() throws Exception {
+    void markdownImportAndItsArtifactReconciliationJobShareOneRollbackBoundary() throws Exception {
         ReportGenerationOrchestrator imports=mock(ReportGenerationOrchestrator.class);ReportJobDispatcher jobs=mock(ReportJobDispatcher.class);
-        LabReportInstance imported=draft(88L,0);imported.setJsonStatus("PENDING");imported.setMarkdownStatus("PENDING");when(imports.importMarkdown(31L,"# edited",1001L)).thenReturn(imported);
+        LabReportInstance imported=draft(88L,0);imported.setJsonStatus("SUCCESS");imported.setMarkdownStatus("SUCCESS");imported.setWordStatus("PENDING");imported.setPdfStatus("NOT_REQUESTED");when(imports.importMarkdown(31L,"# edited",1001L)).thenReturn(imported);
         when(jobs.queue(88L,"DATA","1001")).thenThrow(new ServiceException("queue unavailable"));
         LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,imports,jobs);
 
         assertThrows(ServiceException.class,()->service.importMarkdown(31L,"edit.md","# edited".getBytes(StandardCharsets.UTF_8),1001L));
 
         assertTrue(LabReportServiceImpl.class.getMethod("importMarkdown",Long.class,String.class,byte[].class,Long.class).isAnnotationPresent(Transactional.class));
-        verify(mapper,never()).failWord(any(),any(),any());
+        verify(mapper,never()).failWord(any(),any(),any(),any(),any());
+    }
+
+    @Test
+    void manualImportDataJobPublishesPersistedJsonAndRawMarkdownWhenPathsAreMissing() {
+        LabReportJob job=job(61L,"DATA");LabReportInstance report=draft(31L,0);report.setSourceType("MANUAL_IMPORT");report.setJsonPath(null);report.setMarkdownPath(null);report.setContentMarkdown("# Edited exactly");
+        ReportContext context=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(context,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
+        when(mapper.selectReportJobById(61L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markDataPending(31L,61L,"run-token-1234567890","1001")).thenReturn(1);
+        when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.json");when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
+        when(mapper.completeJson(eq(31L),eq(61L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);when(mapper.completeMarkdown(eq(31L),eq(61L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);
+        ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.<ReportExporter>singletonList(new JsonReportExporter())),store,new ReportDataCodec(),downstream,Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
+
+        worker.execute(61L);
+
+        verify(mapper).completeJson(eq(31L),eq(61L),eq("run-token-1234567890"),eq(report.getContentJson()),eq("archive/report-31/runs/run-token-1234567890/report-31.json"),eq("1001"));
+        verify(mapper).completeMarkdown(31L,61L,"run-token-1234567890","# Edited exactly","archive/report-31/runs/run-token-1234567890/report-31.md","1001");
+        verify(downstream).advance(eq(61L),eq(31L),eq("WORD"),eq("run-token-1234567890"),eq("1001"),any());
+    }
+
+    @Test
+    void markdownImportCannotExceedTheWordTextBudget() {
+        ReportGenerationOrchestrator imports=mock(ReportGenerationOrchestrator.class);LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,imports,mock(ReportJobDispatcher.class));
+        byte[] oversized=new byte[1024*1024+1];java.util.Arrays.fill(oversized,(byte)'a');
+        assertThrows(ServiceException.class,()->service.importMarkdown(31L,"edit.md",oversized,1001L));verify(imports,never()).importMarkdown(any(),any(),any());
+    }
+
+    @Test
+    void summaryUpsertReturnsTheDatabaseIdentityAndIncrementedRevision() {
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));LabReportSummary input=new LabReportSummary();input.setPeriod("2026-07");input.setBizLine("ALL");input.setSectionCode("EXEC");input.setSummaryText("done");LabReportSummary stored=new LabReportSummary();stored.setId(77L);stored.setPeriod("2026-07");stored.setBizLine("ALL");stored.setSectionCode("EXEC");stored.setSummaryText("done");stored.setSourceRevision(5);when(mapper.upsertSummary(any(LabReportSummary.class))).thenReturn(2);when(mapper.selectSummary("2026-07","ALL","EXEC")).thenReturn(stored);
+        LabReportSummary result=service.saveSummary(input,1001L);
+        assertEquals(77L,result.getId());assertEquals(5,result.getSourceRevision());
+    }
+
+    @Test
+    void summaryApiAcceptsEveryCanonicalReportPeriod() {
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));LabReportSummary input=new LabReportSummary();input.setPeriod("2026Q3");input.setBizLine("ALL");input.setSectionCode("EXEC");input.setSummaryText("quarterly summary");LabReportSummary stored=new LabReportSummary();stored.setId(78L);stored.setPeriod("2026Q3");stored.setBizLine("ALL");stored.setSectionCode("EXEC");stored.setSourceRevision(1);when(mapper.upsertSummary(any(LabReportSummary.class))).thenReturn(1);when(mapper.selectSummary("2026Q3","ALL","EXEC")).thenReturn(stored);
+
+        assertEquals(78L,service.saveSummary(input,1001L).getId());
+    }
+
+    @Test
+    void summaryJsonIsStreamBudgetedBeforeTreeMaterialization() {
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));StringBuilder deep=new StringBuilder();for(int i=0;i<70;i++)deep.append("{\"x\":");deep.append('0');for(int i=0;i<70;i++)deep.append('}');LabReportSummary input=new LabReportSummary();input.setPeriod("2026-07");input.setBizLine("ALL");input.setSectionCode("EXEC");input.setSummaryText("rendered");input.setSummaryJson(deep.toString());
+
+        assertThrows(ServiceException.class,()->service.saveSummary(input,1001L));
+
+        verify(mapper,never()).upsertSummary(any());
+    }
+
+    @Test
+    void reportHistoryDtoProjectionPreservesTheMapperPageTotal() {
+        com.github.pagehelper.Page<LabReportInstance> mapped=new com.github.pagehelper.Page<LabReportInstance>(2,10);mapped.setTotal(37L);mapped.add(draft(31L,0));when(mapper.selectReportHistory(null,null,true,false)).thenReturn(mapped);when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.<String>emptySet());LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));
+
+        java.util.List<com.ailab.system.dto.ReportStatusView> result=service.history(null,null,1001L);
+
+        assertTrue(result instanceof com.github.pagehelper.Page);assertEquals(37L,((com.github.pagehelper.Page<?>)result).getTotal());
+    }
+
+    @Test
+    void artifactFailurePersistenceErrorLeavesTheJobRunningForRecovery() throws Exception {
+        LabReportJob job=job(62L,"WORD");LabReportInstance report=draft(31L,0);report.setWordStatus("PENDING");ReportContext context=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(context,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
+        when(mapper.selectReportJobById(62L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markWordPending(31L,62L,"run-token-1234567890","1001")).thenReturn(1);when(mapper.failWord(eq(31L),eq(62L),eq("run-token-1234567890"),any(),eq("1001"))).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("temporary write failure"));
+        ReportExporter word=new ReportExporter(){public String getId(){return "WORD";}public boolean supports(String format){return "WORD".equals(format);}public byte[] export(com.ailab.system.report.model.ReportData value)throws java.io.IOException{throw new java.io.IOException("export failed");}};ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.singletonList(word)),store,new ReportDataCodec(),mock(ReportJobDispatcher.class),Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
+
+        worker.execute(62L);
+
+        verify(mapper,never()).failReportJob(any(),any(),any(),any(),any());
     }
 
     @Test
     void tempCleanupEligibilityFailsClosedForUnknownOrActiveReports() {
         LabReportTempFileEligibilityImpl eligibility=new LabReportTempFileEligibilityImpl(mapper);
         assertTrue(!eligibility.isDeletionEligible(java.nio.file.Paths.get("unknown/file.part")));
-        when(mapper.selectReportById(31L)).thenReturn(draft(31L,0));when(mapper.countActiveReportJobs(31L)).thenReturn(1);
-        assertTrue(!eligibility.isDeletionEligible(java.nio.file.Paths.get("report-31/file.part")));
-        when(mapper.countActiveReportJobs(31L)).thenReturn(0);assertTrue(!eligibility.isDeletionEligible(java.nio.file.Paths.get("report-31/file.part")));
-        when(mapper.countTerminalReportJobs(31L)).thenReturn(1);assertTrue(eligibility.isDeletionEligible(java.nio.file.Paths.get("report-31/file.part")));
+        LabReportJob terminal=job(77L,"PDF");terminal.setJobStatus("SUCCESS");when(mapper.selectReportById(31L)).thenReturn(draft(31L,0));when(mapper.selectReportJobById(77L)).thenReturn(terminal);when(mapper.countActiveReportJobs(31L)).thenReturn(1);
+        java.nio.file.Path residue=java.nio.file.Paths.get("lo-report-31-job-77-run-token-1234567890-12345/out/report.pdf");assertTrue(!eligibility.isDeletionEligible(residue));
+        when(mapper.countActiveReportJobs(31L)).thenReturn(0);assertTrue(eligibility.isDeletionEligible(residue));
     }
 
     private LabReportJob job(Long id,String step){LabReportJob value=new LabReportJob();value.setId(id);value.setReportId(31L);value.setJobType(step);value.setJobStatus("QUEUED");value.setVersion(0);value.setCreateBy("1001");return value;}
-    private ReportJobLock lock(){return new ReportJobLock(){public String tryAcquire(Long reportId,String step){return "token";}public void release(Long reportId,String step,String token){}};}
+    private ReportJobLock lock(){return new ReportJobLock(){public String tryAcquire(Long reportId,String step){return "run-token-1234567890";}public void release(Long reportId,String step,String token){}};}
 
     private LabReportTemplate template() { LabReportTemplate value = new LabReportTemplate(); value.setId(7L);
         value.setTemplateCode("monthly"); value.setTemplateName("Monthly"); value.setPeriodType("MONTH");
@@ -352,5 +512,5 @@ class ReportGenerationOrchestratorTest {
         value.setFinalFlag("0"); value.setSensitiveFlag("0"); value.setSourceType("AUTO"); value.setSourcePerfRevision(3);
         value.setSourceDataJson("{\"performancePins\":[]}");
         value.setContentJson("{}"); value.setContentMarkdown("# report"); value.setJsonStatus("SUCCESS");
-        value.setMarkdownStatus("SUCCESS"); value.setWordStatus("SUCCESS"); value.setPdfStatus("SUCCESS"); value.setVersion(version); return value; }
+        value.setJsonPath("archive/report-"+id+"/report.json");value.setMarkdownStatus("SUCCESS");value.setMarkdownPath("archive/report-"+id+"/report.md");value.setWordStatus("SUCCESS");value.setWordPath("archive/report-"+id+"/report.docx");value.setPdfStatus("SUCCESS");value.setPdfPath("archive/report-"+id+"/report.pdf");value.setVersion(version); return value; }
 }

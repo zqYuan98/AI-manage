@@ -88,9 +88,11 @@ class WordReportExporterTest {
 
     @Test
     void rejectsHugeCanonicalTextBeforeBuildingTheDocumentPackage() {
-        ReportData value = new ReportData(report().getContext(), "t", 1,
-                Collections.singletonList(new ReportSectionData("x", "TEXT", "x", Collections.<Map<String,Object>>emptyList(), map("text", repeat("界", 400000)))), Collections.<String,Object>emptyMap());
-        assertThrows(java.io.IOException.class, () -> new WordReportExporter().export(value));
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> new ReportData(report().getContext(), "t", 1,
+                        Collections.singletonList(new ReportSectionData("x", "TEXT", "x", Collections.<Map<String,Object>>emptyList(), map("text", repeat("界", 400000)))),
+                        Collections.<String,Object>emptyMap()));
+        assertTrue(error.getMessage().contains("text byte limit"));
     }
 
     @Test

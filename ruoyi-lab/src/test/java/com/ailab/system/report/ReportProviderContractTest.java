@@ -467,7 +467,7 @@ class ReportProviderContractTest {
         LabReportSection section = new LabReportSection();
         section.setSectionCode("MANUAL_NOTE"); section.setSectionName("Manual"); section.setSectionType("MANUAL");
         section.setManualFlag("1"); section.setVisibleFlag("1"); section.setQueryConfigJson("{}");
-        section.setRenderConfigJson("{\"placeholder\":\"Manual placeholder\"}"); section.setStyleConfigJson("{}");
+        section.setRenderConfigJson("{\"required\":false,\"placeholder\":\"Manual placeholder\"}"); section.setStyleConfigJson("{}");
         return new ReportSectionConfig(section);
     }
 

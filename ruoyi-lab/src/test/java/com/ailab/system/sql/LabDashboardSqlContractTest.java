@@ -38,7 +38,7 @@ class LabDashboardSqlContractTest {
         assertTrue(compact.contains("e.block_status='open'ande.del_flag='0'") && compact.contains("t.current_block_flag='1'"));
         assertTrue(compact.contains("t.workflow_statusin('draft','active')") && compact.contains("pc.close_status='closed'"));
         assertTrue(compact.contains("groupbyg.id,g.title,g.year") && compact.contains("groupbym.id,u.nick_name,m.biz_line"));
-        assertTrue(compact.contains("p.current_flag='1'") && compact.contains("ri.sensitive_flag='0'"));
+        assertTrue(compact.contains("p.current_flag='1'") && compact.contains("coalesce(ri.sensitive_flag,'0')='0'"));
         assertTrue(compact.contains("ri.lifecycle_statusin('finalized','superseded')")
                 && compact.contains("ri.lifecycle_status='final'")
                 && compact.contains("ri.json_status='ready'")
@@ -165,6 +165,13 @@ class LabDashboardSqlContractTest {
                         && ledger.contains("scope.rolekey=='lab_member'"),
                 "only typed risk-drill mode should apply trusted dashboard scope in SQL");
         assertFalse(ledgerXml.contains("${"));
+    }
+
+    @Test
+    void dashboardReportsRequireTheCurrentSensitivePermissionEvenForManagers() throws Exception {
+        String xml=read("ruoyi-lab/src/main/resources/mapper/lab/LabDashboardMapper.xml");String compact=compact(xml);
+        assertTrue(occurrences(compact,"#{sensitive}")>=2&&occurrences(compact,"ri.sensitive_flag")>=2,"recent and latest report queries must receive the live sensitive permission snapshot");
+        assertFalse(compact.contains("#{scope.rolekey}='lab_manager'or(ri.sensitive_flag='0'"),"manager role alone must not bypass sensitive report reauthorization");
     }
 
     @Test

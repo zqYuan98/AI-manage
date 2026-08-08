@@ -57,6 +57,14 @@ public final class ReportConfigCatalog {
         return providers == null ? Collections.<String>emptySet() : providers;
     }
 
+    public static boolean supportsPeriod(String providerId,String periodType){
+        if(providerId==null||periodType==null)return false;
+        if(PERF_SUMMARY.equals(providerId))return "MONTH".equals(periodType)||"QUARTER".equals(periodType);
+        if(GOAL_PROGRESS.equals(providerId))return "MONTH".equals(periodType)||"QUARTER".equals(periodType)||"YEAR".equals(periodType);
+        if(TASK_NEXT.equals(providerId))return "MONTH".equals(periodType);
+        return PROVIDER_IDS.contains(providerId)&&REPORT_TYPES.contains(periodType);
+    }
+
     private static Map<String, Set<String>> compatibility() {
         Map<String, Set<String>> values = new LinkedHashMap<String, Set<String>>();
         values.put(TABLE, set(TASK_DETAIL, TASK_UNDONE, TASK_NEXT, TASK_COORD, TASK_BLOCK,

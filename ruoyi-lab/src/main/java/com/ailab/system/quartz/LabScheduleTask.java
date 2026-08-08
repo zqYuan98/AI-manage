@@ -2,6 +2,8 @@ package com.ailab.system.quartz;
 
 import com.ailab.system.config.LabProperties;
 import com.ailab.system.mapper.LabDashboardMapper;
+import com.ailab.system.mapper.LabReportMapper;
+import com.ailab.system.report.ReportArtifactStore;
 import com.ailab.system.service.LabPerformanceService;
 import com.ailab.system.service.LabReminderService;
 import com.ailab.system.service.LabReportRecoveryWorker;
@@ -20,6 +22,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,13 +42,15 @@ public class LabScheduleTask {
     private final Clock clock;
     private final LabReportRecoveryWorker reportRecoveryWorker;
     private final LabReportTempFileEligibility tempFileEligibility;
+    private final LabReportMapper reportMapper;
+    private final ReportArtifactStore artifactStore;
 
     @Autowired
     public LabScheduleTask(LabReminderService reminders, LabPerformanceService performance,
             LabDashboardMapper mapper, LabProperties properties, Optional<LabReportRecoveryWorker> recoveryWorker,
-            Optional<LabReportTempFileEligibility> tempFileEligibility) {
+            Optional<LabReportTempFileEligibility> tempFileEligibility,LabReportMapper reportMapper,ReportArtifactStore artifactStore) {
         this(reminders, performance, mapper, properties, Clock.system(ZoneId.of("Asia/Shanghai")),
-                recoveryWorker.orElse(null), tempFileEligibility.orElse(null));
+                recoveryWorker.orElse(null), tempFileEligibility.orElse(null),reportMapper,artifactStore);
     }
 
     public LabScheduleTask(LabReminderService reminders, LabPerformanceService performance,
@@ -55,9 +61,15 @@ public class LabScheduleTask {
     public LabScheduleTask(LabReminderService reminders, LabPerformanceService performance,
             LabDashboardMapper mapper, LabProperties properties, Clock clock, LabReportRecoveryWorker reportRecoveryWorker,
             LabReportTempFileEligibility tempFileEligibility) {
+        this(reminders,performance,mapper,properties,clock,reportRecoveryWorker,tempFileEligibility,null,null);
+    }
+
+    public LabScheduleTask(LabReminderService reminders, LabPerformanceService performance,
+            LabDashboardMapper mapper, LabProperties properties, Clock clock, LabReportRecoveryWorker reportRecoveryWorker,
+            LabReportTempFileEligibility tempFileEligibility,LabReportMapper reportMapper,ReportArtifactStore artifactStore) {
         this.reminders = reminders; this.performance = performance; this.mapper = mapper;
         this.properties = properties; this.clock = clock; this.reportRecoveryWorker = reportRecoveryWorker;
-        this.tempFileEligibility = tempFileEligibility;
+        this.tempFileEligibility = tempFileEligibility;this.reportMapper=reportMapper;this.artifactStore=artifactStore;
     }
 
     public void scanBlocks() {
@@ -101,9 +113,9 @@ public class LabScheduleTask {
             }
             if (tempFileEligibility == null) {
                 LOG.warn("AI Lab report temporary cleanup eligibility is not installed; cleanup skipped fail-closed");
-                return;
-            }
+            } else {
             final Instant cutoff = clock.instant().minus(TEMP_RETENTION_HOURS, ChronoUnit.HOURS);
+            List<Path> directories=new ArrayList<Path>();try(Stream<Path> paths=Files.walk(realTemp)){Path[] values=paths.filter(path->Files.isDirectory(path)&&!path.equals(realTemp)).toArray(Path[]::new);for(Path directory:values){Path realDirectory=directory.toRealPath();if(!realDirectory.startsWith(realTemp))throw new ServiceException("Refusing to clean a temporary directory outside the configured directory");Path relative=realTemp.relativize(realDirectory);if(Files.getLastModifiedTime(realDirectory).toInstant().isBefore(cutoff)&&tempFileEligibility.isDeletionEligible(relative))directories.add(realDirectory);}}
             int deleted = 0;
             try (Stream<Path> paths = Files.walk(realTemp)) {
                 Path[] files = paths.filter(path -> Files.isRegularFile(path)).toArray(Path[]::new);
@@ -115,7 +127,10 @@ public class LabScheduleTask {
                             && tempFileEligibility.isDeletionEligible(relativeFile) && Files.deleteIfExists(realFile)) deleted++;
                 }
             }
+            Collections.sort(directories,new Comparator<Path>(){@Override public int compare(Path left,Path right){return Integer.compare(right.getNameCount(),left.getNameCount());}});for(Path directory:directories){try{if(Files.deleteIfExists(directory))deleted++;}catch(java.nio.file.DirectoryNotEmptyException ignored){/* another owned residue remains */}}
             LOG.info("AI Lab report temporary cleanup removed {} files", deleted);
+            }
+            if(artifactStore!=null&&reportMapper!=null){int deleted=artifactStore.cleanOrphanRuns(reportMapper.selectReferencedReportArtifactPaths(),clock.instant().minus(7,ChronoUnit.DAYS));LOG.info("AI Lab report archive reconciliation removed {} orphan run directories",deleted);}
         } catch (ServiceException error) {
             throw error;
         } catch (IOException error) {

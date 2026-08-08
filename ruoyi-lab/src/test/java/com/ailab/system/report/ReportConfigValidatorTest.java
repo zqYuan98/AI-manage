@@ -141,6 +141,13 @@ class ReportConfigValidatorTest {
     }
 
     @Test
+    void serializedManualSectionsDeriveTheRequiredManualFlagOnSaveAndImport() {
+        String valid = "{\"sectionType\":\"MANUAL\",\"renderConfig\":{\"required\":false,\"placeholder\":\"暂无内容\"}}";
+        assertTrue(validator.validateForSave(valid).isManual());
+        assertTrue(validator.validateForImport(valid).isManual());
+    }
+
+    @Test
     void sectionStyleUsesTheSameStrictBoundaryForObjectsSavesAndImports() {
         LabReportSection valid = section("TABLE", "TASK_DETAIL");
         valid.setStyleConfigJson("{\"titleLevel\":\"H2\",\"width\":\"100%\",\"padding\":{\"top\":8,\"right\":8,\"bottom\":8,\"left\":8}}");
@@ -594,8 +601,11 @@ class ReportConfigValidatorTest {
         LabReportSection section = new LabReportSection();
         section.setSectionType(type);
         section.setDataSource(provider);
+        section.setManualFlag("MANUAL".equals(type) ? "1" : "0");
         section.setQueryConfigJson("{\"filters\":[]}");
-        section.setRenderConfigJson("{\"columns\":[\"owner\"]}");
+        section.setRenderConfigJson("MANUAL".equals(type)
+                ? "{\"required\":false,\"placeholder\":\"暂无内容\"}"
+                : "{\"columns\":[\"owner\"]}");
         return section;
     }
 

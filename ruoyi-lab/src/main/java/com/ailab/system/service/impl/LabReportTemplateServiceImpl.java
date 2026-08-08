@@ -4,9 +4,12 @@ import com.ailab.system.domain.LabReportSection;
 import com.ailab.system.domain.LabReportTemplate;
 import com.ailab.system.mapper.LabReportMapper;
 import com.ailab.system.report.config.ReportConfigValidator;
+import com.ailab.system.report.config.ReportConfigCatalog;
 import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.LabReportTemplateService;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -39,16 +42,15 @@ public class LabReportTemplateServiceImpl implements LabReportTemplateService {
     public LabReportTemplate saveRevision(Long sourceTemplateId, LabReportTemplate draft, List<LabReportSection> input,
             boolean saveAsNewFamily, int expectedVersion, Long actorUserId) {
         access.requireManager(actorUserId); if (draft == null) throw new ServiceException("Template configuration is required");
-        String actor = actor(actorUserId); LabReportTemplate source = null; boolean familyDefault = false;
-        if (sourceTemplateId != null) {
-            if (saveAsNewFamily) source = required(mapper.selectTemplateForUpdate(sourceTemplateId));
-            else {
-                LabReportTemplate snapshot = required(mapper.selectTemplateById(sourceTemplateId));
+        String actor = actor(actorUserId); LabReportTemplate source = null; boolean familyDefault = false; Long securityBaselineTemplateId=null;List<LabReportTemplate> lockedDestination=null;
+        LabReportTemplate snapshot=sourceTemplateId==null?null:required(mapper.selectTemplateById(sourceTemplateId));
+        if(saveAsNewFamily){lockedDestination=lockTemplateTypes(draft.getPeriodType(),snapshot==null?null:snapshot.getPeriodType());if(sourceTemplateId!=null){source=required(mapper.selectTemplateForUpdate(sourceTemplateId));if(!same(snapshot.getPeriodType(),source.getPeriodType())||source.getVersion()==null||source.getVersion().intValue()!=expectedVersion)throw new ServiceException("Template changed concurrently; reload before saving");}}
+        else if (sourceTemplateId != null) {
                 List<LabReportTemplate> lockedType = safe(mapper.lockTemplateType(snapshot.getPeriodType()));
                 source = required(mapper.selectTemplateForUpdate(sourceTemplateId));
                 if (!same(snapshot.getPeriodType(), source.getPeriodType())) throw new ServiceException("Template changed concurrently; reload before saving");
                 familyDefault = familyHasDefault(lockedType, source.getTemplateCode());
-            }
+                LabReportTemplate latest=latestFamily(lockedType,source.getTemplateCode());securityBaselineTemplateId=latest==null?source.getId():latest.getId();
         }
         LabReportTemplate next;
         if (saveAsNewFamily) {
@@ -63,9 +65,10 @@ public class LabReportTemplateServiceImpl implements LabReportTemplateService {
             next.setDefaultFlag(familyDefault ? "1" : "0"); next.setVersion(0);
             if (familyDefault && !"ENABLED".equals(next.getStatus())) throw new ServiceException("A default template family must publish an enabled latest revision");
         }
+        if(saveAsNewFamily&&!hasValidTypeDefault(lockedDestination)){if(!"ENABLED".equals(next.getStatus()))throw new ServiceException("A report type without a default requires an enabled template");next.setDefaultFlag("1");}
         next.setId(null); next.setDelFlag("0"); next.setCreateBy(actor); validator.validateTemplate(next);
-        List<LabReportSection> sections = validateSections(input);
-        if (!saveAsNewFamily && source != null) validateSecurityUpdates(safe(mapper.selectSections(source.getId())), sections);
+        List<LabReportSection> sections = validateSections(input,next.getPeriodType());
+        if (!saveAsNewFamily && source != null) validateSecurityUpdates(safe(mapper.selectSections(securityBaselineTemplateId==null?source.getId():securityBaselineTemplateId)), sections);
         if (!saveAsNewFamily) mapper.clearLatestTemplate(source.getTemplateCode(), actor);
         affected(mapper.insertTemplate(next), "Template revision was not created");
         for (LabReportSection section : sections) { section.setId(null); section.setTemplateId(next.getId()); section.setVersion(0); section.setDelFlag("0"); section.setCreateBy(actor); }
@@ -97,9 +100,19 @@ public class LabReportTemplateServiceImpl implements LabReportTemplateService {
     }
 
     private boolean familyHasDefault(List<LabReportTemplate> values, String templateCode) {
-        for (LabReportTemplate value : values) if (same(templateCode, value.getTemplateCode()) && value.isDefaultTemplate()) return true;
+        for (LabReportTemplate value : values) if (same(templateCode, value.getTemplateCode()) && value.isDefaultTemplate()&&value.isLatest()&&"ENABLED".equals(value.getStatus())) return true;
         return false;
     }
+
+    private boolean hasValidTypeDefault(List<LabReportTemplate> values) {
+        for (LabReportTemplate value : values) if (value.isDefaultTemplate() && value.isLatest()
+                && "ENABLED".equals(value.getStatus()) && !"2".equals(value.getDelFlag())) return true;
+        return false;
+    }
+
+    private List<LabReportTemplate> lockTemplateTypes(String destination,String source){java.util.Set<String> types=new java.util.TreeSet<String>();if(destination!=null)types.add(destination);if(source!=null)types.add(source);List<LabReportTemplate> destinationRows=Collections.emptyList();for(String type:types){List<LabReportTemplate> rows=safe(mapper.lockTemplateType(type));if(same(type,destination))destinationRows=rows;}return destinationRows;}
+
+    private LabReportTemplate latestFamily(List<LabReportTemplate> values,String templateCode){for(LabReportTemplate value:values)if(same(templateCode,value.getTemplateCode())&&value.isLatest())return value;return null;}
 
     @Override public String previewMarkdown(Long templateId, Long actorUserId) {
         access.requireManager(actorUserId); LabReportTemplate template = required(mapper.selectTemplateById(templateId));
@@ -126,6 +139,7 @@ public class LabReportTemplateServiceImpl implements LabReportTemplateService {
     @Override @Transactional public LabReportTemplate importJson(String source, String newTemplateCode, Long actorUserId) {
         access.requireManager(actorUserId);
         if (source == null || source.getBytes(StandardCharsets.UTF_8).length > MAX_IMPORT_BYTES) throw new ServiceException("Template JSON is missing or too large");
+        validateImportJsonStream(source);
         try {
             JsonNode root = JSON.readTree(source); only(root, "template", "sections"); JsonNode rawTemplate = root.get("template");
             if (rawTemplate == null || !rawTemplate.isObject() || root.get("sections") == null || !root.get("sections").isArray() || root.get("sections").size() > 200) throw new ServiceException("Invalid template JSON document");
@@ -158,6 +172,9 @@ public class LabReportTemplateServiceImpl implements LabReportTemplateService {
         section.setSensitiveFlag(bool(raw, "sensitive", false) ? "1" : "0");
         section.setSensitivePermission(optionalText(raw, "sensitivePermission")); return section;
     }
+    private void validateImportJsonStream(String source){
+        try{JsonParser parser=JSON.getFactory().createParser(source);int depth=0,tokens=0,totalStrings=0;try{JsonToken token;while((token=parser.nextToken())!=null){if(++tokens>100000)throw new ServiceException("Template JSON has too many tokens");if(token==JsonToken.START_OBJECT||token==JsonToken.START_ARRAY){if(++depth>64)throw new ServiceException("Template JSON nesting is too deep");}else if(token==JsonToken.END_OBJECT||token==JsonToken.END_ARRAY)depth--;if(token==JsonToken.FIELD_NAME||token==JsonToken.VALUE_STRING){int length=parser.getTextLength();if(length>262144||(totalStrings+=length)>1048576)throw new ServiceException("Template JSON string budget exceeded");}}}finally{parser.close();}}catch(ServiceException ex){throw ex;}catch(Exception ex){throw new ServiceException("Invalid template JSON document");}
+    }
     private ObjectNode sectionJson(LabReportSection section) {
         ObjectNode value = JSON.createObjectNode(); value.put("sectionCode", section.getSectionCode()); value.put("sectionName", section.getSectionName());
         value.put("sectionType", section.getSectionType()); value.put("sortNo", section.getSortNo());
@@ -167,7 +184,7 @@ public class LabReportTemplateServiceImpl implements LabReportTemplateService {
         if (section.getSensitivePermission() != null) value.put("sensitivePermission", section.getSensitivePermission()); return value;
     }
     private void json(ObjectNode target, String field, String source) { try { target.set(field, JSON.readTree(source == null ? "{}" : source)); } catch (Exception ex) { throw new ServiceException("Invalid template JSON configuration"); } }
-    private List<LabReportSection> validateSections(List<LabReportSection> values) {
+    private List<LabReportSection> validateSections(List<LabReportSection> values,String periodType) {
         if (values != null && values.size() > 200) throw new ServiceException("Too many report sections");
         List<LabReportSection> result = new ArrayList<LabReportSection>(); Set<String> codes = new HashSet<String>(); Set<Integer> sorts = new HashSet<Integer>();
         if (values != null) for (LabReportSection value : values) {
@@ -177,6 +194,7 @@ public class LabReportTemplateServiceImpl implements LabReportTemplateService {
             if (copy.getSortNo() == null || copy.getSortNo() < 1 || copy.getSortNo() > 10000 || !sorts.add(copy.getSortNo())) throw new ServiceException("Invalid or duplicate report section order");
             if (!flag(copy.getManualFlag()) || !flag(copy.getVisibleFlag()) || !flag(copy.getSensitiveFlag())) throw new ServiceException("Invalid report section flag");
             try { validator.validateSection(copy); } catch (RuntimeException ex) { throw new ServiceException(ex.getMessage()); }
+            String provider="MANUAL".equals(copy.getSectionType())?ReportConfigCatalog.MANUAL_SUMMARY:copy.getDataSource();if(!ReportConfigCatalog.supportsPeriod(provider,periodType))throw new ServiceException("Report provider is not supported for the template period type");
             result.add(copy);
         }
         return result;
