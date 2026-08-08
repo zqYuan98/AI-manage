@@ -130,7 +130,7 @@ public class LabScheduleTask {
             Collections.sort(directories,new Comparator<Path>(){@Override public int compare(Path left,Path right){return Integer.compare(right.getNameCount(),left.getNameCount());}});for(Path directory:directories){try{if(Files.deleteIfExists(directory))deleted++;}catch(java.nio.file.DirectoryNotEmptyException ignored){/* another owned residue remains */}}
             LOG.info("AI Lab report temporary cleanup removed {} files", deleted);
             }
-            if(artifactStore!=null&&reportMapper!=null){int deleted=artifactStore.cleanOrphanRuns(reportMapper.selectReferencedReportArtifactPaths(),clock.instant().minus(7,ChronoUnit.DAYS));LOG.info("AI Lab report archive reconciliation removed {} orphan run directories",deleted);}
+            if(artifactStore!=null&&reportMapper!=null){int deleted=artifactStore.cleanOrphanRuns(reportMapper.selectReferencedReportArtifactPaths(),clock.instant().minus(7,ChronoUnit.DAYS));LOG.info("AI Lab report archive reconciliation removed {} orphan artifact files",deleted);}
         } catch (ServiceException error) {
             throw error;
         } catch (IOException error) {

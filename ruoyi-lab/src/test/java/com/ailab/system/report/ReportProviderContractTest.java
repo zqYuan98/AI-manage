@@ -114,6 +114,17 @@ class ReportProviderContractTest {
             String statement = xml.substring(xml.indexOf("<select id=\""+statementId+"\""), xml.indexOf("</select>",xml.indexOf("<select id=\""+statementId+"\"")));
             assertTrue(statement.contains("limit #{sourceFetchLimit}"), statementId);
         }
+
+        TaskDetailProvider aggregateLimited = new TaskDetailProvider();
+        inject(aggregateLimited, (LabReportDataMapper) Proxy.newProxyInstance(getClass().getClassLoader(),
+                new Class<?>[] {LabReportDataMapper.class},
+                (proxy, method, args) -> Arrays.<Map<String,Object>>asList(row(), row())));
+        Map<String,Object> attributes = new LinkedHashMap<String,Object>();
+        attributes.put(ReportQueryCriteria.SOURCE_FETCH_LIMIT_ATTRIBUTE, Integer.valueOf(2));
+        ReportContext limited = new ReportContext("2026-08", "platform", 30005L, Instant.EPOCH, attributes);
+        assertThrows(IllegalStateException.class,
+                () -> aggregateLimited.load(limited, sectionFor("TASK_DETAIL")),
+                "remaining+1 is an overflow sentinel and must be rejected before Java filtering");
     }
 
     @Test

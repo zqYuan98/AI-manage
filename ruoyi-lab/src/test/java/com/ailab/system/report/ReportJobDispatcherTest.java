@@ -46,12 +46,28 @@ class ReportJobDispatcherTest {
     void queuePersistsBeforeSubmittingAndReturnsWithoutRunningWorkerInline() {
         ReportQueueReceipt receipt = dispatcher.queue(31L, "DATA", "1001");
         assertEquals(31L, receipt.getReportId()); assertEquals(51L, receipt.getJobId());
-        verify(mapper).insertReportJob(any(LabReportJob.class));
+        ArgumentCaptor<LabReportJob> inserted = ArgumentCaptor.forClass(LabReportJob.class);
+        verify(mapper).insertReportJob(inserted.capture());
+        assertEquals(0, inserted.getValue().getAttemptCount());
         ArgumentCaptor<Runnable> submitted = ArgumentCaptor.forClass(Runnable.class);
         verify(executor).execute(submitted.capture());
         verify(worker, never()).execute(any());
         submitted.getValue().run();
         verify(worker).execute(51L);
+    }
+
+    @Test
+    void queueCarriesThePreviousClaimCountAndOnlyClaimAdvancesIt() {
+        LabReportJob previous = job(40L, 31L, "DATA", "FAILED", 4);
+        previous.setAttemptCount(2);
+        when(mapper.selectReportJobs(31L)).thenReturn(Collections.singletonList(previous));
+
+        dispatcher.queue(31L, "DATA", "1001");
+
+        ArgumentCaptor<LabReportJob> inserted = ArgumentCaptor.forClass(LabReportJob.class);
+        verify(mapper).insertReportJob(inserted.capture());
+        assertEquals(2, inserted.getValue().getAttemptCount(),
+                "queue creation must not pre-increment the durable claim counter");
     }
 
     @Test

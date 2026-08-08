@@ -7,6 +7,7 @@ import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.ReportArtifact;
 import com.ailab.system.mapper.LabReportMapper;
 import com.ailab.system.report.model.ReportData;
+import com.ailab.system.report.model.ReportDataBudget;
 import com.ailab.system.report.model.ReportDataCodec;
 import com.ailab.system.report.model.ReportPeriod;
 import com.ailab.system.report.model.ReportPerformancePin;
@@ -32,7 +33,6 @@ import org.springframework.transaction.annotation.Transactional;
 /** Short database lifecycle operations. File work is deliberately performed outside transaction methods. */
 @Component
 public class ReportGenerationOrchestrator {
-    private static final int MAX_MARKDOWN_BYTES = 1024 * 1024;
     private final LabReportMapper mapper; private final LabAccessService access; private final ISysMenuService menus;
     private final ReportArtifactStore store; private final ReportDataCodec codec; private final ReportManualImportPersistence manualImports; private final Clock clock;
 
@@ -61,7 +61,7 @@ public class ReportGenerationOrchestrator {
         if(!snapshot.getTemplateCode().equals(template.getTemplateCode()))throw new ServiceException("Template family changed concurrently");
         if (!template.isLatest() || !"ENABLED".equals(template.getStatus()) || !parsed.getKind().name().equals(template.getPeriodType())) throw new ServiceException("Only the latest enabled template can generate the requested report type");
         List<LabReportSection> sections = safe(mapper.selectSections(templateId));
-        requireManualCompleteness(sections,period,bizLine);
+        Map<String,String> manualSummaryTexts=manualSummaryTexts(sections,period,bizLine);requireManualCompleteness(sections,manualSummaryTexts);
         Integer max = mapper.selectMaxReportRevisionForUpdate(template.getTemplateCode(), period, bizLine);
         String performancePeriod=parsed.getKind()==ReportPeriod.Kind.QUARTER?period.substring(0,4)+"-Q"+period.charAt(5):period;
         List<ReportPerformancePin> performancePins = safe(mapper.selectSourcePerformancePins(performancePeriod, bizLine));
@@ -69,7 +69,7 @@ public class ReportGenerationOrchestrator {
         LabReportInstance instance = base(template, period, bizLine, max == null ? 1 : max + 1, actorUserId);
         instance.setSensitiveFlag(sensitive(sections) ? "1" : "0"); instance.setSourceType("AUTO");
         instance.setSourcePerfRevision(performanceRevision);
-        instance.setSourceDataJson(codec.encodeSourceSnapshot(performancePins));
+        instance.setSourceDataJson(codec.encodeSourceSnapshot(performancePins,manualSummaryTexts));
         affected(mapper.insertReportInstance(instance), "Report generation version was not created");
         return instance;
     }
@@ -94,7 +94,7 @@ public class ReportGenerationOrchestrator {
         LabReportInstance report = requiredReport(mapper.selectReportForUpdate(reportId));
         if (report.getVersion() == null || report.getVersion().intValue() != expectedVersion) throw new ServiceException("Report changed concurrently; reload before finalizing");
         if (!"DRAFT".equals(report.getLifecycleStatus())) throw new ServiceException("Finalized and superseded reports are immutable");
-        requireManualCompleteness(safe(mapper.selectSections(report.getTemplateId())),report.getPeriod(),report.getBizLine());
+        requireManualCompleteness(safe(mapper.selectSections(report.getTemplateId())),codec.decodeManualSummaryTexts(report.getSourceDataJson()));
         for (String status : statuses(report)) if (!"SUCCESS".equals(status)) throw new ServiceException("JSON, Markdown, Word and PDF must all succeed before finalization");
         for (String path : paths(report)) if (!hasText(path)) throw new ServiceException("JSON, Markdown, Word and PDF must all have durable artifacts before finalization");
         if(mapper.countActiveReportJobs(reportId)!=0)throw new ServiceException("Report generation jobs must finish before finalization");
@@ -139,12 +139,15 @@ public class ReportGenerationOrchestrator {
         value.setVersion(0); value.setDelFlag("0"); value.setCreateBy(actor(actorUserId)); return value;
     }
     private boolean sensitive(List<LabReportSection> sections) { for (LabReportSection section : sections) if (!"0".equals(section.getVisibleFlag()) && (section.isSensitive() || "PERF_SUMMARY".equals(section.getDataSource()) || hasText(section.getSensitivePermission()))) return true; return false; }
-    private void requireManualCompleteness(List<LabReportSection> sections,String period,String bizLine){
-        Map<String,LabReportSummary> summaries=new LinkedHashMap<String,LabReportSummary>();for(LabReportSummary value:safe(mapper.selectSummaries(period,bizLine)))summaries.put(value.getSectionCode(),value);
-        for(LabReportSection section:sections){if("0".equals(section.getVisibleFlag())||!"MANUAL".equals(section.getSectionType()))continue;ReportSectionConfig config=new ReportSectionConfig(section);if(!Boolean.TRUE.equals(config.getRenderConfig().get("required")))continue;LabReportSummary summary=summaries.get(section.getSectionCode());if(summary==null||!hasText(summary.getSummaryText()))throw new ServiceException("Required manual report section is incomplete: "+section.getSectionCode());}
+    private Map<String,String> manualSummaryTexts(List<LabReportSection> sections,String period,String bizLine){
+        Map<String,LabReportSummary> available=new LinkedHashMap<String,LabReportSummary>();for(LabReportSummary value:safe(mapper.selectSummaries(period,bizLine)))available.put(value.getSectionCode(),value);
+        Map<String,String> result=new LinkedHashMap<String,String>();for(LabReportSection section:sections){if("0".equals(section.getVisibleFlag())||!"MANUAL".equals(section.getSectionType()))continue;LabReportSummary summary=available.get(section.getSectionCode());result.put(section.getSectionCode(),summary==null||summary.getSummaryText()==null?"":summary.getSummaryText());}return result;
+    }
+    private void requireManualCompleteness(List<LabReportSection> sections,Map<String,String> summaries){
+        for(LabReportSection section:sections){if("0".equals(section.getVisibleFlag())||!"MANUAL".equals(section.getSectionType()))continue;ReportSectionConfig config=new ReportSectionConfig(section);if(!Boolean.TRUE.equals(config.getRenderConfig().get("required")))continue;if(!hasText(summaries.get(section.getSectionCode())))throw new ServiceException("Required manual report section is incomplete: "+section.getSectionCode());}
     }
     private String reportNo(String period, String bizLine) { String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12); return "RPT-" + period.replaceAll("[^A-Za-z0-9]", "") + "-" + bizLine + "-" + suffix; }
-    private void validateMarkdown(String value) { if (value == null || value.indexOf('\0') >= 0 || value.getBytes(StandardCharsets.UTF_8).length > MAX_MARKDOWN_BYTES) throw new ServiceException("Markdown is missing, invalid or too large"); }
+    private void validateMarkdown(String value) { if (value == null || value.indexOf('\0') >= 0 || value.getBytes(StandardCharsets.UTF_8).length > ReportDataBudget.manualMarkdownByteLimit()) throw new ServiceException("Markdown is missing, invalid or too large"); }
     private void requireBizLine(String value) { if (value == null || !value.matches("[A-Za-z0-9_-]{1,32}")) throw new ServiceException("Invalid business line"); }
     private String path(LabReportInstance value, String format) { if ("JSON".equals(format)) return value.getJsonPath(); if ("MARKDOWN".equals(format)) return value.getMarkdownPath(); if ("WORD".equals(format)) return value.getWordPath(); if ("PDF".equals(format)) return value.getPdfPath(); throw new ServiceException("Unsupported report artifact"); }
     private String status(LabReportInstance value, String format) { if ("JSON".equals(format)) return value.getJsonStatus(); if ("MARKDOWN".equals(format)) return value.getMarkdownStatus(); if ("WORD".equals(format)) return value.getWordStatus(); if ("PDF".equals(format)) return value.getPdfStatus(); throw new ServiceException("Unsupported report artifact"); }

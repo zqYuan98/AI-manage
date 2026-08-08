@@ -53,6 +53,9 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
     protected boolean supports(ReportPeriod.Kind kind) { return kind == ReportPeriod.Kind.MONTH; }
     protected final LabReportDataMapper mapper() { if (mapper == null) throw new IllegalStateException("Report data mapper is unavailable"); return mapper; }
     protected final ReportSectionData section(ReportQueryCriteria criteria, ReportSectionConfig cfg, List<Map<String, Object>> rows, Map<String, Object> summary) {
+        if (rows != null && rows.size() >= criteria.getSourceFetchLimit()) {
+            throw sourceOverflow();
+        }
         if (enforcesSourceRowLimit() && rows != null && rows.size() > ReportQueryCriteria.MAX_SOURCE_ROWS) {
             throw sourceOverflow();
         }

@@ -51,6 +51,7 @@
     <sql id="templateColumns">id,template_code,template_name,period_type,revision_no,latest_flag,default_flag,status,header_json,style_json,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
     <sql id="sectionColumns">id,template_id,section_code,section_name,section_type,sort_no,data_source,query_config_json,render_config_json,style_config_json,manual_flag,visible_flag,sensitive_flag,sensitive_permission,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
     <sql id="reportColumns">id,report_no,template_id,template_code,template_revision,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,source_type,source_data_json,source_perf_revision,content_json,content_markdown,json_status,json_path,json_error,markdown_status,markdown_path,markdown_error,word_status,word_path,word_error,pdf_status,pdf_path,pdf_error,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
+    <sql id="reportHistoryColumns">id,report_no,template_code,template_revision,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,source_type,json_status,markdown_status,word_status,pdf_status,version,create_time,update_time</sql>
     <sql id="jobColumns">id,job_no,report_id,job_type,job_status,progress_rate,attempt_count,error_message,started_time,finished_time,idempotency_key,run_token,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
 
     <select id="selectTemplates" resultMap="TemplateResult">select <include refid="templateColumns"/> from lab_report_template where del_flag='0' order by period_type,template_code,revision_no desc</select>
@@ -95,7 +96,7 @@
     <select id="selectReportForUpdate" parameterType="long" resultMap="ReportResult">select <include refid="reportColumns"/> from lab_report_instance where id=#{id} and del_flag='0' for update</select>
     <select id="lockReportFamily" resultMap="ReportResult">select <include refid="reportColumns"/> from lab_report_instance where template_code=#{templateCode} and period=#{period} and biz_line=#{bizLine} and del_flag='0' order by id for update</select>
     <select id="selectReportHistory" resultMap="ReportResult">
-        select <include refid="reportColumns"/> from lab_report_instance where del_flag='0'
+        select <include refid="reportHistoryColumns"/> from lab_report_instance where del_flag='0'
         <if test="period != null and period != ''">and period=#{period}</if><if test="bizLine != null and bizLine != ''">and biz_line=#{bizLine}</if>
         <if test="!manager">and lifecycle_status in ('FINALIZED','SUPERSEDED')</if>
         <if test="!sensitive">and sensitive_flag='0'</if>
@@ -124,7 +125,7 @@
         values(#{jobNo},#{reportId},#{jobType},#{jobStatus},#{progressRate},#{attemptCount},#{errorMessage},#{startedTime},#{finishedTime},#{idempotencyKey},#{runToken},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
     </insert>
     <select id="selectReportJobById" parameterType="long" resultMap="JobResult">select <include refid="jobColumns"/> from lab_report_job where id=#{id} and del_flag='0'</select>
-    <update id="claimReportJob">update lab_report_job set job_status='RUNNING',run_token=#{runToken},progress_rate=1,attempt_count=case when attempt_count&lt;1 then 1 else attempt_count end,started_time=#{startedTime},finished_time=null,error_message=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and job_status='QUEUED' and run_token is null and del_flag='0'</update>
+    <update id="claimReportJob">update lab_report_job set job_status='RUNNING',run_token=#{runToken},progress_rate=1,attempt_count=coalesce(attempt_count,0)+1,started_time=#{startedTime},finished_time=null,error_message=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and job_status='QUEUED' and run_token is null and del_flag='0'</update>
     <update id="heartbeatReportJob">update lab_report_job set update_by=#{actor},update_time=sysdate() where id=#{id} and job_status='RUNNING' and run_token=#{runToken} and del_flag='0'</update>
     <update id="completeReportJob">update lab_report_job set job_status='SUCCESS',progress_rate=100,finished_time=#{finishedTime},error_message=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and job_status='RUNNING' and run_token=#{runToken} and del_flag='0'</update>
     <update id="failReportJob">update lab_report_job set job_status='FAILED',finished_time=#{finishedTime},error_message=#{error},update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and job_status='RUNNING' and run_token=#{runToken} and del_flag='0'</update>

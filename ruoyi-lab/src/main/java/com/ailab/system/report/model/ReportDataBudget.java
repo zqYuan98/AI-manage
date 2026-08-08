@@ -8,24 +8,36 @@ import java.util.List;
 import java.util.Map;
 
 /** One aggregate budget for the entire neutral report model, enforced before export. */
-final class ReportDataBudget {
+public final class ReportDataBudget {
     private static final int MAX_SECTIONS=200, MAX_ROWS=25000, MAX_NODES=100000, MAX_DEPTH=64;
     private static final long MAX_TEXT_BYTES=1024L*1024L, MAX_IMAGE_BYTES=10L*1024L*1024L;
     private ReportDataBudget(){ }
 
+    /** Reserves half of the aggregate text budget for context, metadata and structural labels. */
+    public static int manualMarkdownByteLimit(){return 512*1024;}
+
+    /**
+     * Incremental build budget.  A worker consumes each rendered section before retaining it and
+     * passes {@link #sourceFetchLimit()} to the next provider, so an oversized report is rejected
+     * while it is being assembled rather than after all source rows have been materialized.
+     */
+    public static Accumulator accumulator(ReportContext context){return new Accumulator(context);}
+
     static void validate(ReportContext context,List<ReportSectionData> sections,Map<String,Object> metadata){
-        State state=new State();
-        if(sections!=null){
-            if(sections.size()>MAX_SECTIONS)throw invalid("section limit");
-            for(ReportSectionData section:sections){
-                if(section==null)throw invalid("null section");
-                state.rows+=section.getRows().size();if(state.rows>MAX_ROWS)throw invalid("total row limit");
-                state.text(section.getSectionCode());state.text(section.getSectionType());state.text(section.getTitle());
-                state.value(section.getRows(),null,0);state.value(section.getSummary(),null,0);
-            }
+        Accumulator budget=accumulator(context);if(sections!=null)for(ReportSectionData section:sections)budget.accept(section);budget.complete(metadata);
+    }
+
+    public static final class Accumulator{
+        private final State state=new State();private int sections;
+        private Accumulator(ReportContext context){if(context!=null)state.value(context.getAttributes(),null,0);}
+        public int sourceFetchLimit(){int remaining=Math.max(0,MAX_ROWS-state.rows);return Math.min(ReportQueryCriteria.MAX_SOURCE_ROWS+1,remaining+1);}
+        public void accept(ReportSectionData section){
+            if(section==null)throw invalid("null section");if(++sections>MAX_SECTIONS)throw invalid("section limit");
+            state.rows+=section.getRows().size();if(state.rows>MAX_ROWS)throw invalid("total row limit");
+            state.text(section.getSectionCode());state.text(section.getSectionType());state.text(section.getTitle());
+            state.value(section.getRows(),null,0);state.value(section.getSummary(),null,0);
         }
-        if(context!=null)state.value(context.getAttributes(),null,0);
-        state.value(metadata,null,0);
+        public void complete(Map<String,Object> metadata){state.value(metadata,null,0);}
     }
 
     private static IllegalArgumentException invalid(String reason){return new IllegalArgumentException("Report exceeds "+reason);}

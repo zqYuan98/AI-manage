@@ -136,6 +136,30 @@ class ReportGenerationOrchestratorTest {
     }
 
     @Test
+    void generationPinsManualSummaryTextForTheWholeArtifactPipeline() {
+        LabReportTemplate template=template();when(mapper.selectTemplateById(7L)).thenReturn(template);when(mapper.selectTemplateForUpdate(7L)).thenReturn(template);
+        LabReportSection manual=section("EXEC_SUMMARY",false);manual.setSectionType("MANUAL");manual.setDataSource(null);manual.setManualFlag("1");manual.setRenderConfigJson("{\"required\":true,\"placeholder\":\"required\"}");
+        LabReportSummary summary=new LabReportSummary();summary.setSectionCode("EXEC_SUMMARY");summary.setSummaryText("Pinned management summary");summary.setSummaryJson("{}");summary.setSourceRevision(9);
+        when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(manual));when(mapper.selectSummaries("2026-07","ALL")).thenReturn(Collections.singletonList(summary));
+
+        LabReportInstance instance=orchestrator.createGeneration(7L,"2026-07","ALL",1001L);
+
+        assertEquals("Pinned management summary",new ReportDataCodec().decodeManualSummaryTexts(instance.getSourceDataJson()).get("EXEC_SUMMARY"));
+    }
+
+    @Test
+    void finalizationCannotBeBypassedByRestoringMutableManualSummaryAfterGeneration() {
+        LabReportInstance complete=draft(31L,4);complete.setSourceDataJson(new ReportDataCodec().encodeSourceSnapshot(Collections.<ReportPerformancePin>emptyList(),Collections.singletonMap("EXEC_SUMMARY","")));
+        LabReportSection manual=section("EXEC_SUMMARY",false);manual.setSectionType("MANUAL");manual.setDataSource(null);manual.setManualFlag("1");manual.setRenderConfigJson("{\"required\":true}");
+        LabReportSummary restored=new LabReportSummary();restored.setSectionCode("EXEC_SUMMARY");restored.setSummaryText("Restored after artifacts were generated");
+        when(mapper.selectReportById(31L)).thenReturn(complete);when(mapper.lockReportFamily("monthly","2026-07","ALL")).thenReturn(Collections.singletonList(complete));when(mapper.selectReportForUpdate(31L)).thenReturn(complete);when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(manual));when(mapper.selectSummaries("2026-07","ALL")).thenReturn(Collections.singletonList(restored));
+
+        assertThrows(ServiceException.class,()->orchestrator.finalizeReport(31L,4,1001L));
+
+        verify(mapper,never()).finalizeReport(any(),any(),any());
+    }
+
+    @Test
     void finalizationRequiresAllFourArtifactsAndOptimisticallySupersedesPriorFinal() {
         LabReportInstance incomplete = draft(31L, 4); incomplete.setPdfStatus("FAILED");
         when(mapper.selectReportById(31L)).thenReturn(incomplete);
@@ -199,7 +223,16 @@ class ReportGenerationOrchestratorTest {
         assertEquals("PENDING", imported.getWordStatus()); assertEquals("NOT_REQUESTED", imported.getPdfStatus());
         assertEquals(edited, imported.getContentMarkdown());
         verify(mapper).lockReportFamily("monthly", "2026-07", "ALL");
-        assertTrue(imported.getContentJson().contains("MANUAL_IMPORT"));verify(store,never()).publish(any(),any(),any(),any(),any());
+        assertTrue(imported.getContentJson().contains("MANUAL_IMPORT"));verify(store,never()).publish(any(),any(),any(),any(),any(),any());
+    }
+
+    @Test
+    void markdownImportUsesTheNeutralModelReservedTextBudget() {
+        LabReportInstance source=draft(20L,7);source.setLifecycleStatus("FINALIZED");source.setContentJson("{\"context\":{\"period\":\"2026-07\",\"bizLine\":\"ALL\",\"requesterId\":11,\"generatedAt\":\"2026-08-08T01:00:00Z\",\"attributes\":{}},\"templateCode\":\"monthly\",\"templateRevision\":6,\"sections\":[],\"metadata\":{}}");when(mapper.selectReportById(20L)).thenReturn(source);when(mapper.selectMaxReportRevisionForUpdate("monthly","2026-07","ALL")).thenReturn(7);
+        int limit=com.ailab.system.report.model.ReportDataBudget.manualMarkdownByteLimit();char[] acceptedChars=new char[limit];java.util.Arrays.fill(acceptedChars,'x');char[] rejectedChars=new char[limit+1];java.util.Arrays.fill(rejectedChars,'x');
+
+        assertEquals("SUCCESS",orchestrator.importMarkdown(20L,new String(acceptedChars),1001L).getMarkdownStatus());
+        assertThrows(ServiceException.class,()->orchestrator.importMarkdown(20L,new String(rejectedChars),1001L));
     }
 
     @Test
@@ -255,8 +288,8 @@ class ReportGenerationOrchestratorTest {
         when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(configured)); when(mapper.selectSummaries("2026-07","ALL")).thenReturn(Collections.emptyList());
         when(mapper.completeJson(eq(31L),eq(51L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);
         when(mapper.completeMarkdown(eq(31L),eq(51L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);
-        when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.json");
-        when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
+        when(store.publish(eq(31L),eq(51L),eq("run-token-1234567890"),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.json");
+        when(store.publish(eq(31L),eq(51L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
         DataSourceProvider provider=new DataSourceProvider(){public String getId(){return "GOAL_PROGRESS";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData load(ReportContext c,ReportSectionConfig s){return new ReportSectionData(s.getSectionCode(),s.getSectionType(),s.getTitle(),Collections.<java.util.Map<String,Object>>emptyList(),Collections.<String,Object>singletonMap("text","data"));}};
         SectionRenderer renderer=new SectionRenderer(){public String getId(){return "TEXT";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData render(ReportContext c,ReportSectionConfig s,ReportSectionData d){return d;}};
         LabAccessContext manager=new LabAccessContext();manager.setUserId(1001L);manager.setMemberId(11L);manager.setRoleKey("lab_manager");manager.setBizLine("manage");when(access.context(1001L)).thenReturn(manager);when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.singleton("lab:report:sensitive"));
@@ -268,6 +301,25 @@ class ReportGenerationOrchestratorTest {
         verify(mapper).completeJson(eq(31L),eq(51L),eq("run-token-1234567890"),any(),eq("archive/report-31/runs/run-token-1234567890/report-31.json"),eq("1001"));
         verify(mapper).completeMarkdown(eq(31L),eq(51L),eq("run-token-1234567890"),any(),eq("archive/report-31/runs/run-token-1234567890/report-31.md"),eq("1001"));
         verify(downstream).advance(eq(51L),eq(31L),eq("WORD"),eq("run-token-1234567890"),eq("1001"),any());
+    }
+
+    @Test
+    void dataWorkerRendersThePinnedManualSummaryWithoutReloadingMutableSummaryRows() {
+        LabReportJob job=job(63L,"DATA");LabReportInstance report=draft(31L,0);report.setJsonStatus("PENDING");report.setMarkdownStatus("PENDING");
+        report.setSourceDataJson(new ReportDataCodec().encodeSourceSnapshot(Collections.<ReportPerformancePin>emptyList(),Collections.singletonMap("EXEC_SUMMARY","Pinned management decision")));
+        when(mapper.selectReportJobById(63L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markDataPending(31L,63L,"run-token-1234567890","1001")).thenReturn(1);when(mapper.selectTemplateById(7L)).thenReturn(template());
+        LabReportSection configured=section("EXEC_SUMMARY",false);configured.setSectionType("MANUAL");configured.setDataSource(null);configured.setManualFlag("1");configured.setRenderConfigJson("{\"required\":true}");when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(configured));
+        when(mapper.completeJson(eq(31L),eq(63L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);when(mapper.completeMarkdown(eq(31L),eq(63L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);
+        when(store.publish(eq(31L),eq(63L),eq("run-token-1234567890"),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.json");when(store.publish(eq(31L),eq(63L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
+        DataSourceProvider provider=new DataSourceProvider(){public String getId(){return "MANUAL_SUMMARY";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData load(ReportContext c,ReportSectionConfig s){return new ReportSectionData(s.getSectionCode(),s.getSectionType(),s.getTitle(),Collections.<java.util.Map<String,Object>>emptyList(),Collections.<String,Object>emptyMap());}};
+        SectionRenderer renderer=new SectionRenderer(){public String getId(){return "MANUAL";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData render(ReportContext c,ReportSectionConfig s,ReportSectionData d){return d;}};
+        when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.singleton("lab:report:sensitive"));ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);
+        ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),new TrustedReportContextFactory(access,menus),new DataSourceProviderRegistry(Collections.singletonList(provider)),new SectionRendererRegistry(Collections.singletonList(renderer)),new ReportExporterRegistry(Arrays.<ReportExporter>asList(new JsonReportExporter(),new MarkdownReportExporter())),store,new ReportDataCodec(),downstream,Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
+
+        worker.execute(63L);
+
+        org.mockito.ArgumentCaptor<String> canonical=org.mockito.ArgumentCaptor.forClass(String.class);verify(mapper).completeJson(eq(31L),eq(63L),eq("run-token-1234567890"),canonical.capture(),any(),eq("1001"));
+        assertTrue(canonical.getValue().contains("Pinned management decision"));verify(mapper,never()).selectSummaries(any(),any());verify(downstream).advance(eq(63L),eq(31L),eq("WORD"),eq("run-token-1234567890"),eq("1001"),any());
     }
 
     @Test
@@ -285,18 +337,40 @@ class ReportGenerationOrchestratorTest {
     @Test
     void artifactStoreRejectsTraversalAndCannotOverwritePublishedSuccess(@TempDir Path root) throws Exception {
         LabProperties properties=new LabProperties();properties.setOutputDirectory(root.resolve("reports").toString());properties.setTempDirectory(root.resolve("reports/tmp").toString());ReportArtifactStore actual=new ReportArtifactStore(properties);
-        String relative=actual.publish(9L,"run-token-11111111","report-9","JSON","{}".getBytes(StandardCharsets.UTF_8));assertTrue(Files.isRegularFile(actual.resolve(relative,"JSON")));
-        assertThrows(ServiceException.class,()->actual.publish(9L,"run-token-11111111","report-9","JSON","new".getBytes(StandardCharsets.UTF_8)));
+        String relative=actual.publish(9L,91L,"run-token-11111111","report-9","JSON","{}".getBytes(StandardCharsets.UTF_8));assertTrue(Files.isRegularFile(actual.resolve(relative,"JSON")));
+        assertThrows(ServiceException.class,()->actual.publish(9L,91L,"run-token-11111111","report-9","JSON","new".getBytes(StandardCharsets.UTF_8)));
         assertThrows(ServiceException.class,()->actual.resolve("../secret.json","JSON"));
     }
 
     @Test
     void artifactStoreDeletesOnlyOldUnreferencedRunDirectories(@TempDir Path root) throws Exception {
-        LabProperties properties=new LabProperties();properties.setOutputDirectory(root.resolve("reports").toString());properties.setTempDirectory(root.resolve("reports/tmp").toString());ReportArtifactStore actual=new ReportArtifactStore(properties);String referenced=actual.publish(9L,"run-token-reference-1111","report-9","JSON","{}".getBytes(StandardCharsets.UTF_8));String orphan=actual.publish(10L,"run-token-orphan-222222","report-10","JSON","{}".getBytes(StandardCharsets.UTF_8));Path referencedFile=actual.resolve(referenced,"JSON");Path orphanFile=actual.resolve(orphan,"JSON");java.nio.file.attribute.FileTime old=java.nio.file.attribute.FileTime.from(Instant.parse("2026-07-01T00:00:00Z"));Files.setLastModifiedTime(referencedFile.getParent(),old);Files.setLastModifiedTime(orphanFile.getParent(),old);
+        LabProperties properties=new LabProperties();properties.setOutputDirectory(root.resolve("reports").toString());properties.setTempDirectory(root.resolve("reports/tmp").toString());ReportArtifactStore actual=new ReportArtifactStore(properties);String referenced=actual.publish(9L,91L,"run-token-reference-1111","report-9","JSON","{}".getBytes(StandardCharsets.UTF_8));String orphan=actual.publish(10L,101L,"run-token-orphan-222222","report-10","JSON","{}".getBytes(StandardCharsets.UTF_8));Path referencedFile=actual.resolve(referenced,"JSON");Path orphanFile=actual.resolve(orphan,"JSON");java.nio.file.attribute.FileTime old=java.nio.file.attribute.FileTime.from(Instant.parse("2026-07-01T00:00:00Z"));Files.setLastModifiedTime(referencedFile,old);Files.setLastModifiedTime(orphanFile,old);Files.setLastModifiedTime(referencedFile.getParent(),old);Files.setLastModifiedTime(orphanFile.getParent(),old);
 
         assertEquals(1,actual.cleanOrphanRuns(Collections.singletonList(referenced),Instant.parse("2026-08-01T00:00:00Z")));
 
         assertTrue(Files.exists(referencedFile));assertTrue(!Files.exists(orphanFile.getParent()));
+    }
+
+    @Test
+    void artifactCleanupDoesNotDeleteANewEmptyRunDirectory(@TempDir Path root) throws Exception {
+        LabProperties properties=new LabProperties();properties.setOutputDirectory(root.resolve("reports").toString());properties.setTempDirectory(root.resolve("reports/tmp").toString());ReportArtifactStore actual=new ReportArtifactStore(properties);
+        Path activeRun=root.resolve("reports/archive/report-11/runs/run-token-active-3333");Files.createDirectories(activeRun);
+
+        assertEquals(0,actual.cleanOrphanRuns(Collections.<String>emptyList(),Instant.parse("2026-08-01T00:00:00Z")));
+
+        assertTrue(Files.isDirectory(activeRun),"cleanup must not race the publish window between createDirectories and atomic move");
+    }
+
+    @Test
+    void artifactStoreDeletesOldUnreferencedFilesInsideARetainedRun(@TempDir Path root) throws Exception {
+        LabProperties properties=new LabProperties();properties.setOutputDirectory(root.resolve("reports").toString());properties.setTempDirectory(root.resolve("reports/tmp").toString());ReportArtifactStore actual=new ReportArtifactStore(properties);
+        String referenced=actual.publish(9L,91L,"run-token-mixed-111111","report-9","JSON","{}".getBytes(StandardCharsets.UTF_8));
+        String orphan=actual.publish(9L,91L,"run-token-mixed-111111","report-9-extra","MARKDOWN","orphan".getBytes(StandardCharsets.UTF_8));
+        Path referencedFile=actual.resolve(referenced,"JSON");Path orphanFile=actual.resolve(orphan,"MARKDOWN");java.nio.file.attribute.FileTime old=java.nio.file.attribute.FileTime.from(Instant.parse("2026-07-01T00:00:00Z"));Files.setLastModifiedTime(referencedFile,old);Files.setLastModifiedTime(orphanFile,old);Files.setLastModifiedTime(orphanFile.getParent(),old);
+
+        assertEquals(1,actual.cleanOrphanRuns(Collections.singletonList(referenced),Instant.parse("2026-08-01T00:00:00Z")));
+
+        assertTrue(Files.exists(referencedFile));assertTrue(!Files.exists(orphanFile));assertTrue(Files.exists(referencedFile.getParent()));
     }
 
     @Test
@@ -308,7 +382,7 @@ class ReportGenerationOrchestratorTest {
 
         worker.execute(53L);
 
-        verify(mapper,never()).markDataPending(any(),any(),any(),any());verify(store,never()).publish(any(),any(),any(),any(),any());
+        verify(mapper,never()).markDataPending(any(),any(),any(),any());verify(store,never()).publish(any(),any(),any(),any(),any(),any());
         verify(downstream).advance(eq(53L),eq(31L),eq("WORD"),eq("run-token-1234567890"),eq("1001"),any());
     }
 
@@ -337,7 +411,7 @@ class ReportGenerationOrchestratorTest {
 
         worker.execute(57L);
 
-        verify(store,never()).publish(any(),any(),any(),any(),any());verify(mapper,never()).completeWord(any(),any(),any(),any(),any());verify(mapper,never()).failWord(any(),any(),any(),any(),any());verify(mapper,never()).failReportJob(any(),any(),any(),any(),any());
+        verify(store,never()).publish(any(),any(),any(),any(),any(),any());verify(mapper,never()).completeWord(any(),any(),any(),any(),any());verify(mapper,never()).failWord(any(),any(),any(),any(),any());verify(mapper,never()).failReportJob(any(),any(),any(),any(),any());
     }
 
     @Test
@@ -346,7 +420,7 @@ class ReportGenerationOrchestratorTest {
         ReportContext persistedContext=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());
         report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(persistedContext,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
         when(mapper.selectReportJobById(58L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markWordPending(31L,58L,"run-token-1234567890","1001")).thenReturn(1);
-        when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("WORD"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.docx");
+        when(store.publish(eq(31L),eq(58L),eq("run-token-1234567890"),eq("report-31"),eq("WORD"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.docx");
         ReportExporter word=new ReportExporter(){public String getId(){return "WORD";}public boolean supports(String format){return "WORD".equals(format);}public byte[] export(com.ailab.system.report.model.ReportData value){return new byte[]{1};}};
         ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.singletonList(word)),store,new ReportDataCodec(),mock(ReportJobDispatcher.class),Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
 
@@ -361,7 +435,7 @@ class ReportGenerationOrchestratorTest {
         ReportContext persistedContext=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());
         report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(persistedContext,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
         when(mapper.selectReportJobById(60L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markWordPending(31L,60L,"run-token-1234567890","1001")).thenReturn(1);
-        String path="archive/report-31/runs/run-token-1234567890/report-31.docx";when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("WORD"),any())).thenReturn(path);
+        String path="archive/report-31/runs/run-token-1234567890/report-31.docx";when(store.publish(eq(31L),eq(60L),eq("run-token-1234567890"),eq("report-31"),eq("WORD"),any())).thenReturn(path);
         when(mapper.completeWord(31L,60L,"run-token-1234567890",path,"1001")).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("commit outcome unknown"));
         ReportExporter word=new ReportExporter(){public String getId(){return "WORD";}public boolean supports(String format){return "WORD".equals(format);}public byte[] export(com.ailab.system.report.model.ReportData value){return new byte[]{1};}};
         ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.singletonList(word)),store,new ReportDataCodec(),mock(ReportJobDispatcher.class),Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
@@ -392,7 +466,7 @@ class ReportGenerationOrchestratorTest {
         LabReportJob job=job(54L,"DATA");LabReportInstance report=draft(31L,0);report.setMarkdownStatus("FAILED");
         ReportContext persistedContext=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());
         report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(persistedContext,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
-        when(mapper.selectReportJobById(54L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markDataPending(31L,54L,"run-token-1234567890","1001")).thenReturn(1);when(mapper.completeMarkdown(eq(31L),eq(54L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
+        when(mapper.selectReportJobById(54L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markDataPending(31L,54L,"run-token-1234567890","1001")).thenReturn(1);when(mapper.completeMarkdown(eq(31L),eq(54L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);when(store.publish(eq(31L),eq(54L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
         ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);
         ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.<ReportExporter>singletonList(new MarkdownReportExporter())),store,new ReportDataCodec(),downstream,Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
 
@@ -425,7 +499,7 @@ class ReportGenerationOrchestratorTest {
         LabReportJob job=job(61L,"DATA");LabReportInstance report=draft(31L,0);report.setSourceType("MANUAL_IMPORT");report.setJsonPath(null);report.setMarkdownPath(null);report.setContentMarkdown("# Edited exactly");
         ReportContext context=new ReportContext("2026-07","ALL",11L,Instant.parse("2026-08-08T01:00:00Z"),Collections.<String,Object>emptyMap());report.setContentJson(new ReportDataCodec().encode(new com.ailab.system.report.model.ReportData(context,"monthly",6,Collections.<ReportSectionData>emptyList(),Collections.<String,Object>emptyMap())));
         when(mapper.selectReportJobById(61L)).thenReturn(job);when(mapper.claimReportJob(any(),any(),any(),any(),any())).thenReturn(1);when(mapper.selectReportById(31L)).thenReturn(report);when(mapper.markDataPending(31L,61L,"run-token-1234567890","1001")).thenReturn(1);
-        when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.json");when(store.publish(eq(31L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
+        when(store.publish(eq(31L),eq(61L),eq("run-token-1234567890"),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.json");when(store.publish(eq(31L),eq(61L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
         when(mapper.completeJson(eq(31L),eq(61L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);when(mapper.completeMarkdown(eq(31L),eq(61L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);
         ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),null,new DataSourceProviderRegistry(Collections.<DataSourceProvider>emptyList()),new SectionRendererRegistry(Collections.<SectionRenderer>emptyList()),new ReportExporterRegistry(Collections.<ReportExporter>singletonList(new JsonReportExporter())),store,new ReportDataCodec(),downstream,Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
 
@@ -493,6 +567,7 @@ class ReportGenerationOrchestratorTest {
         LabReportJob terminal=job(77L,"PDF");terminal.setJobStatus("SUCCESS");when(mapper.selectReportById(31L)).thenReturn(draft(31L,0));when(mapper.selectReportJobById(77L)).thenReturn(terminal);when(mapper.countActiveReportJobs(31L)).thenReturn(1);
         java.nio.file.Path residue=java.nio.file.Paths.get("lo-report-31-job-77-run-token-1234567890-12345/out/report.pdf");assertTrue(!eligibility.isDeletionEligible(residue));
         when(mapper.countActiveReportJobs(31L)).thenReturn(0);assertTrue(eligibility.isDeletionEligible(residue));
+        java.nio.file.Path artifactResidue=java.nio.file.Paths.get("report-31-job-77-run-run-token-1234567890/report-31-1.part");assertTrue(eligibility.isDeletionEligible(artifactResidue));
     }
 
     private LabReportJob job(Long id,String step){LabReportJob value=new LabReportJob();value.setId(id);value.setReportId(31L);value.setJobType(step);value.setJobStatus("QUEUED");value.setVersion(0);value.setCreateBy("1001");return value;}

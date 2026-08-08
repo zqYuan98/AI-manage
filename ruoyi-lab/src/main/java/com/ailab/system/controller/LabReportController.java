@@ -4,14 +4,18 @@ import com.ailab.system.domain.LabReportSummary;
 import com.ailab.system.dto.ReportArtifact;
 import com.ailab.system.dto.ReportGenerationCommand;
 import com.ailab.system.service.LabReportService;
+import com.ailab.system.report.model.ReportDataBudget;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.page.TableDataInfo;
+import com.ruoyi.common.core.page.PageDomain;
+import com.ruoyi.common.core.page.TableSupport;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.file.FileUtils;
+import com.github.pagehelper.PageHelper;
 import java.nio.file.Files;
 import javax.servlet.http.HttpServletResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -28,12 +32,13 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/lab/report")
 public class LabReportController extends BaseController {
-    private static final long MAX_MARKDOWN=1024L*1024L;
+    private static final int MAX_HISTORY_PAGE_SIZE=100;
+    private static final long MAX_MARKDOWN=ReportDataBudget.manualMarkdownByteLimit();
     private final LabReportService service;
     public LabReportController(LabReportService service){this.service=service;}
 
     @PreAuthorize("@ss.hasPermi('lab:report:list')") @GetMapping("/history")
-    public TableDataInfo history(@RequestParam(required=false)String period,@RequestParam(required=false)String bizLine,HttpServletResponse response){preventCaching(response);startPage();return getDataTable(service.history(period,bizLine,SecurityUtils.getUserId()));}
+    public TableDataInfo history(@RequestParam(required=false)String period,@RequestParam(required=false)String bizLine,HttpServletResponse response){preventCaching(response);PageDomain page=TableSupport.buildPageRequest();if(page.getPageSize()==null||page.getPageSize()<1||page.getPageSize()>MAX_HISTORY_PAGE_SIZE)throw new ServiceException("Report history page size must be between 1 and "+MAX_HISTORY_PAGE_SIZE);PageHelper.startPage(page.getPageNum(),page.getPageSize()).setReasonable(page.getReasonable());return getDataTable(service.history(period,bizLine,SecurityUtils.getUserId()));}
 
     @PreAuthorize("@ss.hasPermi('lab:report:list')") @GetMapping("/{id}/status")
     public AjaxResult status(@PathVariable Long id,HttpServletResponse response){preventCaching(response);return success(service.status(id,SecurityUtils.getUserId()));}

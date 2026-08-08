@@ -18,10 +18,10 @@ class ReportFencingContractTest {
     void everyRunPublishesToAnIndependentImmutableOwnedPath(@TempDir Path root) throws Exception {
         LabProperties properties=new LabProperties();properties.setOutputDirectory(root.resolve("reports").toString());properties.setTempDirectory(root.resolve("reports/tmp").toString());
         ReportArtifactStore store=new ReportArtifactStore(properties);
-        Method publish=ReportArtifactStore.class.getMethod("publish",Long.class,String.class,String.class,String.class,byte[].class);
+        Method publish=ReportArtifactStore.class.getMethod("publish",Long.class,Long.class,String.class,String.class,String.class,byte[].class);
 
-        String winner=(String)publish.invoke(store,9L,"winner-token-123456","report-9","JSON","winner".getBytes(StandardCharsets.UTF_8));
-        String loser=(String)publish.invoke(store,9L,"loser-token-1234567","report-9","JSON","loser".getBytes(StandardCharsets.UTF_8));
+        String winner=(String)publish.invoke(store,9L,51L,"winner-token-123456","report-9","JSON","winner".getBytes(StandardCharsets.UTF_8));
+        String loser=(String)publish.invoke(store,9L,52L,"loser-token-1234567","report-9","JSON","loser".getBytes(StandardCharsets.UTF_8));
 
         assertNotEquals(winner,loser);assertEquals("winner",new String(store.read(winner,"JSON"),StandardCharsets.UTF_8));
         store.deleteUncommitted(loser);assertTrue(Files.isRegularFile(store.resolve(winner,"JSON")),"loser cleanup must never delete the winner's artifact");

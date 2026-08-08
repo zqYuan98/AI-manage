@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 /** Fail-closed lifecycle check for temporary directories owned by known report instances. */
 @Component
 public final class LabReportTempFileEligibilityImpl implements LabReportTempFileEligibility {
-    private static final java.util.regex.Pattern OWNER=java.util.regex.Pattern.compile("lo-report-([1-9][0-9]*)-job-([1-9][0-9]*)-run-[A-Za-z0-9_-]{16,128}-[A-Za-z0-9]+$");
+    private static final java.util.regex.Pattern OWNER=java.util.regex.Pattern.compile("(?:lo-)?report-([1-9][0-9]*)-job-([1-9][0-9]*)-run-[A-Za-z0-9_-]{16,128}(?:-[A-Za-z0-9]+)?$");
     private final LabReportMapper mapper;
     public LabReportTempFileEligibilityImpl(LabReportMapper mapper){this.mapper=mapper;}
     @Override public boolean isDeletionEligible(Path relativePath){

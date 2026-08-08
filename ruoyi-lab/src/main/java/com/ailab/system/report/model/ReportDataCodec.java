@@ -62,9 +62,20 @@ public final class ReportDataCodec {
     }
 
     public String encodeSourceSnapshot(List<ReportPerformancePin> pins) {
+        return encodeSourceSnapshot(pins, Collections.<String,String>emptyMap());
+    }
+
+    public String encodeSourceSnapshot(List<ReportPerformancePin> pins, Map<String,String> manualSummaryTexts) {
         if (pins == null || pins.size() > 5000) throw new IllegalArgumentException("Performance snapshot is too large");
-        Map<String,Object> value=new LinkedHashMap<String,Object>();value.put("performancePins",pins);
-        try{return JSON.writeValueAsString(value);}catch(IOException ex){throw new IllegalArgumentException("Cannot encode performance snapshot",ex);}
+        if(manualSummaryTexts==null||manualSummaryTexts.size()>200)throw new IllegalArgumentException("Manual summary snapshot is too large");
+        Map<String,String> summaries=new LinkedHashMap<String,String>();long totalManualBytes=0;
+        for(Map.Entry<String,String> item:manualSummaryTexts.entrySet()){
+            if(item.getKey()==null||!item.getKey().matches("[A-Za-z0-9_-]{1,64}")||item.getValue()==null)throw new IllegalArgumentException("Invalid manual summary snapshot");byte[] encoded=item.getValue().getBytes(StandardCharsets.UTF_8);totalManualBytes+=encoded.length;
+            if(encoded.length>65536||totalManualBytes>ReportDataBudget.manualMarkdownByteLimit())throw new IllegalArgumentException("Manual summary snapshot is too large");
+            summaries.put(item.getKey(),item.getValue());
+        }
+        Map<String,Object> value=new LinkedHashMap<String,Object>();value.put("performancePins",pins);value.put("manualSummaryTexts",summaries);
+        try{String encoded=JSON.writeValueAsString(value);if(encoded.getBytes(StandardCharsets.UTF_8).length>MAX_BYTES)throw new IllegalArgumentException("Source snapshot is too large");validateJsonStream(encoded,"source snapshot");return encoded;}catch(IOException ex){throw new IllegalArgumentException("Cannot encode source snapshot",ex);}
     }
 
     public List<ReportPerformancePin> decodePerformancePins(String source) {
@@ -73,7 +84,7 @@ public final class ReportDataCodec {
             validateJsonStream(source,"performance snapshot");
             JsonNode root=JSON.readTree(source);requiredObject(root,"performance snapshot");
             if(root.size()==1&&root.has("performanceRevision")&&root.get("performanceRevision").canConvertToInt())return null;
-            if(root.size()!=1||!root.has("performancePins")||!root.get("performancePins").isArray()||root.get("performancePins").size()>5000)throw new IllegalArgumentException("Invalid performance snapshot");
+            if((root.size()!=1&&root.size()!=2)||!root.has("performancePins")||!root.get("performancePins").isArray()||root.get("performancePins").size()>5000||(root.size()==2&&!root.has("manualSummaryTexts")))throw new IllegalArgumentException("Invalid performance snapshot");
             List<ReportPerformancePin> result=new ArrayList<ReportPerformancePin>();java.util.Set<Long> members=new java.util.HashSet<Long>();
             for(JsonNode item:root.get("performancePins")){
                 if(!item.isObject()||item.size()!=2||!item.has("memberId")||!item.has("revisionNo")||!item.get("memberId").canConvertToLong()||!item.get("revisionNo").canConvertToInt())throw new IllegalArgumentException("Invalid performance pin");
@@ -81,6 +92,17 @@ public final class ReportDataCodec {
             }
             return Collections.unmodifiableList(result);
         } catch(IOException ex){throw new IllegalArgumentException("Invalid performance snapshot",ex);}
+    }
+
+    public Map<String,String> decodeManualSummaryTexts(String source) {
+        if(source==null||source.getBytes(StandardCharsets.UTF_8).length>MAX_BYTES)throw new IllegalArgumentException("Source snapshot is missing or too large");
+        try{
+            validateJsonStream(source,"source snapshot");JsonNode root=JSON.readTree(source);requiredObject(root,"source snapshot");JsonNode values=root.get("manualSummaryTexts");
+            if(values==null)return Collections.emptyMap();if(!values.isObject()||values.size()>200)throw new IllegalArgumentException("Invalid manual summary snapshot");
+            Map<String,String> result=new LinkedHashMap<String,String>();java.util.Iterator<Map.Entry<String,JsonNode>> fields=values.fields();
+            while(fields.hasNext()){Map.Entry<String,JsonNode> item=fields.next();if(!item.getKey().matches("[A-Za-z0-9_-]{1,64}")||!item.getValue().isTextual()||item.getValue().textValue().getBytes(StandardCharsets.UTF_8).length>65536)throw new IllegalArgumentException("Invalid manual summary snapshot");result.put(item.getKey(),item.getValue().textValue());}
+            return Collections.unmodifiableMap(result);
+        }catch(IOException ex){throw new IllegalArgumentException("Invalid manual summary snapshot",ex);}
     }
 
     public Map<String,Object> decodeObject(String source, String name) {

@@ -12,7 +12,9 @@ import com.ailab.system.report.exporter.PdfReportExporter;
 import com.ailab.system.report.exporter.ReportExporterRegistry;
 import com.ailab.system.report.model.ReportContext;
 import com.ailab.system.report.model.ReportData;
+import com.ailab.system.report.model.ReportDataBudget;
 import com.ailab.system.report.model.ReportDataCodec;
+import com.ailab.system.report.model.ReportQueryCriteria;
 import com.ailab.system.report.model.ReportSectionData;
 import com.ailab.system.report.model.TrustedReportContextFactory;
 import com.ailab.system.report.provider.DataSourceProviderRegistry;
@@ -122,14 +124,14 @@ public class ReportGenerationWorker {
         String name = "report-" + report.getId();
         if (needJson) {
             byte[] json; try { json = exporters.require("JSON").export(value); } catch (Exception ex) { throw failure(ex); }
-            requireHealthy(healthy); String path = store.publish(report.getId(), runToken, name, "JSON", json);
+            requireHealthy(healthy); String path = store.publish(report.getId(), job.getId(), runToken, name, "JSON", json);
             try { requireHealthy(healthy); requireOwned(mapper.completeJson(report.getId(), job.getId(), runToken, new String(json, StandardCharsets.UTF_8), path, actor)); }
             catch (OwnershipLostException | LeaseLostException ex) { cleanup(path); throw ex; }
             catch (RuntimeException ex) { throw new CompletionUnknownException(ex); }
         }
         if (needMarkdown) {
             byte[] markdown; try { markdown = manual ? report.getContentMarkdown().getBytes(StandardCharsets.UTF_8) : exporters.require("MARKDOWN").export(value); } catch (Exception ex) { throw failure(ex); }
-            requireHealthy(healthy); String path = store.publish(report.getId(), runToken, name, "MARKDOWN", markdown);
+            requireHealthy(healthy); String path = store.publish(report.getId(), job.getId(), runToken, name, "MARKDOWN", markdown);
             try { requireHealthy(healthy); requireOwned(mapper.completeMarkdown(report.getId(), job.getId(), runToken, new String(markdown, StandardCharsets.UTF_8), path, actor)); }
             catch (OwnershipLostException | LeaseLostException ex) { cleanup(path); throw ex; }
             catch (RuntimeException ex) { throw new CompletionUnknownException(ex); }
@@ -141,7 +143,7 @@ public class ReportGenerationWorker {
         ReportData value = codec.decode(report.getContentJson()); byte[] bytes;
         try { bytes = exporters.require("WORD").export(value); } catch (Exception ex) { throw failure(ex); }
         requireHealthy(healthy); String name = "report-" + report.getId();
-        String path = store.publish(report.getId(), runToken, name, "WORD", bytes);
+        String path = store.publish(report.getId(), job.getId(), runToken, name, "WORD", bytes);
         try { requireHealthy(healthy); requireOwned(mapper.completeWord(report.getId(), job.getId(), runToken, path, actor)); }
         catch (OwnershipLostException | LeaseLostException ex) { cleanup(path); throw ex; }
         catch (RuntimeException ex) { throw new CompletionUnknownException(ex); }
@@ -155,7 +157,7 @@ public class ReportGenerationWorker {
             bytes = ((PdfReportExporter) exporters.require("PDF")).exportFromWord(word, "report-" + report.getId() + "-job-" + job.getId() + "-run-" + runToken);
         } catch (Exception ex) { throw failure(ex); }
         requireHealthy(healthy); String name = "report-" + report.getId();
-        String path = store.publish(report.getId(), runToken, name, "PDF", bytes);
+        String path = store.publish(report.getId(), job.getId(), runToken, name, "PDF", bytes);
         try { requireHealthy(healthy); requireOwned(mapper.completePdf(report.getId(), job.getId(), runToken, path, actor)); }
         catch (OwnershipLostException | LeaseLostException ex) { cleanup(path); throw ex; }
         catch (RuntimeException ex) { throw new CompletionUnknownException(ex); }
@@ -169,22 +171,25 @@ public class ReportGenerationWorker {
         List<com.ailab.system.report.model.ReportPerformancePin> pins=codec.decodePerformancePins(report.getSourceDataJson());if(pins!=null)attributes.put("performancePins", pinValues(pins));
         ReportContext base = contexts.create(actorId, report.getPeriod(), clock.instant(), attributes);
         ReportContext context = new ReportContext(report.getPeriod(), report.getBizLine(), base.getRequesterId(), base.getGeneratedAt(), base.getAccessScope(), attributes);
-        Map<String,LabReportSummary> summaries = summaries(report); List<ReportSectionData> values = new ArrayList<ReportSectionData>();
+        Map<String,String> summaries = codec.decodeManualSummaryTexts(report.getSourceDataJson()); List<ReportSectionData> values = new ArrayList<ReportSectionData>();
+        ReportDataBudget.Accumulator budget=ReportDataBudget.accumulator(context);
         for (LabReportSection row : safe(mapper.selectSections(report.getTemplateId()))) {
             if ("0".equals(row.getVisibleFlag())) continue; ReportSectionConfig section = new ReportSectionConfig(row);
             String providerId = "MANUAL".equals(section.getSectionType()) ? ReportConfigCatalog.MANUAL_SUMMARY : section.getDataSource();
-            ReportSectionData source = providers.require(providerId).load(context, section);
-            LabReportSummary manual = summaries.get(section.getSectionCode());
-            if (manual != null) { Map<String,Object> summary = new LinkedHashMap<String,Object>(source.getSummary()); summary.put("manualText", manual.getSummaryText()); source = new ReportSectionData(source.getSectionCode(), source.getSectionType(), source.getTitle(), source.getRows(), summary); }
-            values.add(renderers.require(section.getSectionType()).render(context, section, source));
+            Map<String,Object> sectionAttributes=new LinkedHashMap<String,Object>(attributes);sectionAttributes.put(ReportQueryCriteria.SOURCE_FETCH_LIMIT_ATTRIBUTE,Integer.valueOf(budget.sourceFetchLimit()));
+            ReportContext sectionContext=new ReportContext(context.getPeriod(),context.getBizLine(),context.getRequesterId(),context.getGeneratedAt(),context.getAccessScope(),sectionAttributes);
+            ReportSectionData source = providers.require(providerId).load(sectionContext, section);
+            String manual = summaries.get(section.getSectionCode());
+            if (manual != null) { Map<String,Object> summary = new LinkedHashMap<String,Object>(source.getSummary()); summary.put("manualText", manual); source = new ReportSectionData(source.getSectionCode(), source.getSectionType(), source.getTitle(), source.getRows(), summary); }
+            ReportSectionData rendered=renderers.require(section.getSectionType()).render(sectionContext, section, source);budget.accept(rendered);values.add(rendered);
         }
         Map<String,Object> metadata = new LinkedHashMap<String,Object>(); metadata.put("reportId", report.getId()); metadata.put("sourcePerformanceRevision", report.getSourcePerfRevision()); metadata.put("sourceType", report.getSourceType());
         metadata.put("header", codec.decodeObject(template.getHeaderJson(), "template header"));
         metadata.put("style", codec.decodeObject(template.getStyleJson(), "template style"));
+        budget.complete(metadata);
         return new ReportData(context, report.getTemplateCode(), report.getTemplateRevision(), values, metadata);
     }
 
-    private Map<String,LabReportSummary> summaries(LabReportInstance report) { Map<String,LabReportSummary> result = new LinkedHashMap<String,LabReportSummary>(); for (LabReportSummary value : safe(mapper.selectSummaries(report.getPeriod(), report.getBizLine()))) result.put(value.getSectionCode(), value); return result; }
     private List<Map<String,Object>> pinValues(List<com.ailab.system.report.model.ReportPerformancePin> pins) { List<Map<String,Object>> result=new ArrayList<Map<String,Object>>();for(com.ailab.system.report.model.ReportPerformancePin pin:pins){Map<String,Object> value=new LinkedHashMap<String,Object>();value.put("memberId",pin.getMemberId());value.put("revisionNo",pin.getRevisionNo());result.add(value);}return result; }
     private String next(String step) { return "DATA".equals(step) ? "WORD" : "WORD".equals(step) ? "PDF" : null; }
     private boolean successful(LabReportInstance report, String step) {

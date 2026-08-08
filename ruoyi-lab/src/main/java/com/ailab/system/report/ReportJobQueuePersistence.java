@@ -26,7 +26,7 @@ public class ReportJobQueuePersistence {
         String suffix = UUID.randomUUID().toString().replace("-", "");
         job.setJobNo("RPJ-" + reportId + "-" + step + "-" + suffix.substring(0, 12));
         job.setReportId(reportId); job.setJobType(step); job.setJobStatus("QUEUED");
-        job.setProgressRate(BigDecimal.ZERO); job.setAttemptCount(nextAttempt(reportId, step));
+        job.setProgressRate(BigDecimal.ZERO); job.setAttemptCount(previousAttempt(reportId, step));
         job.setIdempotencyKey("report:" + reportId + ":" + step + ":" + suffix);
         job.setVersion(0); job.setDelFlag("0"); job.setCreateBy(actor);
         if (mapper.insertReportJob(job) != 1 || job.getId() == null) {
@@ -41,11 +41,11 @@ public class ReportJobQueuePersistence {
         return mapper.selectActiveReportJob(reportId, step);
     }
 
-    private int nextAttempt(Long reportId, String step) {
-        int attempt = 1; List<LabReportJob> jobs = mapper.selectReportJobs(reportId);
+    private int previousAttempt(Long reportId, String step) {
+        int attempt = 0; List<LabReportJob> jobs = mapper.selectReportJobs(reportId);
         if (jobs != null) for (LabReportJob value : jobs) {
             if (step.equals(value.getJobType()) && value.getAttemptCount() != null) {
-                attempt = Math.max(attempt, value.getAttemptCount() + 1);
+                attempt = Math.max(attempt, value.getAttemptCount());
             }
         }
         return attempt;

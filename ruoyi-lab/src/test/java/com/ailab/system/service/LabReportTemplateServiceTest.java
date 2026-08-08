@@ -196,6 +196,8 @@ class LabReportTemplateServiceTest {
         assertThrows(ServiceException.class, () -> service.importJson(unknownNestedField, "bad-copy", 1001L));
         String coercedFlag = json.replace("\"manual\":false", "\"manual\":\"true\"");
         assertThrows(ServiceException.class, () -> service.importJson(coercedFlag, "bad-flag", 1001L));
+        assertThrows(ServiceException.class, () -> service.importJson(json + "{}", "trailing-root", 1001L));
+        assertThrows(ServiceException.class, () -> service.importJson(json + " trailing", "trailing-garbage", 1001L));
     }
 
     @Test

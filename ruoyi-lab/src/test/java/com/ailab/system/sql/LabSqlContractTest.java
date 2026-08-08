@@ -121,6 +121,25 @@ class LabSqlContractTest {
     }
 
     @Test
+    void freshAndLegacyReportTemplateDefaultsRemainUniqueAcrossSeedReruns() throws IOException {
+        String sql = readSql();
+        String create = tableBlocks(sql).get("lab_report_template").toLowerCase(Locale.ROOT)
+                .replace("`", "").replaceAll("\\s+", "");
+        assertTrue(create.contains("default_unique_flagtinyintgeneratedalwaysas(casewhendel_flag='0'andlatest_flag='1'andstatus='enabled'anddefault_flag='1'then1elsenullend)stored"),
+                "fresh installs must create the generated default uniqueness flag atomically with the table");
+        assertTrue(create.contains("uniquekeyuk_lab_report_tpl_period_default(period_type,default_unique_flag)"),
+                "fresh installs must enforce one enabled latest default per period type before any seed runs");
+
+        String compact = sql.toLowerCase(Locale.ROOT).replace("`", "").replaceAll("\\s+", "");
+        assertTrue(compact.contains("set@ailab_seed_month_default_flag=(selectcasewhencount(*)=0then'1'else'0'endfromlab_report_templatewhereperiod_type='month'andlatest_flag='1'anddefault_flag='1'andstatus='enabled'anddel_flag='0')"),
+                "the demo seed must only become MONTH default when migration left no enabled default");
+        assertTrue(compact.contains("30001,'standard_month','standardmonthlylaboratoryreport','month',1,'1',@ailab_seed_month_default_flag,'enabled'"),
+                "the seeded template must consume the post-cleanup default decision instead of unconditionally claiming default");
+        assertTrue(compact.contains("'manual_note','manualnote','manual',40,null,json_object('filters',json_array()),json_object('placeholder','entermanagementnote','required',true)"),
+                "the seeded manual management note must be explicitly required so create/finalize completeness is immutable");
+    }
+
+    @Test
     void seedCleanupContractRejectsUnsafeRangeMutationAndTestUsesJava8Apis() throws IOException {
         String sql = readSql();
         assertSafeSeedCleanup(sql);
@@ -179,7 +198,7 @@ class LabSqlContractTest {
     private static void assertTemplateSeed(String sql) {
         List<List<String>> rows = insertRows(sql, "lab_report_template");
         List<String> standard = rows.stream().filter(r -> r.size() > 2 && "standard_month".equals(unquote(r.get(1)))).findFirst().orElseThrow(() -> new AssertionError("default template row missing"));
-        assertEquals("MONTH", unquote(standard.get(3))); assertEquals("1", unquote(standard.get(5))); assertEquals("1", unquote(standard.get(6))); assertEquals("ENABLED", unquote(standard.get(7)));
+        assertEquals("MONTH", unquote(standard.get(3))); assertEquals("1", unquote(standard.get(5))); assertEquals("@ailab_seed_month_default_flag", standard.get(6)); assertEquals("ENABLED", unquote(standard.get(7)));
     }
 
     private static void assertMemberSeeds(String sql) {
