@@ -131,11 +131,17 @@ class LabDashboardSqlContractTest {
                         && dashboard.contains("risk_parent.period&lt;=date_format(#{asof},'%y-%m')"),
                 "goal risk must not compare YYYY-Www directly with YYYY-MM");
         for (String scopedAlias : Arrays.asList("m.biz_line=#{scope.bizline}", "m.owner_id=#{scope.memberid}",
-                "w.biz_line=#{scope.bizline}", "w.owner_id=#{scope.memberid}",
                 "parent_month.biz_line=#{scope.bizline}", "parent_month.owner_id=#{scope.memberid}",
-                "rt.biz_line=#{scope.bizline}", "rt.owner_id=#{scope.memberid}")) {
+                "rt.biz_line=#{scope.bizline}", "rt.owner_id=#{scope.memberid}",
+                "risk_parent.biz_line=#{scope.bizline}", "risk_parent.owner_id=#{scope.memberid}")) {
             assertTrue(dashboard.contains(scopedAlias), "goal task fact is not scoped: " + scopedAlias);
         }
+        assertFalse(dashboardXml.contains("<include refid=\"weekTaskScope\"/>")
+                        || dashboardXml.contains("<include refid=\"blockTaskScope\"/>"),
+                "an authorized parent month must aggregate every legal child regardless of delegated week owner");
+        assertTrue(dashboard.contains("rt.task_level='month'")
+                        && dashboard.contains("risk_parent.id=rt.parent_id"),
+                "risk facts must authorize month rows directly and week rows through their parent month");
         assertTrue(dashboard.contains("leftjoinlab_tasktont.owner_id=m.idandt.del_flag='0'and("),
                 "member-load task predicates should be pushed into the join before grouping");
         String bootstrap = compact(read("sql/ailab.sql"));

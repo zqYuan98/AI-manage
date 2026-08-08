@@ -3,6 +3,7 @@ package com.ailab.system.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -25,6 +26,9 @@ import com.ailab.system.service.impl.LabTaskServiceImpl;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ailab.system.service.impl.TaskWorkflowServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
+import com.ruoyi.common.core.page.TableDataInfo;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -180,6 +184,29 @@ class LabTaskServiceTest {
         LabTask attempted = task(null, 0L, "month", "2026-08", 15L, "100", "100");
         attempted.setGoalId(10L); attempted.setMilestoneId(11L); attempted.setBizLine("platform");
         assertThrows(ServiceException.class, () -> service.createTask(attempted, 2L));
+    }
+
+    @Test
+    void controllerPageRequestSurvivesTrustedTaskScopeLookupAndDoesNotPolluteCallerQuery() {
+        for (long id = 1L; id <= 4L; id++) tasks.put(activeTask(id, 13L));
+        access.consumePage = true;
+        tasks.pagedTotal = 7L;
+        LabTask query = new LabTask();
+        try {
+            PageHelper.startPage(2, 2, "plan_date desc");
+
+            List<LabTask> rows = service.listTasks(query, 3L);
+            TableDataInfo table = new ExposedTaskController(service).table(rows);
+
+            assertTrue(rows instanceof Page, "the business mapper, not the access lookup, must consume PageHelper");
+            assertEquals(7L, table.getTotal());
+            assertEquals(2, rows.size());
+            assertNull(query.getOwnerId(), "trusted scope belongs on a server copy, not the caller's binding object");
+            assertNotSame(query, tasks.lastQuery);
+            assertEquals(Long.valueOf(13L), tasks.lastQuery.getOwnerId());
+        } finally {
+            PageHelper.clearPage();
+        }
     }
 
     @Test
@@ -809,12 +836,29 @@ class LabTaskServiceTest {
         final List<Long> lockedMemberIds = new ArrayList<Long>();
         long seq = 50L, gateSeq = 70L, eventSeq = 90L;
         boolean rejectGateWrite;
+        Long pagedTotal;
+        LabTask lastQuery;
         void put(LabTask task) { data.put(task.getId(), task); }
         LabTask find(Long id) { return data.get(id); }
         LabTaskQualityGate gate(Long id) { return gates.get(id); }
         @Override public Long selectMemberIdByUserId(Long userId) { Long memberId = memberIds.get(userId); return memberId == null ? userId : memberId; }
         @Override public String selectMemberBizLineById(Long memberId) { String line = memberLines.get(memberId); return line == null ? "algorithm" : line; }
-        @Override public List<LabTask> selectTaskList(LabTask query) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if (!"2".equals(task.getDelFlag()) && (query.getOwnerId() == null || query.getOwnerId().equals(task.getOwnerId())) && (query.getBizLine() == null || query.getBizLine().equals(task.getBizLine()))) result.add(task); return result; }
+        @Override public List<LabTask> selectTaskList(LabTask query) {
+            lastQuery = query;
+            List<LabTask> result = new ArrayList<LabTask>();
+            for (LabTask task : data.values()) if (!"2".equals(task.getDelFlag())
+                    && (query.getOwnerId() == null || query.getOwnerId().equals(task.getOwnerId()))
+                    && (query.getBizLine() == null || query.getBizLine().equals(task.getBizLine()))) result.add(task);
+            Page<?> request = PageHelper.getLocalPage();
+            if (pagedTotal == null || request == null) return result;
+            Page<LabTask> page = new Page<LabTask>(request.getPageNum(), request.getPageSize());
+            page.setTotal(pagedTotal);
+            int from = Math.min((request.getPageNum() - 1) * request.getPageSize(), result.size());
+            int to = Math.min(from + request.getPageSize(), result.size());
+            page.addAll(result.subList(from, to));
+            PageHelper.clearPage();
+            return page;
+        }
         @Override public LabTask selectTaskById(Long id) { LabTask t = data.get(id); return t == null || "2".equals(t.getDelFlag()) ? null : t; }
         @Override public LabTask selectTaskForUpdate(Long id) { lockedTaskIds.add(id); LabTask current = lockedOverrides.get(id); return current == null ? selectTaskById(id) : current; }
         @Override public List<LabTask> selectTasksByParentId(Long parentId) { List<LabTask> r = new ArrayList<LabTask>(); for (LabTask t : data.values()) if (parentId.equals(t.getParentId()) && !"2".equals(t.getDelFlag())) r.add(t); return r; }
@@ -845,7 +889,16 @@ class LabTaskServiceTest {
 
     static final class MemoryAccessMapper implements LabAccessMapper {
         final Map<Long, LabAccessContext> contexts = new LinkedHashMap<Long, LabAccessContext>();
+        boolean consumePage;
         void put(Long userId, Long memberId, String roleKey, String bizLine) { LabAccessContext value = new LabAccessContext(); value.setUserId(userId); value.setMemberId(memberId); value.setRoleKey(roleKey); value.setBizLine(bizLine); value.setDeptId(101L); contexts.put(userId, value); }
-        @Override public LabAccessContext selectAccessContext(Long userId) { return contexts.get(userId); }
+        @Override public LabAccessContext selectAccessContext(Long userId) {
+            if (consumePage && PageHelper.getLocalPage() != null) PageHelper.clearPage();
+            return contexts.get(userId);
+        }
+    }
+
+    static final class ExposedTaskController extends LabTaskController {
+        ExposedTaskController(LabTaskService service) { super(service); }
+        TableDataInfo table(List<?> rows) { return getDataTable(rows); }
     }
 }

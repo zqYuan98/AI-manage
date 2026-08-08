@@ -71,28 +71,22 @@
             <when test="scope.roleKey == 'lab_member'">and m.owner_id=#{scope.memberId}</when>
         </choose>
     </sql>
-    <sql id="weekTaskScope">
-        <choose>
-            <when test="scope.roleKey == 'lab_lead'">and w.biz_line=#{scope.bizLine}</when>
-            <when test="scope.roleKey == 'lab_member'">and w.owner_id=#{scope.memberId}</when>
-        </choose>
-    </sql>
     <sql id="parentMonthScope">
         <choose>
             <when test="scope.roleKey == 'lab_lead'">and parent_month.biz_line=#{scope.bizLine}</when>
             <when test="scope.roleKey == 'lab_member'">and parent_month.owner_id=#{scope.memberId}</when>
         </choose>
     </sql>
-    <sql id="riskTaskScope">
+    <sql id="riskMonthScope">
         <choose>
             <when test="scope.roleKey == 'lab_lead'">and rt.biz_line=#{scope.bizLine}</when>
             <when test="scope.roleKey == 'lab_member'">and rt.owner_id=#{scope.memberId}</when>
         </choose>
     </sql>
-    <sql id="blockTaskScope">
+    <sql id="riskParentScope">
         <choose>
-            <when test="scope.roleKey == 'lab_lead'">and block_task.biz_line=#{scope.bizLine}</when>
-            <when test="scope.roleKey == 'lab_member'">and block_task.owner_id=#{scope.memberId}</when>
+            <when test="scope.roleKey == 'lab_lead'">and risk_parent.biz_line=#{scope.bizLine}</when>
+            <when test="scope.roleKey == 'lab_member'">and risk_parent.owner_id=#{scope.memberId}</when>
         </choose>
     </sql>
 
@@ -198,7 +192,7 @@
             join lab_goal weekly_annual on weekly_annual.id=parent_month.goal_id and weekly_annual.goal_level='YEAR'
                 and weekly_annual.year=#{year} and weekly_annual.status='ACTIVE' and weekly_annual.del_flag='0'
             where w.task_level='week' and w.del_flag='0'
-            <include refid="weekTaskScope"/><include refid="parentMonthScope"/> group by w.parent_id
+            <include refid="parentMonthScope"/> group by w.parent_id
         ), month_progress as (
             select m.id,m.goal_id,m.milestone_id,m.period,m.plan_date,m.workflow_status,m.result_status,
             m.goal_weight,q.weight quarter_weight,
@@ -212,9 +206,8 @@
             <include refid="monthTaskScope"/>
         ), open_blocks as (
             select be.task_id,min(be.block_start_time) block_start_time from lab_task_block_event be
-            join lab_task block_task on block_task.id=be.task_id and block_task.del_flag='0'
             where be.block_status='OPEN' and be.block_start_time&lt;=#{asOf} and be.del_flag='0'
-            <include refid="blockTaskScope"/> group by be.task_id
+            group by be.task_id
         ), goal_expected as (
             select mp.goal_id,
             sum(case when mp.plan_date&lt;=date(#{asOf}) then mp.goal_weight*mp.quarter_weight/100 else 0 end) expected_progress
@@ -240,11 +233,13 @@
             join lab_goal risk_goal on risk_goal.id=rt.goal_id and risk_goal.goal_level='YEAR'
                 and risk_goal.year=#{year} and risk_goal.status='ACTIVE' and risk_goal.del_flag='0'
             left join open_blocks blocks on blocks.task_id=rt.id
-            where ((rt.task_level='month' and rt.period&lt;=date_format(#{asOf},'%Y-%m'))
+            where ((rt.task_level='month' and rt.period&lt;=date_format(#{asOf},'%Y-%m')
+                    <include refid="riskMonthScope"/>)
                 or (rt.task_level='week' and exists(select 1 from lab_task risk_parent
                     where risk_parent.id=rt.parent_id and risk_parent.task_level='month'
-                    and risk_parent.period&lt;=date_format(#{asOf},'%Y-%m') and risk_parent.del_flag='0')))
-            and rt.del_flag='0' <include refid="riskTaskScope"/> group by rt.goal_id
+                    and risk_parent.period&lt;=date_format(#{asOf},'%Y-%m') and risk_parent.del_flag='0'
+                    <include refid="riskParentScope"/>)))
+            and rt.del_flag='0' group by rt.goal_id
         )
         select g.id goal_id,g.title goal_title,g.year,
         coalesce(max(gp.expected_progress),0) expected_progress,
@@ -269,7 +264,7 @@
             join lab_goal weekly_annual on weekly_annual.id=parent_month.goal_id and weekly_annual.goal_level='YEAR'
                 and weekly_annual.year=#{year} and weekly_annual.status='ACTIVE' and weekly_annual.del_flag='0'
             where w.task_level='week' and w.del_flag='0'
-            <include refid="weekTaskScope"/><include refid="parentMonthScope"/> group by w.parent_id
+            <include refid="parentMonthScope"/> group by w.parent_id
         ), month_progress as (
             select m.goal_id,m.milestone_id,m.period,m.plan_date,m.goal_weight,q.weight quarter_weight,
             case when m.workflow_status='CONFIRMED' and m.result_status in ('EXCEEDED','ONTIME','DELAYED') then 1

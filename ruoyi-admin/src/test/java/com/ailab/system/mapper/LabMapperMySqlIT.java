@@ -21,6 +21,7 @@ import com.ailab.system.domain.LabReminder;
 import com.ailab.system.dto.CollaborationReviewCommand;
 import com.ailab.system.dto.DashboardOverview;
 import com.ailab.system.dto.GoalHealthFact;
+import com.ailab.system.dto.GoalTrendPoint;
 import com.ailab.system.dto.ReminderCandidate;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.PerformanceAssetFact;
@@ -259,7 +260,7 @@ class LabMapperMySqlIT {
                 + "(39681,39680,'QUARTER',2096,'2096Q3','IT-2096-Q3-SCOPE','IT scoped dashboard quarter',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now())");
         jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,actual_finish_time,deliverable,perf_weight,goal_weight,workflow_status,result_status,result_desc,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values"
                 + "(39682,0,39680,39681,'month','2096-08','algorithm','key','IT scoped algorithm month',39203,101,'2096-08-25',null,'algorithm month',50,50,'ACTIVE','DOING','working','0','0','0',0,'0','it',now()),"
-                + "(39683,39682,39680,39681,'week','2096-W32','algorithm','daily','IT scoped algorithm week',39203,101,'2096-08-10','2096-08-09 10:00:00','algorithm week',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now()),"
+                + "(39683,39682,39680,39681,'week','2096-W32','algorithm','daily','IT delegated algorithm week',39202,101,'2096-08-10','2096-08-09 10:00:00','algorithm week',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now()),"
                 + "(39684,39682,39680,39681,'week','2096-08','algorithm','daily','IT legacy weekly period',39203,101,'2096-08-17',null,'legacy week',0,0,'CONFIRMED','UNDONE','missed','0','0','0',0,'0','it',now()),"
                 + "(39685,0,39680,39681,'month','2096-08','platform','key','IT scoped platform month',30003,102,'2096-08-25',null,'platform month',50,50,'ACTIVE','DOING','working','0','0','0',0,'0','it',now()),"
                 + "(39686,39685,39680,39681,'week','2096-W32','platform','daily','IT scoped platform week',30003,102,'2096-08-10','2096-08-09 10:00:00','platform week',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now())");
@@ -271,7 +272,11 @@ class LabMapperMySqlIT {
         assertEquals(new BigDecimal("25.00"), leadFact.getActualProgress().setScale(2),
                 "lead goal facts must exclude a platform decoy while the goal remains readable");
         assertEquals(new BigDecimal("25.00"), memberFact.getActualProgress().setScale(2),
-                "member goal facts must use only personal parent and weekly facts");
+                "a member-authorized parent month must aggregate a same-line week delegated to another owner");
+        GoalTrendPoint memberTrend = dashboardMapper.selectGoalProgressTrend(2096, asOf, accessService.context(39103L)).stream()
+                .filter(point -> Long.valueOf(39680L).equals(point.getGoalId())).findFirst().orElseThrow(AssertionError::new);
+        assertEquals(new BigDecimal("25.00"), memberTrend.getActualProgress().setScale(2),
+                "trend uses the parent authorization too and excludes the platform parent from this goal's aggregate");
 
         long managerConfirmed = dashboardMapper.selectTaskStatusDistribution("2096-08", accessService.context(39101L)).stream()
                 .filter(item -> "CONFIRMED".equals(item.getCode())).mapToLong(item -> item.getCount()).sum();

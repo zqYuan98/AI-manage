@@ -11,6 +11,8 @@ import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.LabAssetRiskPolicy;
 import com.ailab.system.service.LabLedgerService;
 import com.ruoyi.common.exception.ServiceException;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -21,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.BeanUtils;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -56,20 +59,54 @@ public class LabLedgerServiceImpl implements LabLedgerService {
 
     @Override
     public List<LabAsset> listAssets(LabAsset query, Long actorId) {
-        LabAccessContext scope=accessService.context(actorId);
-        LabAsset safe=query==null?new LabAsset():query;
-        List<LabAsset> rows=ledgerMapper.selectAssetList(safe,safe.isSinglePointRisk()?scope:null);
-        assetRiskPolicy.applyAll(rows);
-        if(!safe.isSinglePointRisk())return rows;
-        List<LabAsset> scopedRisks=new ArrayList<LabAsset>();
-        for(LabAsset row:rows)if(row.isSinglePointRisk()&&canReadDashboardRisk(scope,row))scopedRisks.add(row);
-        return scopedRisks;
+        Page<?> requestedPage = detachPage();
+        LabAsset safe = copyAsset(query);
+        LabAccessContext scope = accessService.context(actorId);
+        restorePage(requestedPage);
+        List<LabAsset> visible = copyAssetRows(
+                ledgerMapper.selectAssetList(safe, safe.isSinglePointRisk() ? scope : null));
+        assetRiskPolicy.applyAll(visible);
+        if (safe.isSinglePointRisk()) for (LabAsset row : visible) {
+            if (!row.isSinglePointRisk() || !canReadDashboardRisk(scope, row)) {
+                throw new ServiceException("Asset risk query returned a row outside the trusted dashboard scope");
+            }
+        }
+        return visible;
     }
 
     @Override
     public List<LabAsset> listAssetRisks(LabAsset query, Long actorId) {
-        LabAsset safe=query==null?new LabAsset():query;safe.setSinglePointRisk(true);
-        return listAssets(safe,actorId);
+        LabAsset safe = copyAsset(query); safe.setSinglePointRisk(true);
+        return listAssets(safe, actorId);
+    }
+
+    private LabAsset copyAsset(LabAsset source) {
+        LabAsset copy = new LabAsset();
+        if (source != null) BeanUtils.copyProperties(source, copy);
+        return copy;
+    }
+
+    private List<LabAsset> copyAssetRows(List<LabAsset> rows) {
+        if (rows instanceof Page) {
+            for (int i = 0; i < rows.size(); i++) rows.set(i, copyAsset(rows.get(i)));
+            return rows;
+        }
+        List<LabAsset> copies = new ArrayList<LabAsset>();
+        if (rows != null) for (LabAsset row : rows) copies.add(copyAsset(row));
+        return copies;
+    }
+
+    private Page<?> detachPage() {
+        Page<?> requested = PageHelper.getLocalPage();
+        if (requested != null) PageHelper.clearPage();
+        return requested;
+    }
+
+    private void restorePage(Page<?> requested) {
+        if (requested == null) return;
+        Page<?> restored = PageHelper.startPage(requested.getPageNum(), requested.getPageSize(), requested.getOrderBy());
+        restored.setReasonable(requested.getReasonable());
+        restored.setPageSizeZero(requested.getPageSizeZero());
     }
 
     @Override

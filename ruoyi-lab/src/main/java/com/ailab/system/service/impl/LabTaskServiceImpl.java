@@ -17,6 +17,8 @@ import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.TaskWorkflowService;
 import com.ailab.system.util.LabPeriodUtils;
 import com.ruoyi.common.exception.ServiceException;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -31,6 +33,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -65,10 +68,34 @@ public class LabTaskServiceImpl implements LabTaskService {
 
     @Override
     public List<LabTask> listTasks(LabTask query, Long actorId) {
-        LabTask scoped = query == null ? new LabTask() : query;
+        Page<?> requestedPage = detachPage();
+        LabTask scoped = copyTaskQuery(query);
         validateTaskListQuery(scoped);
         accessService.scopeTaskQuery(scoped, actorId);
+        restorePage(requestedPage);
         return taskMapper.selectTaskList(scoped);
+    }
+
+    private LabTask copyTaskQuery(LabTask query) {
+        LabTask copy = new LabTask();
+        if (query != null) {
+            BeanUtils.copyProperties(query, copy);
+            copy.setWorkflowStatuses(query.getWorkflowStatuses());
+        }
+        return copy;
+    }
+
+    private Page<?> detachPage() {
+        Page<?> requested = PageHelper.getLocalPage();
+        if (requested != null) PageHelper.clearPage();
+        return requested;
+    }
+
+    private void restorePage(Page<?> requested) {
+        if (requested == null) return;
+        Page<?> restored = PageHelper.startPage(requested.getPageNum(), requested.getPageSize(), requested.getOrderBy());
+        restored.setReasonable(requested.getReasonable());
+        restored.setPageSizeZero(requested.getPageSizeZero());
     }
 
     private void validateTaskListQuery(LabTask query) {

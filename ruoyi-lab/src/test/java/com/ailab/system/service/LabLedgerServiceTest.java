@@ -2,7 +2,9 @@ package com.ailab.system.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -14,6 +16,7 @@ import com.ailab.system.domain.LabAsset;
 import com.ailab.system.domain.LabIpr;
 import com.ailab.system.domain.LabMember;
 import com.ailab.system.domain.LabOne2One;
+import com.ailab.system.controller.LabAssetController;
 import com.ailab.system.controller.LabOne2OneController;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.mapper.LabLedgerMapper;
@@ -21,8 +24,11 @@ import com.ailab.system.mapper.LabMemberMapper;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ailab.system.service.impl.LabLedgerServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
+import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.enums.BusinessType;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.time.Clock;
@@ -105,13 +111,15 @@ class LabLedgerServiceTest {
         LabAsset missingBackup = asset(4L, 20L, 40L, "ACTIVE", 0); missingBackup.setCriticalFlag("1"); missingBackup.setBackupOwnerStatus(null);
         LabAsset nonCritical = asset(3L, 20L, null, "INACTIVE", 0); nonCritical.setCriticalFlag("0");
         LabAsset inactiveCritical = asset(5L, 20L, null, "INACTIVE", 0); inactiveCritical.setCriticalFlag("1");
-        when(ledgerMapper.selectAssetList(any(LabAsset.class), any())).thenReturn(Arrays.asList(noBackup, inactiveBackup, missingBackup, nonCritical, inactiveCritical));
-        assertEquals(4, service.listAssetRisks(new LabAsset(), 1L).size());
-        assertTrue(noBackup.isSinglePointRisk());
-        assertTrue(inactiveBackup.isSinglePointRisk());
-        assertTrue(missingBackup.isSinglePointRisk());
+        when(ledgerMapper.selectAssetList(any(LabAsset.class), any())).thenReturn(Arrays.asList(noBackup, inactiveBackup, missingBackup, inactiveCritical));
+        List<LabAsset> risks = service.listAssetRisks(new LabAsset(), 1L);
+        assertEquals(4, risks.size());
+        assertTrue(risks.get(0).isSinglePointRisk());
+        assertTrue(risks.get(1).isSinglePointRisk());
+        assertTrue(risks.get(2).isSinglePointRisk());
         assertFalse(nonCritical.isSinglePointRisk());
-        assertTrue(inactiveCritical.isSinglePointRisk(), "critical inventory stays in the shared risk population regardless of deployment state");
+        assertTrue(risks.get(3).isSinglePointRisk(), "critical inventory stays in the shared risk population regardless of deployment state");
+        assertFalse(noBackup.isSinglePointRisk(), "derived response state must not pollute mapper-owned rows");
     }
 
     @Test
@@ -125,13 +133,54 @@ class LabLedgerServiceTest {
         irrelevant.setAssetStage("VERIFYING"); irrelevant.setCriticalFlag("0");
         irrelevant.setPrimaryOwnerBizLine("algorithm");
         when(ledgerMapper.selectAssetList(any(LabAsset.class), any()))
-                .thenReturn(Arrays.asList(sameLine, crossLine, irrelevant));
+                .thenReturn(Collections.singletonList(sameLine));
         LabAsset query = new LabAsset(); query.setSinglePointRisk(true);
 
         List<LabAsset> result = service.listAssets(query, 2L);
 
-        assertEquals(Collections.singletonList(sameLine), result,
+        assertEquals(1, result.size());
+        assertEquals(Long.valueOf(1L), result.get(0).getId(),
                 "risk drill must match the scoped KPI and the shared risk policy exactly");
+    }
+
+    @Test
+    void controllerRiskPageSurvivesAccessLookupPreservesTotalAndDoesNotPolluteMapperRows() {
+        when(accessService.context(2L)).thenAnswer(invocation -> {
+            if (PageHelper.getLocalPage() != null) PageHelper.clearPage();
+            return context(2L, 21L, LabAccessServiceImpl.LEAD, "algorithm");
+        });
+        LabAsset mappedFirst = asset(1L, 20L, null, "ACTIVE", 0);
+        mappedFirst.setCriticalFlag("1"); mappedFirst.setPrimaryOwnerBizLine("algorithm");
+        LabAsset mappedSecond = asset(2L, 20L, null, "ACTIVE", 0);
+        mappedSecond.setCriticalFlag("1"); mappedSecond.setPrimaryOwnerBizLine("algorithm");
+        @SuppressWarnings("unchecked")
+        final Page<LabAsset>[] mapperPage = new Page[1];
+        when(ledgerMapper.selectAssetList(any(LabAsset.class), any())).thenAnswer(invocation -> {
+            Page<?> request = PageHelper.getLocalPage();
+            if (request == null) return Arrays.asList(mappedFirst, mappedSecond);
+            Page<LabAsset> page = new Page<LabAsset>(request.getPageNum(), request.getPageSize());
+            page.setTotal(7L); page.add(mappedFirst); page.add(mappedSecond); mapperPage[0] = page;
+            PageHelper.clearPage();
+            return page;
+        });
+        LabAsset query = new LabAsset(); query.setSinglePointRisk(true);
+        try {
+            PageHelper.startPage(2, 2, "asset_name asc");
+
+            List<LabAsset> rows = service.listAssets(query, 2L);
+            TableDataInfo table = new ExposedAssetController(service).table(rows);
+
+            assertTrue(rows instanceof Page, "the scoped asset mapper must consume the controller page request");
+            assertSame(mapperPage[0], rows);
+            assertEquals(7L, table.getTotal());
+            assertEquals(2, rows.size());
+            assertNotSame(mappedFirst, rows.get(0));
+            assertFalse(mappedFirst.isSinglePointRisk(), "derived response flags must not pollute mapper-owned entities");
+            assertTrue(rows.get(0).isSinglePointRisk());
+            assertTrue(query.isSinglePointRisk());
+        } finally {
+            PageHelper.clearPage();
+        }
     }
 
     @Test
@@ -361,4 +410,9 @@ class LabLedgerServiceTest {
     private LabOne2One one2one(Long id, Long memberId, Long leaderId, Integer version) { LabOne2One o=new LabOne2One(); o.setId(id); o.setMemberId(memberId); o.setLeaderId(leaderId); o.setMeetingDate(date("2026-08-01")); o.setFactsEvidence("facts"); o.setDifficulties("difficulty"); o.setNextAction("next"); o.setManagerComment("comment"); o.setVersion(version); return o; }
     private LabIpr ipr(Long id, Long owner, String stage, Integer version) { LabIpr i=new LabIpr(); i.setId(id); i.setIprNo("IPR-"+(id==null?"NEW":id)); i.setIprName("IPR"); i.setIprType("PATENT"); i.setIprStage(stage); i.setOwnerId(owner); i.setPlannedSubmitDate(date("2026-08-15")); i.setStatus("ACTIVE"); i.setVersion(version); return i; }
     private Date date(String iso) { return Date.from(java.time.LocalDate.parse(iso).atStartOfDay(ZoneOffset.UTC).toInstant()); }
+
+    static final class ExposedAssetController extends LabAssetController {
+        ExposedAssetController(LabLedgerService service) { super(service); }
+        TableDataInfo table(List<?> rows) { return getDataTable(rows); }
+    }
 }
