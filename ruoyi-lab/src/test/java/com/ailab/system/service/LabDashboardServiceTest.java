@@ -29,6 +29,9 @@ import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -84,6 +87,9 @@ class LabDashboardServiceTest {
             assertFalse(metric.getDrillDownFilters().isEmpty());
         });
         assertEquals("YELLOW", result.getGoalHealth().get(0).getStatus());
+        assertEquals(Collections.singletonList(11L), result.getKpis().get(0).getDrillDownFilters().get("goalIds"));
+        assertEquals(Boolean.TRUE, result.getKpis().get(0).getDrillDownFilters().get("goalIdsFilter"));
+        assertEquals("month", result.getKpis().get(1).getDrillDownFilters().get("taskLevel"));
         assertEquals(Boolean.TRUE, result.getKpis().get(4).getDrillDownFilters().get("singlePointRisk"));
         assertFalse(result.getKpis().get(4).getDrillDownFilters().containsKey("backupMissing"));
         assertEquals(Arrays.asList("DRAFT", "ACTIVE"), result.getKpis().get(2).getDrillDownFilters().get("workflowStatuses"));
@@ -166,7 +172,7 @@ class LabDashboardServiceTest {
         LabAccessContext manager = manager();
         when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(manager))).thenReturn(Collections.<GoalHealthFact>emptyList());
         when(mapper.selectKpiFact(eq("2026-08"), any(), eq(manager))).thenReturn(new DashboardKpiFact());
-        GoalTrendPoint point = new GoalTrendPoint(); point.setPeriod("2026-08"); point.setExpectedProgress(new BigDecimal("55")); point.setActualProgress(new BigDecimal("40"));
+        GoalTrendPoint point = new GoalTrendPoint(); point.setGoalId(11L); point.setGoalName("Annual goal"); point.setPeriod("2026-08"); point.setExpectedProgress(new BigDecimal("55")); point.setActualProgress(new BigDecimal("40"));
         when(mapper.selectGoalProgressTrend(eq(2026), any(), eq(manager))).thenReturn(Collections.singletonList(point));
         emptyDashboardQueriesFor(manager);
 
@@ -175,7 +181,27 @@ class LabDashboardServiceTest {
         assertEquals(1, result.getGoalTrend().size());
         assertTrue(result.getGoalTrend().get(0).getDefinition().contains("累计"));
         assertEquals(Instant.parse("2026-08-15T01:00:00Z"), result.getGoalTrend().get(0).getLastUpdated().toInstant());
+        assertEquals(Long.valueOf(11L), result.getGoalTrend().get(0).getDrillDownFilters().get("goalId"));
         assertEquals("2026-08", result.getGoalTrend().get(0).getDrillDownFilters().get("period"));
+    }
+
+    @Test
+    void goalTrendDtoRepresentsTwoIndependentSixtyPercentGoalSeries() throws Exception {
+        GoalTrendPoint first = new GoalTrendPoint();
+        GoalTrendPoint second = new GoalTrendPoint();
+        java.lang.reflect.Method setGoalId = GoalTrendPoint.class.getMethod("setGoalId", Long.class);
+        java.lang.reflect.Method setGoalName = GoalTrendPoint.class.getMethod("setGoalName", String.class);
+        java.lang.reflect.Method getGoalId = GoalTrendPoint.class.getMethod("getGoalId");
+        setGoalId.invoke(first, 11L); setGoalName.invoke(first, "Goal A"); first.setActualProgress(new BigDecimal("60"));
+        setGoalId.invoke(second, 12L); setGoalName.invoke(second, "Goal B"); second.setActualProgress(new BigDecimal("60"));
+
+        List<GoalTrendPoint> points = Arrays.asList(first, second);
+        Set<Object> series = new HashSet<Object>();
+        for (GoalTrendPoint point : points) {
+            series.add(getGoalId.invoke(point));
+            assertTrue(point.getActualProgress().compareTo(new BigDecimal("100")) <= 0);
+        }
+        assertEquals(2, series.size(), "60% + 60% must remain two chart series instead of one 120% point");
     }
 
     @Test

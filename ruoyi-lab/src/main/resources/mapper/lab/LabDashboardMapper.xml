@@ -27,6 +27,7 @@
         <result property="delayedFocusTask" column="delayed_focus_task"/><result property="overdueUnsubmittedFocusTask" column="overdue_unsubmitted_focus_task"/>
     </resultMap>
     <resultMap id="GoalTrendResult" type="com.ailab.system.dto.GoalTrendPoint">
+        <id property="goalId" column="goal_id"/><result property="goalName" column="goal_name"/>
         <result property="period" column="period"/><result property="expectedProgress" column="expected_progress"/>
         <result property="actualProgress" column="actual_progress"/>
     </resultMap>
@@ -155,7 +156,12 @@
             select w.parent_id month_task_id,
             coalesce(round(100*sum(case when w.workflow_status='CONFIRMED' and w.result_status in ('EXCEEDED','ONTIME','DELAYED') then 1 else 0 end)
                 /nullif(sum(case when w.workflow_status='CONFIRMED' then 1 else 0 end),0),2)/100,0) completion_ratio
-            from lab_task w where w.task_level='week' and w.del_flag='0' group by w.parent_id
+            from lab_task w
+            join lab_task parent_month on parent_month.id=w.parent_id and parent_month.task_level='month'
+                and parent_month.task_type='key' and parent_month.period&lt;=date_format(#{asOf},'%Y-%m') and parent_month.del_flag='0'
+            join lab_goal weekly_annual on weekly_annual.id=parent_month.goal_id and weekly_annual.goal_level='YEAR'
+                and weekly_annual.year=#{year} and weekly_annual.status='ACTIVE' and weekly_annual.del_flag='0'
+            where w.task_level='week' and w.del_flag='0' group by w.parent_id
         ), month_progress as (
             select m.id,m.goal_id,m.milestone_id,m.period,m.plan_date,m.workflow_status,m.result_status,
             m.goal_weight,q.weight quarter_weight,
@@ -213,7 +219,12 @@
             select w.parent_id month_task_id,
             coalesce(round(100*sum(case when w.workflow_status='CONFIRMED' and w.result_status in ('EXCEEDED','ONTIME','DELAYED') then 1 else 0 end)
                 /nullif(sum(case when w.workflow_status='CONFIRMED' then 1 else 0 end),0),2)/100,0) completion_ratio
-            from lab_task w where w.task_level='week' and w.del_flag='0' group by w.parent_id
+            from lab_task w
+            join lab_task parent_month on parent_month.id=w.parent_id and parent_month.task_level='month'
+                and parent_month.task_type='key' and parent_month.period&lt;=date_format(#{asOf},'%Y-%m') and parent_month.del_flag='0'
+            join lab_goal weekly_annual on weekly_annual.id=parent_month.goal_id and weekly_annual.goal_level='YEAR'
+                and weekly_annual.year=#{year} and weekly_annual.status='ACTIVE' and weekly_annual.del_flag='0'
+            where w.task_level='week' and w.del_flag='0' group by w.parent_id
         ), month_progress as (
             select m.goal_id,m.milestone_id,m.period,m.plan_date,m.goal_weight,q.weight quarter_weight,
             case when m.workflow_status='CONFIRMED' and m.result_status in ('EXCEEDED','ONTIME','DELAYED') then 1
@@ -224,13 +235,13 @@
             left join weekly_progress wp on wp.month_task_id=m.id
             where m.task_level='month' and m.task_type='key' and m.period&lt;=date_format(#{asOf},'%Y-%m') and m.del_flag='0'
         ), periods as (
-            select distinct period from month_progress
+            select distinct goal_id,period from month_progress
         ), milestones as (
             select distinct goal_id,milestone_id,quarter_weight from month_progress
         ), milestone_trend as (
             select p.period,ms.goal_id,ms.milestone_id,ms.quarter_weight,
             least(100,greatest(0,round(sum(mp.goal_weight*mp.completion_ratio),2))) milestone_progress
-            from periods p cross join milestones ms
+            from periods p join milestones ms on ms.goal_id=p.goal_id
             left join month_progress mp on mp.goal_id=ms.goal_id and mp.milestone_id=ms.milestone_id and mp.period&lt;=p.period
             group by p.period,ms.goal_id,ms.milestone_id,ms.quarter_weight
         ), annual_trend as (
@@ -238,17 +249,18 @@
             least(100,greatest(0,round(sum(mt.quarter_weight*mt.milestone_progress/100),2))) annual_progress
             from milestone_trend mt group by mt.period,mt.goal_id
         ), actual_trend as (
-            select period,sum(annual_progress) actual_progress from annual_trend group by period
+            select period,goal_id,annual_progress actual_progress from annual_trend
         ), expected_monthly as (
-            select mp.period,
+            select mp.goal_id,mp.period,
             sum(case when mp.plan_date&lt;=date(#{asOf}) then mp.goal_weight*mp.quarter_weight/100 else 0 end) expected_delta
-            from month_progress mp group by mp.period
+            from month_progress mp group by mp.goal_id,mp.period
         ), expected_trend as (
-            select period,round(sum(expected_delta) over(order by period),2) expected_progress
+            select goal_id,period,round(sum(expected_delta) over(partition by goal_id order by period),2) expected_progress
             from expected_monthly
         )
-        select et.period,et.expected_progress,coalesce(at.actual_progress,0) actual_progress
-        from expected_trend et left join actual_trend at on at.period=et.period order by et.period
+        select et.goal_id,g.title goal_name,et.period,et.expected_progress,coalesce(at.actual_progress,0) actual_progress
+        from expected_trend et join lab_goal g on g.id=et.goal_id and g.del_flag='0'
+        left join actual_trend at on at.goal_id=et.goal_id and at.period=et.period order by et.goal_id,et.period
     </select>
 
     <select id="selectKpiFact" resultMap="KpiFactResult">

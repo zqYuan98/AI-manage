@@ -31,6 +31,8 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.BeanWrapper;
+import org.springframework.beans.BeanWrapperImpl;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -188,6 +190,22 @@ class LabGoalServiceTest {
     }
 
     @Test
+    void dashboardRiskGoalIdsBindThroughGetAndRemainAnExactTypedGoalListFilter() {
+        LabGoal query = new LabGoal();
+        BeanWrapper requestBinder = new BeanWrapperImpl(query);
+        requestBinder.setAutoGrowNestedPaths(true);
+        requestBinder.setPropertyValue("goalIdsFilter", Boolean.TRUE);
+        requestBinder.setPropertyValue("goalIds[0]", 11L);
+        requestBinder.setPropertyValue("goalIds[1]", 12L);
+
+        service.listGoals(query, 99L);
+
+        assertEquals(Boolean.TRUE, requestBinder.getPropertyValue("goalIdsFilter"));
+        assertEquals(java.util.Arrays.asList(11L, 12L), requestBinder.getPropertyValue("goalIds"));
+        assertEquals(query, goals.lastQuery);
+    }
+
+    @Test
     void goalMapperNeverExpandsDynamicSqlFragments() throws Exception {
         Path root = Paths.get("").toAbsolutePath();
         while (root != null && !Files.exists(root.resolve("ruoyi-lab/src/main/resources/mapper/lab/LabGoalMapper.xml"))) {
@@ -198,6 +216,10 @@ class LabGoalServiceTest {
 
         assertFalse(xml.contains("${"), "goal queries must never expand caller-provided SQL fragments");
         assertFalse(xml.toLowerCase().contains("datascope"), "goal reads are intentionally global for all lab roles");
+        String compact = xml.toLowerCase().replaceAll("\\s+", "");
+        assertTrue(compact.contains("goalidsfilter") && compact.contains("collection=\"goalids\"")
+                && compact.contains("#{goalid}") && compact.contains("<otherwise>and1=0</otherwise>"),
+                "empty and non-empty risk-goal id filters must both reproduce the dashboard set exactly");
     }
 
     @Test

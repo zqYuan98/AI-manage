@@ -6,12 +6,18 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class GoalTrendPoint {
+    private Long goalId;
+    private String goalName;
     private String period;
     private BigDecimal expectedProgress;
     private BigDecimal actualProgress;
     private String definition;
     private Date lastUpdated;
     private Map<String, Object> drillDownFilters = new LinkedHashMap<String, Object>();
+    public Long getGoalId() { return goalId; }
+    public void setGoalId(Long goalId) { this.goalId = goalId; }
+    public String getGoalName() { return goalName; }
+    public void setGoalName(String goalName) { this.goalName = goalName; }
     public String getPeriod() { return period; }
     public void setPeriod(String period) { this.period = period; }
     public BigDecimal getExpectedProgress() { return expectedProgress; }

@@ -1,6 +1,7 @@
 package com.ailab.system.sql;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ailab.system.quartz.LabScheduleTask;
@@ -78,7 +79,27 @@ class LabDashboardSqlContractTest {
         assertTrue(compact.contains("goal_riskas(") && compact.contains("fromlab_taskrt")
                 && compact.contains("blocks.task_id=rt.id"),
                 "goal risk must consider every current task under the goal without multiplying progress aggregates");
+        assertEquals(2, occurrences(compact,
+                "fromlab_taskwjoinlab_taskparent_monthonparent_month.id=w.parent_id"),
+                "both health and trend weekly aggregates must start from valid requested parent months");
+        assertEquals(2, occurrences(compact, "weekly_annual.year=#{year}"));
+        assertEquals(2, occurrences(compact, "parent_month.period&lt;=date_format(#{asof},'%y-%m')"));
+        assertFalse(compact.contains("fromlab_taskwwherew.task_level='week'"),
+                "weekly progress must not aggregate the complete cross-year task history");
         assertFalse(compact.contains("selectkeymonthtasksbymilestoneid"), "dashboard aggregation must remain set based");
+    }
+
+    @Test
+    void goalTrendReturnsIndependentGoalSeriesInsteadOfSummingPercentagesAcrossGoals() throws Exception {
+        String compact = compact(read("ruoyi-lab/src/main/resources/mapper/lab/LabDashboardMapper.xml"));
+        assertTrue(compact.contains("property=\"goalid\"column=\"goal_id\"")
+                && compact.contains("property=\"goalname\"column=\"goal_name\""),
+                "trend DTO mapping must identify the annual-goal series");
+        assertTrue(compact.contains("selectet.goal_id,g.titlegoal_name,et.period")
+                && compact.contains("partitionbygoal_idorderbyperiod"),
+                "each annual goal needs its own cumulative monthly series");
+        assertFalse(compact.contains("selectperiod,sum(annual_progress)actual_progress"),
+                "two goals at 60 percent must remain two 60-percent series, never a 120-percent point");
     }
 
     @Test
@@ -127,6 +148,11 @@ class LabDashboardSqlContractTest {
 
     private String read(String relative) throws Exception { return new String(Files.readAllBytes(root().resolve(relative)), StandardCharsets.UTF_8); }
     private String compact(String value) { return value.toLowerCase().replaceAll("\\s+", ""); }
+    private int occurrences(String value, String needle) {
+        int count = 0;
+        for (int offset = 0; (offset = value.indexOf(needle, offset)) >= 0; offset += needle.length()) count++;
+        return count;
+    }
     private Path root() {
         for (Path cursor = Paths.get(System.getProperty("user.dir")).toAbsolutePath(); cursor != null; cursor = cursor.getParent()) {
             if (Files.isRegularFile(cursor.resolve("pom.xml")) && Files.isDirectory(cursor.resolve("ruoyi-lab"))) return cursor;

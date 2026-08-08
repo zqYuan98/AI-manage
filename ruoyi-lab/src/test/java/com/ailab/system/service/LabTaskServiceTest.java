@@ -186,6 +186,7 @@ class LabTaskServiceTest {
     void dashboardDrillFiltersFeedTheExistingTaskListThroughTypedParameters() {
         LabTask query = new LabTask();
         query.setPeriod("2026-08");
+        query.setTaskLevel("month");
         query.setWorkflowStatuses(Arrays.asList("DRAFT", "ACTIVE"));
         query.setOverdueOrPending(Boolean.TRUE);
         query.setAsOf(Date.from(Instant.parse("2026-08-15T00:00:00Z")));
@@ -195,6 +196,7 @@ class LabTaskServiceTest {
         service.listTasks(query, 9L);
 
         assertEquals(Arrays.asList("DRAFT", "ACTIVE"), query.getWorkflowStatuses());
+        assertEquals("month", query.getTaskLevel());
         assertEquals(Boolean.TRUE, query.getOverdueOrPending());
         assertEquals("1", query.getCurrentBlockFlag());
         assertNotNull(query.getBlockStartBefore());
@@ -205,10 +207,18 @@ class LabTaskServiceTest {
         LabTask query = new LabTask();
         BeanWrapper requestBinder = new BeanWrapperImpl(query);
         requestBinder.setAutoGrowNestedPaths(true);
+        requestBinder.setPropertyValue("taskLevel", "month");
         requestBinder.setPropertyValue("workflowStatuses[0]", "DRAFT");
         requestBinder.setPropertyValue("workflowStatuses[1]", "ACTIVE");
 
         assertEquals(Arrays.asList("DRAFT", "ACTIVE"), query.getWorkflowStatuses());
+        assertEquals("month", query.getTaskLevel());
+    }
+
+    @Test
+    void taskListRejectsUnknownTaskLevelBeforeMapperUse() {
+        LabTask query = new LabTask(); query.setTaskLevel("quarter");
+        assertThrows(ServiceException.class, () -> service.listTasks(query, 9L));
     }
 
     @Test

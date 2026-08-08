@@ -72,6 +72,11 @@ public class LabTaskServiceImpl implements LabTaskService {
     }
 
     private void validateTaskListQuery(LabTask query) {
+        if (query.getTaskLevel() != null && !query.getTaskLevel().isEmpty()
+                && !LabConstants.TASK_LEVEL_MONTH.equals(query.getTaskLevel())
+                && !LabConstants.TASK_LEVEL_WEEK.equals(query.getTaskLevel())) {
+            throw new ServiceException("Task level filter must be month or week");
+        }
         for (String status : query.getWorkflowStatuses()) {
             if (!QUERY_WORKFLOW_STATUSES.contains(status)) throw new ServiceException("Unsupported task workflow status filter");
         }

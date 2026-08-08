@@ -196,14 +196,38 @@ class LabMapperMySqlIT {
                 + "(39874,39873,39871,39872,'week','2024-04','algorithm','daily','IT completed week',39203,101,'2024-04-05','week one',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now()),"
                 + "(39875,39873,39871,39872,'week','2024-04','algorithm','daily','IT undone week two',39203,101,'2024-04-12','week two',0,0,'CONFIRMED','UNDONE','missed','0','0','0',0,'0','it',now()),"
                 + "(39876,39873,39871,39872,'week','2024-04','algorithm','daily','IT undone week three',39203,101,'2024-04-19','week three',0,0,'CONFIRMED','UNDONE','missed','0','0','0',0,'0','it',now())");
+        jdbcTemplate.update("insert into lab_goal(id,parent_id,goal_level,year,period,goal_no,title,owner_id,weight,progress_mode,progress_rate,status,version,del_flag,create_by,create_time) values"
+                + "(39710,0,'YEAR',2022,null,'IT-YEAR-2022-DECOY','IT old decoy goal',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now()),"
+                + "(39711,39710,'QUARTER',2022,'2022Q1','IT-2022-Q1-DECOY','IT old decoy quarter',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now())");
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,result_desc,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values"
+                + "(39712,0,39710,39711,'month','2022-01','algorithm','key','IT old decoy month',39203,101,'2022-01-20','old',100,100,'ACTIVE','DOING','working','0','0','0',0,'0','it',now()),"
+                + "(39713,39712,39710,39711,'week','2022-01','algorithm','daily','IT old decoy week',39203,101,'2022-01-07','old week',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now())");
         BigDecimal roundedByTaskFour = goalService.calculateAnnualProgress(39871L, 39101L);
-        GoalHealthFact roundedDashboard = dashboardMapper.selectGoalHealthFacts(2024,
-                java.sql.Timestamp.valueOf("2024-04-30 23:59:59"), accessService.context(39101L)).stream()
+        List<GoalHealthFact> roundedYearFacts = dashboardMapper.selectGoalHealthFacts(2024,
+                java.sql.Timestamp.valueOf("2024-04-30 23:59:59"), accessService.context(39101L));
+        GoalHealthFact roundedDashboard = roundedYearFacts.stream()
                 .filter(fact -> Long.valueOf(39871L).equals(fact.getGoalId())).findFirst()
                 .orElseThrow(() -> new AssertionError("2024 rounding goal health missing"));
+        assertTrue(roundedYearFacts.stream().noneMatch(fact -> Long.valueOf(39710L).equals(fact.getGoalId())),
+                "requested-year dashboard queries must ignore old parent months and their weekly history");
         assertEquals(new BigDecimal("0.17"), roundedByTaskFour);
         assertEquals(roundedByTaskFour, roundedDashboard.getActualProgress().setScale(2),
                 "dashboard must preserve Task4 weekly, milestone, then annual rounding stages");
+
+        jdbcTemplate.update("insert into lab_goal(id,parent_id,goal_level,year,period,goal_no,title,owner_id,weight,progress_mode,progress_rate,status,version,del_flag,create_by,create_time) values"
+                + "(39701,0,'YEAR',2023,null,'IT-YEAR-2023-A','IT trend A',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now()),"
+                + "(39702,39701,'QUARTER',2023,'2023Q2','IT-2023-A-Q2','IT trend A quarter',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now()),"
+                + "(39704,0,'YEAR',2023,null,'IT-YEAR-2023-B','IT trend B',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now()),"
+                + "(39705,39704,'QUARTER',2023,'2023Q2','IT-2023-B-Q2','IT trend B quarter',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now())");
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,result_desc,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values"
+                + "(39703,0,39701,39702,'month','2023-04','algorithm','key','IT trend A sixty',39203,101,'2023-04-20','A',60,60,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now()),"
+                + "(39706,0,39704,39705,'month','2023-04','algorithm','key','IT trend B sixty',39203,101,'2023-04-20','B',60,60,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now())");
+        List<com.ailab.system.dto.GoalTrendPoint> independentTrend = dashboardMapper.selectGoalProgressTrend(2023,
+                java.sql.Timestamp.valueOf("2023-04-30 23:59:59"), accessService.context(39101L));
+        assertEquals(new java.util.HashSet<Long>(Arrays.asList(39701L, 39704L)), independentTrend.stream()
+                .map(com.ailab.system.dto.GoalTrendPoint::getGoalId).collect(Collectors.toSet()));
+        assertTrue(independentTrend.stream().allMatch(point -> new BigDecimal("60.00").compareTo(point.getActualProgress()) == 0),
+                "two annual goals at 60 percent must be returned as separate series, not a 120 percent aggregate");
     }
 
     @Test

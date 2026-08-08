@@ -69,7 +69,8 @@ public class LabDashboardServiceImpl implements LabDashboardService {
         result.setGoalHealth(health);
         List<GoalTrendPoint> trend = safeTrend(mapper.selectGoalProgressTrend(requestedMonth.getYear(), asOf, scope));
         for (GoalTrendPoint point : trend) {
-            point.setDefinition("按年度目标贡献权重累计计划进度，以及已确认月任务或执行中月任务已确认周任务比例形成的实际进度"); point.setLastUpdated(now);
+            point.setDefinition("每个年度目标独立累计计划进度，以及已确认月任务或执行中月任务已确认周任务比例形成的实际进度"); point.setLastUpdated(now);
+            point.getDrillDownFilters().put("goalId", point.getGoalId());
             point.getDrillDownFilters().put("period", point.getPeriod());
         }
         result.setGoalTrend(trend);
@@ -120,12 +121,15 @@ public class LabDashboardServiceImpl implements LabDashboardService {
 
     private List<DashboardMetric> kpis(String period, List<GoalHealth> health, DashboardKpiFact fact, Date now,
             Date asOf, LocalDate asOfDate) {
-        int riskGoals = 0; for (GoalHealth item : health) if (!"GREEN".equals(item.getStatus())) riskGoals++;
+        List<Long> riskGoalIds = new ArrayList<Long>();
+        for (GoalHealth item : health) if (!"GREEN".equals(item.getStatus())) riskGoalIds.add(item.getGoalId());
         List<DashboardMetric> values = new ArrayList<DashboardMetric>();
-        values.add(metric("annualGoalHealth", "年度目标健康风险", riskGoals, "个", period,
-                HEALTH_DEFINITION, now, filters("year", Integer.valueOf(period.substring(0, 4)))));
+        values.add(metric("annualGoalHealth", "年度目标健康风险", riskGoalIds.size(), "个", period,
+                HEALTH_DEFINITION, now, filters("year", Integer.valueOf(period.substring(0, 4)),
+                        "goalIdsFilter", Boolean.TRUE, "goalIds", riskGoalIds)));
         values.add(metric("keyTaskCompletion", "当月重点任务完成率", zero(fact.getKeyTaskCompletionRate()), "%", period,
-                "已确认且结果完成的当月重点任务绩效权重/全部当月重点任务绩效权重", now, filters("period", period, "taskType", "key")));
+                "已确认且结果完成的当月重点任务绩效权重/全部当月重点任务绩效权重", now,
+                filters("period", period, "taskLevel", "month", "taskType", "key")));
         values.add(metric("overdueOrPending", "逾期/未填", integer(fact.getOverdueOrPendingCount()), "项", period,
                 "计划日期已过仍未提交，或草稿/执行中存在必填字段缺失的当前任务数", now,
                 filters("period", period, "workflowStatuses", Arrays.asList("DRAFT", "ACTIVE"),

@@ -333,6 +333,13 @@ public class LabGoalServiceImpl implements LabGoalService {
     private LabGoal safeGoalQuery(LabGoal query) {
         LabGoal safe = query == null ? new LabGoal() : query;
         safe.getParams().remove("dataScope");
+        if (Boolean.TRUE.equals(safe.getGoalIdsFilter())) {
+            for (Long goalId : safe.getGoalIds()) {
+                if (goalId == null || goalId.longValue() <= 0L) {
+                    throw new ServiceException("Goal id filters must be positive integers");
+                }
+            }
+        }
         return safe;
     }
 

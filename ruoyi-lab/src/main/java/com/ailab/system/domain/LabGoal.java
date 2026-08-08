@@ -26,6 +26,10 @@ public class LabGoal extends BaseEntity {
     private String status;
     private Integer version;
     private String delFlag;
+    /** Query-only exact id set used by dashboard health drill-downs. */
+    private List<Long> goalIds = new ArrayList<Long>();
+    /** Distinguishes an exact empty set from an omitted id filter. */
+    private Boolean goalIdsFilter;
     private List<LabGoal> children = new ArrayList<LabGoal>();
 
     public Long getId() { return id; }
@@ -62,6 +66,13 @@ public class LabGoal extends BaseEntity {
     public void setVersion(Integer version) { this.version = version; }
     public String getDelFlag() { return delFlag; }
     public void setDelFlag(String delFlag) { this.delFlag = delFlag; }
+    /** Mutable so Spring MVC can populate indexed GET parameters. */
+    public List<Long> getGoalIds() { return goalIds; }
+    public void setGoalIds(List<Long> goalIds) {
+        this.goalIds = goalIds == null ? new ArrayList<Long>() : new ArrayList<Long>(goalIds);
+    }
+    public Boolean getGoalIdsFilter() { return goalIdsFilter; }
+    public void setGoalIdsFilter(Boolean goalIdsFilter) { this.goalIdsFilter = goalIdsFilter; }
     public List<LabGoal> getChildren() { return children; }
     public void setChildren(List<LabGoal> children) { this.children = children == null ? new ArrayList<LabGoal>() : children; }
 }
