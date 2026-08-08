@@ -15,6 +15,15 @@ public final class FakeLibreOfficeMain {
             Thread.sleep(SLEEP_MILLIS);
             return;
         }
+        if (args.length > 0 && "terminator-output".equals(args[0])) {
+            byte[] chunk = new byte[4096];
+            Arrays.fill(chunk, (byte) 'x');
+            for (int i = 0; i < 128; i++) {
+                System.out.write(chunk);
+                System.err.write(chunk);
+            }
+            return;
+        }
         if (args.length > 0 && "grandchild".equals(args[0])) {
             Path base = Paths.get(args[1]);
             String tag = args[2];

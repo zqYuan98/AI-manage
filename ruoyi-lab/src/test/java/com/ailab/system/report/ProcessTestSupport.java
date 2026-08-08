@@ -35,7 +35,11 @@ public final class ProcessTestSupport {
         int value = (int) pid;
         if (windows()) {
             WinNT.HANDLE handle = Kernel32.INSTANCE.OpenProcess(0x1000, false, value);
-            if (handle == null || WinBase.INVALID_HANDLE_VALUE.equals(handle)) return false;
+            if (handle == null || WinBase.INVALID_HANDLE_VALUE.equals(handle)) {
+                int error = Kernel32.INSTANCE.GetLastError();
+                if (error == 87) return false;
+                throw new IllegalStateException("cannot inspect process " + value + ", error=" + error);
+            }
             try {
                 IntByReference code = new IntByReference();
                 return Kernel32.INSTANCE.GetExitCodeProcess(handle, code) && code.getValue() == 259;

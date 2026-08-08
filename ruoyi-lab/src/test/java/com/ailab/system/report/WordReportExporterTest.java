@@ -92,7 +92,8 @@ class WordReportExporterTest {
                 new ReportSectionData("chart", "CHART", "chart", Collections.<Map<String,Object>>emptyList(),
                         map("categories", Collections.singletonList("x"), "values", Collections.singletonList(1)))),
                 Collections.<String,Object>emptyMap());
-        assertThrows(java.io.IOException.class, () -> invokePreflight(value));
+        java.io.IOException failure = assertThrows(java.io.IOException.class, () -> invokePreflight(value));
+        assertTrue(failure.getMessage().contains("cell limit"));
     }
 
     @Test
@@ -108,7 +109,8 @@ class WordReportExporterTest {
                 new ReportSectionData("chart", "CHART", "chart", Collections.<Map<String,Object>>emptyList(),
                         map("categories", categories, "values", Collections.emptyList()))),
                 Collections.<String,Object>emptyMap());
-        assertThrows(java.io.IOException.class, () -> invokePreflight(value));
+        java.io.IOException failure = assertThrows(java.io.IOException.class, () -> invokePreflight(value));
+        assertTrue(failure.getMessage().contains("row limit"));
     }
 
     @Test
