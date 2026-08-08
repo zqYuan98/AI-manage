@@ -6,9 +6,11 @@ import com.ailab.system.dto.ReportBodyView;
 import com.ailab.system.dto.ReportJobView;
 import com.ailab.system.dto.ReportQueueReceipt;
 import com.ailab.system.dto.ReportStatusView;
+import com.ailab.system.dto.ReportSummarySectionView;
 import java.util.List;
 
 public interface LabReportService {
+    List<String> bizLines(Long actorUserId);
     ReportQueueReceipt generate(Long templateId, String period, String bizLine, Long actorUserId);
     ReportStatusView status(Long reportId, Long actorUserId);
     List<ReportStatusView> history(String period, String bizLine, Long actorUserId);
@@ -19,5 +21,7 @@ public interface LabReportService {
     ReportStatusView finalizeReport(Long reportId, int expectedVersion, Long actorUserId);
     ReportArtifact artifact(Long reportId, String format, Long actorUserId);
     List<LabReportSummary> summaries(String period, String bizLine, Long actorUserId);
+    List<ReportSummarySectionView> summarySections(String period, String bizLine, Long actorUserId);
     LabReportSummary saveSummary(LabReportSummary summary, Long actorUserId);
+    List<LabReportSummary> saveSummaries(List<LabReportSummary> summaries, Long actorUserId);
 }

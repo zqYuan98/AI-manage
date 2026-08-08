@@ -20,6 +20,9 @@ import com.ailab.system.report.model.ReportData;
 import com.ailab.system.report.model.ReportSectionData;
 import com.ailab.system.report.provider.DataSourceProvider;
 import com.ailab.system.report.provider.DataSourceProviderRegistry;
+import com.ailab.system.report.provider.ManualSummaryProvider;
+import com.ailab.system.report.provider.TaskStatProvider;
+import com.ailab.system.report.provider.TaskDetailProvider;
 import com.ailab.system.report.renderer.SectionRenderer;
 import com.ailab.system.report.renderer.SectionRendererRegistry;
 import java.io.IOException;
@@ -77,6 +80,27 @@ class ReportConfigValidatorTest {
     }
 
     @Test
+    void rejectsUnsupportedManualFieldsAndRendererIncompatibleChartTypesAtSaveTime() {
+        ReportConfigValidator springValidator = new ReportConfigValidator(new DataSourceProviderRegistry(
+                Arrays.<DataSourceProvider>asList(new ManualSummaryProvider(), new TaskStatProvider())));
+        LabReportSection manual = section("MANUAL", null);
+        manual.setQueryConfigJson("{\"filters\":[{\"field\":\"status\",\"operator\":\"EQ\",\"value\":\"ACTIVE\"}]}");
+        assertThrows(IllegalArgumentException.class, () -> springValidator.validateSection(manual));
+
+        LabReportSection chart = section("CHART", "GOAL_PROGRESS");
+        chart.setRenderConfigJson("{\"chart\":\"line\"}");
+        assertThrows(IllegalArgumentException.class, () -> validator.validateSection(chart));
+
+        LabReportSection grouped = section("GROUP_TEXT", "TASK_COORD");
+        grouped.setRenderConfigJson("{\"template\":\"${summary.groups}\"}");
+        assertThrows(IllegalArgumentException.class, () -> validator.validateSection(grouped));
+
+        LabReportSection stat = section("STAT", "TASK_STAT");
+        stat.setRenderConfigJson("{\"metrics\":[\"notARealMetric\"]}");
+        assertThrows(IllegalArgumentException.class, () -> springValidator.validateSection(stat));
+    }
+
+    @Test
     void validatesStrictFilterAndColumnSchemasWithoutDynamicSql() {
         LabReportSection valid = section("TABLE", "TASK_DETAIL");
         valid.setQueryConfigJson("{\"filters\":[{\"field\":\"period\",\"operator\":\"EQ\",\"value\":\"2026-08\"}],\"sort\":\"planDate\"}");
@@ -105,6 +129,17 @@ class ReportConfigValidatorTest {
         LabReportSection badRender = section("STAT", "TASK_STAT");
         badRender.setRenderConfigJson("{\"metrics\":true}");
         assertThrows(IllegalArgumentException.class, () -> validator.validateSection(badRender));
+    }
+
+    @Test
+    void validatesFieldsOperatorsAndValuesAgainstTheSelectedProviderSchema() {
+        ReportConfigValidator typed = new ReportConfigValidator(new DataSourceProviderRegistry(
+                Collections.<DataSourceProvider>singletonList(new TaskDetailProvider())));
+        LabReportSection invalid = section("TABLE", "TASK_DETAIL");
+        invalid.setQueryConfigJson("{\"filters\":[{\"field\":\"status\",\"operator\":\"GTE\",\"value\":1}]}");
+        invalid.setRenderConfigJson("{\"columns\":[\"memberId\"]}");
+
+        assertThrows(IllegalArgumentException.class, () -> typed.validateSection(invalid));
     }
 
     @Test
@@ -605,7 +640,7 @@ class ReportConfigValidatorTest {
         section.setQueryConfigJson("{\"filters\":[]}");
         section.setRenderConfigJson("MANUAL".equals(type)
                 ? "{\"required\":false,\"placeholder\":\"暂无内容\"}"
-                : "{\"columns\":[\"owner\"]}");
+                : "GROUP_TEXT".equals(type) ? "{\"groupBy\":\"owner\"}" : "{\"columns\":[\"owner\"]}");
         return section;
     }
 

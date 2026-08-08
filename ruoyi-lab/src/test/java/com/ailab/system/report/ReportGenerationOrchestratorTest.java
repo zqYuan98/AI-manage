@@ -18,6 +18,7 @@ import com.ailab.system.domain.LabReportJob;
 import com.ailab.system.domain.LabReportSummary;
 import com.ailab.system.controller.LabReportController;
 import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.dto.ReportSummarySectionView;
 import com.ailab.system.mapper.LabReportMapper;
 import com.ailab.system.config.LabProperties;
 import com.ailab.system.report.config.ReportSectionConfig;
@@ -136,15 +137,26 @@ class ReportGenerationOrchestratorTest {
     }
 
     @Test
+    void requiredManualSectionsNeedAllThreeCanonicalManagementFields() {
+        LabReportTemplate template=template();when(mapper.selectTemplateById(7L)).thenReturn(template);when(mapper.selectTemplateForUpdate(7L)).thenReturn(template);
+        LabReportSection manual=section("EXEC_SUMMARY",false);manual.setSectionType("MANUAL");manual.setDataSource(null);manual.setManualFlag("1");manual.setRenderConfigJson("{\"required\":true}");when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(manual));
+        LabReportSummary summary=new LabReportSummary();summary.setSectionCode("EXEC_SUMMARY");summary.setSummaryText("looks complete");summary.setSummaryJson("{\"bizLineSummary\":\"done\",\"reasonAnalysis\":\"because\"}");when(mapper.selectSummaries("2026-07","ALL")).thenReturn(Collections.singletonList(summary));
+
+        assertThrows(ServiceException.class,()->orchestrator.createGeneration(7L,"2026-07","ALL",1001L));
+
+        verify(mapper,never()).insertReportInstance(any());
+    }
+
+    @Test
     void generationPinsManualSummaryTextForTheWholeArtifactPipeline() {
         LabReportTemplate template=template();when(mapper.selectTemplateById(7L)).thenReturn(template);when(mapper.selectTemplateForUpdate(7L)).thenReturn(template);
         LabReportSection manual=section("EXEC_SUMMARY",false);manual.setSectionType("MANUAL");manual.setDataSource(null);manual.setManualFlag("1");manual.setRenderConfigJson("{\"required\":true,\"placeholder\":\"required\"}");
-        LabReportSummary summary=new LabReportSummary();summary.setSectionCode("EXEC_SUMMARY");summary.setSummaryText("Pinned management summary");summary.setSummaryJson("{}");summary.setSourceRevision(9);
+        LabReportSummary summary=new LabReportSummary();summary.setSectionCode("EXEC_SUMMARY");summary.setSummaryText("client text is ignored");summary.setSummaryJson("{\"bizLineSummary\":\"Pinned management summary\",\"reasonAnalysis\":\"Evidence-based reason\",\"nextStep\":\"Named next step\"}");summary.setSourceRevision(9);
         when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(manual));when(mapper.selectSummaries("2026-07","ALL")).thenReturn(Collections.singletonList(summary));
 
         LabReportInstance instance=orchestrator.createGeneration(7L,"2026-07","ALL",1001L);
 
-        assertEquals("Pinned management summary",new ReportDataCodec().decodeManualSummaryTexts(instance.getSourceDataJson()).get("EXEC_SUMMARY"));
+        assertEquals("Pinned management summary\n\nEvidence-based reason\n\nNamed next step",new ReportDataCodec().decodeManualSummaryTexts(instance.getSourceDataJson()).get("EXEC_SUMMARY"));
     }
 
     @Test
@@ -262,6 +274,9 @@ class ReportGenerationOrchestratorTest {
             new XMLMapperBuilder(input, configuration, "mapper/lab/LabReportMapper.xml", configuration.getSqlFragments()).parse();
             assertTrue(configuration.hasStatement("com.ailab.system.mapper.LabReportMapper.finalizeReport"));
             assertTrue(configuration.hasStatement("com.ailab.system.mapper.LabReportMapper.selectRecoverableReportJobs"));
+            assertTrue(configuration.hasStatement("com.ailab.system.mapper.LabReportMapper.selectSummaryForUpdate"));
+            assertTrue(configuration.hasStatement("com.ailab.system.mapper.LabReportMapper.deleteSummary"));
+            assertTrue(configuration.hasStatement("com.ailab.system.mapper.LabReportMapper.selectActiveBizLines"));
         }
         String xml = new String(Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportMapper.xml")), StandardCharsets.UTF_8);
         assertTrue(!xml.contains("${"), "report lifecycle SQL must use bound parameters only");
@@ -519,14 +534,14 @@ class ReportGenerationOrchestratorTest {
 
     @Test
     void summaryUpsertReturnsTheDatabaseIdentityAndIncrementedRevision() {
-        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));LabReportSummary input=new LabReportSummary();input.setPeriod("2026-07");input.setBizLine("ALL");input.setSectionCode("EXEC");input.setSummaryText("done");LabReportSummary stored=new LabReportSummary();stored.setId(77L);stored.setPeriod("2026-07");stored.setBizLine("ALL");stored.setSectionCode("EXEC");stored.setSummaryText("done");stored.setSourceRevision(5);when(mapper.upsertSummary(any(LabReportSummary.class))).thenReturn(2);when(mapper.selectSummary("2026-07","ALL","EXEC")).thenReturn(stored);
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));LabReportSummary input=new LabReportSummary();input.setPeriod("2026-07");input.setBizLine("ALL");input.setSectionCode("EXEC");input.setSourceRevision(4);input.setSummaryText("client controlled");input.setSummaryJson("{\"bizLineSummary\":\"done\",\"reasonAnalysis\":\"because\",\"nextStep\":\"continue\"}");LabReportSummary current=new LabReportSummary();current.setSourceRevision(4);LabReportSummary stored=new LabReportSummary();stored.setId(77L);stored.setPeriod("2026-07");stored.setBizLine("ALL");stored.setSectionCode("EXEC");stored.setSummaryText("done\n\nbecause\n\ncontinue");stored.setSourceRevision(5);when(mapper.selectSummaryForUpdate("2026-07","ALL","EXEC")).thenReturn(current);when(mapper.upsertSummary(any(LabReportSummary.class))).thenReturn(2);when(mapper.selectSummary("2026-07","ALL","EXEC")).thenReturn(stored);
         LabReportSummary result=service.saveSummary(input,1001L);
         assertEquals(77L,result.getId());assertEquals(5,result.getSourceRevision());
     }
 
     @Test
     void summaryApiAcceptsEveryCanonicalReportPeriod() {
-        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));LabReportSummary input=new LabReportSummary();input.setPeriod("2026Q3");input.setBizLine("ALL");input.setSectionCode("EXEC");input.setSummaryText("quarterly summary");LabReportSummary stored=new LabReportSummary();stored.setId(78L);stored.setPeriod("2026Q3");stored.setBizLine("ALL");stored.setSectionCode("EXEC");stored.setSourceRevision(1);when(mapper.upsertSummary(any(LabReportSummary.class))).thenReturn(1);when(mapper.selectSummary("2026Q3","ALL","EXEC")).thenReturn(stored);
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));LabReportSummary input=new LabReportSummary();input.setPeriod("2026Q3");input.setBizLine("ALL");input.setSectionCode("EXEC");input.setSummaryJson("{\"bizLineSummary\":\"quarterly summary\",\"reasonAnalysis\":\"facts\",\"nextStep\":\"next quarter\"}");LabReportSummary stored=new LabReportSummary();stored.setId(78L);stored.setPeriod("2026Q3");stored.setBizLine("ALL");stored.setSectionCode("EXEC");stored.setSourceRevision(1);when(mapper.upsertSummary(any(LabReportSummary.class))).thenReturn(1);when(mapper.selectSummary("2026Q3","ALL","EXEC")).thenReturn(stored);
 
         assertEquals(78L,service.saveSummary(input,1001L).getId());
     }
@@ -538,6 +553,67 @@ class ReportGenerationOrchestratorTest {
         assertThrows(ServiceException.class,()->service.saveSummary(input,1001L));
 
         verify(mapper,never()).upsertSummary(any());
+    }
+
+    @Test
+    void summarySaveCanonicalizesAndRequiresBusinessReasonAndNextStep() {
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));LabReportSummary input=new LabReportSummary();input.setPeriod("2026-07");input.setBizLine("ALL");input.setSectionCode("EXEC");input.setSummaryText("client controlled");input.setSummaryJson("{\"bizLineSummary\":\"Delivered\",\"reasonAnalysis\":\"Evidence\"}");
+
+        assertThrows(ServiceException.class,()->service.saveSummary(input,1001L));
+        input.setSummaryJson("{\"bizLineSummary\":\"Delivered\",\"reasonAnalysis\":\"Evidence\",\"nextStep\":\"Continue\"}{}");
+        assertThrows(ServiceException.class,()->service.saveSummary(input,1001L));
+
+        verify(mapper,never()).upsertSummary(any());
+    }
+
+    @Test
+    void summaryBatchExplicitlyClearsAnExistingOptionalSection() throws Exception {
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));
+        LabReportSummary cleared=new LabReportSummary();cleared.setPeriod("2026-07");cleared.setBizLine("ALL");cleared.setSectionCode("OPTIONAL");cleared.setSourceRevision(3);cleared.setSummaryJson("");LabReportSummary current=new LabReportSummary();current.setSourceRevision(3);when(mapper.selectSummaryForUpdate("2026-07","ALL","OPTIONAL")).thenReturn(current);when(mapper.deleteSummary("2026-07","ALL","OPTIONAL","1001")).thenReturn(1);
+
+        assertTrue(service.saveSummaries(Collections.singletonList(cleared),1001L).isEmpty());
+
+        verify(mapper).deleteSummary("2026-07","ALL","OPTIONAL","1001");
+        verify(mapper,never()).upsertSummary(any());
+        assertTrue(LabReportServiceImpl.class.getMethod("saveSummaries",List.class,Long.class).isAnnotationPresent(Transactional.class));
+    }
+
+    @Test
+    void staleManualSummaryRevisionCannotSilentlyOverwriteAnotherEditor() {
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));LabReportSummary input=new LabReportSummary();input.setPeriod("2026-07");input.setBizLine("ALL");input.setSectionCode("EXEC");input.setSourceRevision(4);input.setSummaryJson("{\"bizLineSummary\":\"mine\",\"reasonAnalysis\":\"facts\",\"nextStep\":\"next\"}");LabReportSummary current=new LabReportSummary();current.setSourceRevision(5);when(mapper.selectSummaryForUpdate("2026-07","ALL","EXEC")).thenReturn(current);
+
+        assertThrows(ServiceException.class,()->service.saveSummary(input,1001L));
+
+        verify(mapper,never()).upsertSummary(any());
+    }
+
+    @Test
+    void managerCannotGenerateForAnUnknownRouteSuppliedBusinessLine() {
+        when(mapper.selectActiveBizLines()).thenReturn(Collections.singletonList("algorithm"));
+
+        assertThrows(ServiceException.class,()->orchestrator.createGeneration(7L,"2026-07","ghost",1001L));
+
+        verify(mapper,never()).insertReportInstance(any());
+    }
+
+    @Test
+    void reportBusinessLineChoicesComeFromTheAuthorizedServerScope() {
+        when(mapper.selectActiveBizLines()).thenReturn(Arrays.asList("algorithm","platform"));LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));
+        assertEquals(Arrays.asList("ALL","algorithm","platform"),service.bizLines(1001L));
+
+        LabAccessContext lead=new LabAccessContext();lead.setUserId(2002L);lead.setRoleKey("lab_lead");lead.setBizLine("algorithm");when(access.context(2002L)).thenReturn(lead);
+        assertEquals(Collections.singletonList("algorithm"),service.bizLines(2002L));
+    }
+
+    @Test
+    void matchingLineLeadCanLoadOnlySafeDefaultManualSectionSchema() {
+        LabAccessContext lead=new LabAccessContext();lead.setUserId(2002L);lead.setRoleKey("lab_lead");lead.setBizLine("algorithm");when(access.context(2002L)).thenReturn(lead);
+        LabReportSection manual=section("EXEC_SUMMARY",false);manual.setSectionType("MANUAL");manual.setSectionName("经营摘要");manual.setDataSource(null);manual.setManualFlag("1");manual.setRenderConfigJson("{\"required\":true,\"placeholder\":\"secret editor hint\"}");when(mapper.selectDefaultManualSections("MONTH")).thenReturn(Collections.singletonList(manual));
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));
+
+        List<ReportSummarySectionView> result=service.summarySections("2026-07","algorithm",2002L);
+
+        assertEquals(1,result.size());assertEquals("EXEC_SUMMARY",result.get(0).getSectionCode());assertEquals("经营摘要",result.get(0).getSectionName());assertTrue(result.get(0).isRequired());
     }
 
     @Test

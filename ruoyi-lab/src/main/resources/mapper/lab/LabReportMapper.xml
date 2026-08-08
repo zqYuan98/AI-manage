@@ -59,6 +59,13 @@
     <select id="selectTemplateForUpdate" parameterType="long" resultMap="TemplateResult">select <include refid="templateColumns"/> from lab_report_template where id=#{id} and del_flag='0' for update</select>
     <select id="lockTemplateType" parameterType="string" resultMap="TemplateResult">select <include refid="templateColumns"/> from lab_report_template where period_type=#{periodType} and del_flag='0' order by id for update</select>
     <select id="selectSections" parameterType="long" resultMap="SectionResult">select <include refid="sectionColumns"/> from lab_report_section where template_id=#{templateId} and del_flag='0' order by sort_no,id</select>
+    <select id="selectDefaultManualSections" parameterType="string" resultMap="SectionResult">
+        select s.* from lab_report_section s
+        join lab_report_template t on t.id=s.template_id and t.del_flag='0'
+        where t.period_type=#{periodType} and t.default_flag='1' and t.latest_flag='1' and t.status='ENABLED'
+          and s.section_type='MANUAL' and s.manual_flag='1' and s.visible_flag='1' and s.del_flag='0'
+        order by s.sort_no,s.id
+    </select>
     <select id="selectMaxTemplateRevisionForUpdate" parameterType="string" resultType="int">select revision_no from lab_report_template where template_code=#{templateCode} and del_flag='0' order by revision_no desc limit 1 for update</select>
     <update id="clearLatestTemplate">update lab_report_template set latest_flag='0',update_by=#{actor},update_time=sysdate(),version=version+1 where template_code=#{templateCode} and latest_flag='1' and del_flag='0'</update>
     <insert id="insertTemplate" parameterType="com.ailab.system.domain.LabReportTemplate" useGeneratedKeys="true" keyProperty="id">
@@ -74,11 +81,14 @@
 
     <select id="selectSummaries" resultMap="SummaryResult">select * from lab_report_summary where period=#{period} and biz_line=#{bizLine} and del_flag='0' order by section_code</select>
     <select id="selectSummary" resultMap="SummaryResult">select * from lab_report_summary where period=#{period} and biz_line=#{bizLine} and section_code=#{sectionCode} and del_flag='0' limit 1</select>
+    <select id="selectSummaryForUpdate" resultMap="SummaryResult">select * from lab_report_summary where period=#{period} and biz_line=#{bizLine} and section_code=#{sectionCode} and del_flag='0' limit 1 for update</select>
     <insert id="upsertSummary" parameterType="com.ailab.system.domain.LabReportSummary" useGeneratedKeys="true" keyProperty="id">
         insert into lab_report_summary(period,biz_line,section_code,summary_json,summary_text,source_revision,del_flag,create_by,create_time,remark)
         values(#{period},#{bizLine},#{sectionCode},#{summaryJson},#{summaryText},1,'0',#{createBy},sysdate(),#{remark})
-        on duplicate key update id=last_insert_id(id),summary_json=values(summary_json),summary_text=values(summary_text),source_revision=source_revision+1,update_by=values(create_by),update_time=sysdate(),remark=values(remark)
+        on duplicate key update id=last_insert_id(id),summary_json=values(summary_json),summary_text=values(summary_text),source_revision=source_revision+1,del_flag='0',update_by=values(create_by),update_time=sysdate(),remark=values(remark)
     </insert>
+    <update id="deleteSummary">update lab_report_summary set del_flag='1',update_by=#{actor},update_time=sysdate() where period=#{period} and biz_line=#{bizLine} and section_code=#{sectionCode} and del_flag='0'</update>
+    <select id="selectActiveBizLines" resultType="string">select distinct biz_line from lab_member where member_status='ACTIVE' and del_flag='0' and biz_line is not null and trim(biz_line)&lt;&gt;'' order by biz_line</select>
 
     <select id="selectMaxReportRevisionForUpdate" resultType="int">select revision_no from lab_report_instance where template_code=#{templateCode} and period=#{period} and biz_line=#{bizLine} and del_flag='0' order by revision_no desc limit 1 for update</select>
     <select id="selectSourcePerformancePins" resultType="com.ailab.system.report.model.ReportPerformancePin">

@@ -1,7 +1,12 @@
 package com.ailab.system.report.config;
 
+import com.ailab.system.report.provider.DataSourceProvider;
+import com.ailab.system.report.provider.DataSourceProviderRegistry;
+import com.ailab.system.report.provider.ReportFieldSpec;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -63,6 +68,51 @@ public final class ReportConfigCatalog {
         if(GOAL_PROGRESS.equals(providerId))return "MONTH".equals(periodType)||"QUARTER".equals(periodType)||"YEAR".equals(periodType);
         if(TASK_NEXT.equals(providerId))return "MONTH".equals(periodType);
         return PROVIDER_IDS.contains(providerId)&&REPORT_TYPES.contains(periodType);
+    }
+
+    /** Immutable, server-owned choices consumed by the visual template designer. */
+    public static Map<String, Object> designerMetadata() {
+        Map<String, Set<String>> compatible = new LinkedHashMap<String, Set<String>>();
+        for (String type : SECTION_TYPES) compatible.put(type, compatibleProviders(type));
+        Map<String, Set<String>> periods = new LinkedHashMap<String, Set<String>>();
+        for (String provider : PROVIDER_IDS) {
+            Set<String> supported = new LinkedHashSet<String>();
+            for (String period : REPORT_TYPES) if (supportsPeriod(provider, period)) supported.add(period);
+            periods.put(provider, Collections.unmodifiableSet(supported));
+        }
+        List<String> variables = Collections.unmodifiableList(new ArrayList<String>(Arrays.asList(
+                "context.period", "context.bizLine", "context.generatedAt", "rows", "summary",
+                "metadata.sectionCode", "metadata.title")));
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("sectionTypes", SECTION_TYPES); result.put("providers", PROVIDER_IDS);
+        result.put("operators", FILTER_OPERATORS); result.put("queryFields", QUERY_FIELDS);
+        result.put("reportTypes", REPORT_TYPES); result.put("templateStatuses", TEMPLATE_STATUSES);
+        result.put("compatibleProviders", Collections.unmodifiableMap(compatible));
+        result.put("providerPeriods", Collections.unmodifiableMap(periods));
+        result.put("freemarkerVariables", variables);
+        return Collections.unmodifiableMap(result);
+    }
+
+    /** Adds provider-local field types/operators without duplicating their runtime schema. */
+    public static Map<String, Object> designerMetadata(DataSourceProviderRegistry registry) {
+        if (registry == null) throw new IllegalArgumentException("Report provider registry is required");
+        Map<String, Object> result = new LinkedHashMap<String, Object>(designerMetadata());
+        Map<String, List<Map<String, Object>>> providers = new LinkedHashMap<String, List<Map<String, Object>>>();
+        Map<String, Set<String>> metrics = new LinkedHashMap<String, Set<String>>();
+        for (Map.Entry<String, DataSourceProvider> entry : registry.asMap().entrySet()) {
+            List<Map<String, Object>> fields = new ArrayList<Map<String, Object>>();
+            for (ReportFieldSpec spec : entry.getValue().getFieldSpecs()) {
+                Map<String, Object> field = new LinkedHashMap<String, Object>();
+                field.put("name", spec.getName()); field.put("type", spec.getType().name());
+                field.put("operators", spec.getOperators());
+                fields.add(Collections.unmodifiableMap(field));
+            }
+            providers.put(entry.getKey(), Collections.unmodifiableList(fields));
+            metrics.put(entry.getKey(), entry.getValue().getSupportedMetrics());
+        }
+        result.put("providerFields", Collections.unmodifiableMap(providers));
+        result.put("providerMetrics", Collections.unmodifiableMap(metrics));
+        return Collections.unmodifiableMap(result);
     }
 
     private static Map<String, Set<String>> compatibility() {

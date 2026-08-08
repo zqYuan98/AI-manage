@@ -2,6 +2,8 @@ package com.ailab.system.controller;
 
 import com.ailab.system.domain.LabReportTemplate;
 import com.ailab.system.dto.TemplateRevisionCommand;
+import com.ailab.system.report.config.ReportConfigCatalog;
+import com.ailab.system.report.provider.DataSourceProviderRegistry;
 import com.ailab.system.service.LabReportTemplateService;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
@@ -33,10 +35,14 @@ import org.springframework.web.multipart.MultipartFile;
 public class LabReportTemplateController extends BaseController {
     private static final long MAX_JSON = 2L * 1024L * 1024L;
     private final LabReportTemplateService service;
-    public LabReportTemplateController(LabReportTemplateService service){this.service=service;}
+    private final DataSourceProviderRegistry providers;
+    public LabReportTemplateController(LabReportTemplateService service,DataSourceProviderRegistry providers){this.service=service;this.providers=providers;}
 
     @PreAuthorize("@ss.hasPermi('lab:template:list')") @GetMapping("/tree")
     public AjaxResult tree(){return success(service.list(SecurityUtils.getUserId()));}
+
+    @PreAuthorize("@ss.hasPermi('lab:template:list')") @GetMapping("/metadata")
+    public AjaxResult metadata(){return success(ReportConfigCatalog.designerMetadata(providers));}
 
     @PreAuthorize("@ss.hasPermi('lab:template:list')") @GetMapping("/{id}/config")
     public AjaxResult config(@PathVariable Long id){Map<String,Object> value=new LinkedHashMap<String,Object>();value.put("template",service.get(id,SecurityUtils.getUserId()));value.put("sections",service.sections(id,SecurityUtils.getUserId()));return success(value);}

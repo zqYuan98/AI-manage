@@ -13,6 +13,7 @@ import com.ailab.system.report.model.ReportPeriod;
 import com.ailab.system.report.model.ReportPerformancePin;
 import com.ailab.system.report.model.ReportSectionData;
 import com.ailab.system.report.config.ReportSectionConfig;
+import com.ailab.system.report.config.ReportManualSummaryContract;
 import com.ailab.system.domain.LabReportSummary;
 import com.ailab.system.service.LabAccessService;
 import com.ruoyi.common.exception.ServiceException;
@@ -141,14 +142,14 @@ public class ReportGenerationOrchestrator {
     private boolean sensitive(List<LabReportSection> sections) { for (LabReportSection section : sections) if (!"0".equals(section.getVisibleFlag()) && (section.isSensitive() || "PERF_SUMMARY".equals(section.getDataSource()) || hasText(section.getSensitivePermission()))) return true; return false; }
     private Map<String,String> manualSummaryTexts(List<LabReportSection> sections,String period,String bizLine){
         Map<String,LabReportSummary> available=new LinkedHashMap<String,LabReportSummary>();for(LabReportSummary value:safe(mapper.selectSummaries(period,bizLine)))available.put(value.getSectionCode(),value);
-        Map<String,String> result=new LinkedHashMap<String,String>();for(LabReportSection section:sections){if("0".equals(section.getVisibleFlag())||!"MANUAL".equals(section.getSectionType()))continue;LabReportSummary summary=available.get(section.getSectionCode());result.put(section.getSectionCode(),summary==null||summary.getSummaryText()==null?"":summary.getSummaryText());}return result;
+        Map<String,String> result=new LinkedHashMap<String,String>();for(LabReportSection section:sections){if("0".equals(section.getVisibleFlag())||!"MANUAL".equals(section.getSectionType()))continue;LabReportSummary summary=available.get(section.getSectionCode());if(summary==null){result.put(section.getSectionCode(),"");continue;}try{result.put(section.getSectionCode(),ReportManualSummaryContract.parse(summary.getSummaryJson()).getText());}catch(IllegalArgumentException ex){result.put(section.getSectionCode(),"");}}return result;
     }
     private void requireManualCompleteness(List<LabReportSection> sections,Map<String,String> summaries){
         for(LabReportSection section:sections){if("0".equals(section.getVisibleFlag())||!"MANUAL".equals(section.getSectionType()))continue;ReportSectionConfig config=new ReportSectionConfig(section);if(!Boolean.TRUE.equals(config.getRenderConfig().get("required")))continue;if(!hasText(summaries.get(section.getSectionCode())))throw new ServiceException("Required manual report section is incomplete: "+section.getSectionCode());}
     }
     private String reportNo(String period, String bizLine) { String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12); return "RPT-" + period.replaceAll("[^A-Za-z0-9]", "") + "-" + bizLine + "-" + suffix; }
     private void validateMarkdown(String value) { if (value == null || value.indexOf('\0') >= 0 || value.getBytes(StandardCharsets.UTF_8).length > ReportDataBudget.manualMarkdownByteLimit()) throw new ServiceException("Markdown is missing, invalid or too large"); }
-    private void requireBizLine(String value) { if (value == null || !value.matches("[A-Za-z0-9_-]{1,32}")) throw new ServiceException("Invalid business line"); }
+    private void requireBizLine(String value) { if (value == null || !value.matches("[A-Za-z0-9_-]{1,32}") || (!"ALL".equals(value) && !safe(mapper.selectActiveBizLines()).contains(value))) throw new ServiceException("Invalid business line"); }
     private String path(LabReportInstance value, String format) { if ("JSON".equals(format)) return value.getJsonPath(); if ("MARKDOWN".equals(format)) return value.getMarkdownPath(); if ("WORD".equals(format)) return value.getWordPath(); if ("PDF".equals(format)) return value.getPdfPath(); throw new ServiceException("Unsupported report artifact"); }
     private String status(LabReportInstance value, String format) { if ("JSON".equals(format)) return value.getJsonStatus(); if ("MARKDOWN".equals(format)) return value.getMarkdownStatus(); if ("WORD".equals(format)) return value.getWordStatus(); if ("PDF".equals(format)) return value.getPdfStatus(); throw new ServiceException("Unsupported report artifact"); }
     private String extension(String format) { return "JSON".equals(format) ? ".json" : "MARKDOWN".equals(format) ? ".md" : "WORD".equals(format) ? ".docx" : ".pdf"; }

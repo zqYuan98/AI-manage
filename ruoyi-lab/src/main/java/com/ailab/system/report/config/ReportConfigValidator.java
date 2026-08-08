@@ -3,6 +3,9 @@ package com.ailab.system.report.config;
 import com.ailab.system.domain.LabReportInstance;
 import com.ailab.system.domain.LabReportSection;
 import com.ailab.system.domain.LabReportTemplate;
+import com.ailab.system.report.provider.DataSourceProvider;
+import com.ailab.system.report.provider.DataSourceProviderRegistry;
+import com.ailab.system.report.provider.ReportFieldSpec;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.JsonToken;
@@ -31,14 +34,20 @@ public final class ReportConfigValidator {
     private static final Set<String> TYPES = ReportConfigCatalog.sectionTypes();
     private static final Set<String> OPERATORS = ReportConfigCatalog.filterOperators();
     private static final Set<String> ALL_FIELDS = ReportConfigCatalog.queryFields();
+    private final DataSourceProviderRegistry providers;
+
+    public ReportConfigValidator() { this.providers = null; }
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReportConfigValidator(DataSourceProviderRegistry providers) { this.providers = providers; }
 
     public void validateSection(LabReportSection section) {
         if (section == null || !TYPES.contains(section.getSectionType())) throw invalid("Unknown report section type");
         String provider = section.getDataSource();
-        if ("MANUAL".equals(section.getSectionType())) { if (provider != null && !provider.trim().isEmpty()) throw invalid("MANUAL sections cannot have a provider"); }
+        if ("MANUAL".equals(section.getSectionType())) { if (provider != null && !provider.trim().isEmpty()) throw invalid("MANUAL sections cannot have a provider"); provider=ReportConfigCatalog.MANUAL_SUMMARY; }
         else if (provider == null || !ReportConfigCatalog.compatibleProviders(section.getSectionType()).contains(provider)) throw invalid("Provider is not compatible with section type");
-        validateQuery(parse(section.getQueryConfigJson(), "query configuration"));
-        JsonNode render=parse(section.getRenderConfigJson(), "render configuration");validateRender(render);
+        Map<String, ReportFieldSpec> fields = providerFields(provider);
+        validateQuery(parse(section.getQueryConfigJson(), "query configuration"), fields);
+        JsonNode render=parse(section.getRenderConfigJson(), "render configuration");validateRender(render, fields, section.getSectionType(), providerMetrics(provider));
         if("MANUAL".equals(section.getSectionType())){
             if(!"1".equals(section.getManualFlag())||!render.has("required")||!render.get("required").isBoolean())throw invalid("MANUAL sections must declare a boolean required setting");
             if(!render.get("required").booleanValue()&&(!render.has("placeholder")||!render.get("placeholder").isTextual()||render.get("placeholder").asText().trim().isEmpty()))throw invalid("Optional MANUAL sections require a placeholder");
@@ -111,30 +120,37 @@ public final class ReportConfigValidator {
         throw new IllegalStateException("Historical report template revision is unavailable");
     }
 
-    private void validateQuery(JsonNode node) {
+    private void validateQuery(JsonNode node, Map<String, ReportFieldSpec> fields) {
         requireObject(node, "query configuration"); assertOnly(node, set("filters", "sort", "groupBy", "limit"), "query configuration");
-        if (node.has("filters")) { if (!node.get("filters").isArray() || node.get("filters").size() > MAX_FILTERS) throw invalid("Invalid filters"); for (JsonNode filter : node.get("filters")) validateFilter(filter); }
-        if (node.has("sort")) allowedField(node.get("sort"), "sort"); if (node.has("groupBy")) allowedField(node.get("groupBy"), "groupBy"); if (node.has("limit") && (!integralInt(node.get("limit")) || node.get("limit").asInt() < 1 || node.get("limit").asInt() > 1000)) throw invalid("Invalid limit");
+        if (node.has("filters")) { if (!node.get("filters").isArray() || node.get("filters").size() > MAX_FILTERS) throw invalid("Invalid filters"); for (JsonNode filter : node.get("filters")) validateFilter(filter, fields); }
+        if (node.has("sort")) allowedField(node.get("sort"), "sort", fields); if (node.has("groupBy")) allowedField(node.get("groupBy"), "groupBy", fields); if (node.has("limit") && (!integralInt(node.get("limit")) || node.get("limit").asInt() < 1 || node.get("limit").asInt() > 1000)) throw invalid("Invalid limit");
     }
-    private void validateFilter(JsonNode filter) {
-        requireObject(filter, "filter"); assertOnly(filter, set("field", "operator", "value"), "filter"); allowedField(filter.get("field"), "filter field");
+    private void validateFilter(JsonNode filter, Map<String, ReportFieldSpec> fields) {
+        requireObject(filter, "filter"); assertOnly(filter, set("field", "operator", "value"), "filter"); allowedField(filter.get("field"), "filter field", fields);
         if (!filter.has("operator") || !filter.get("operator").isTextual() || !OPERATORS.contains(filter.get("operator").asText())) throw invalid("Unknown filter operator");
         if (!filter.has("value") || !simpleValue(filter.get("value"))) throw invalid("Invalid filter value");
         String operator = filter.get("operator").asText(); JsonNode value = filter.get("value");
         if ("BETWEEN".equals(operator) && (!value.isArray() || value.size() != 2 || !scalar(value.get(0)) || !scalar(value.get(1)))) throw invalid("BETWEEN requires exactly two scalar values");
         if ("IN".equals(operator) && (!value.isArray() || value.size() == 0 || value.size() > 20)) throw invalid("Invalid IN filter");
         if (!"BETWEEN".equals(operator) && !"IN".equals(operator) && !scalar(value)) throw invalid("Scalar operator requires a scalar value");
+        if (fields != null) {
+            ReportFieldSpec spec = fields.get(filter.get("field").asText());
+            try { spec.validate(operator, JSON.convertValue(value, Object.class)); }
+            catch (RuntimeException ex) { throw invalid(ex.getMessage()); }
+        }
     }
-    private void validateRender(JsonNode node) {
+    private void validateRender(JsonNode node, Map<String, ReportFieldSpec> fields, String sectionType, Set<String> supportedMetrics) {
         requireObject(node, "render configuration"); assertOnly(node, set("columns", "limit", "template", "metrics", "chart", "groupBy", "placeholder", "required"), "render configuration");
-        if (node.has("columns")) { if (!node.get("columns").isArray() || node.get("columns").size() > MAX_COLUMNS) throw invalid("Invalid columns"); for (JsonNode column : node.get("columns")) validateColumn(column); }
+        if (node.has("columns")) { if (!node.get("columns").isArray() || node.get("columns").size() > MAX_COLUMNS) throw invalid("Invalid columns"); for (JsonNode column : node.get("columns")) validateColumn(column, fields); }
         if (node.has("limit") && (!integralInt(node.get("limit")) || node.get("limit").asInt() < 1 || node.get("limit").asInt() > 1000)) throw invalid("Invalid render limit");
         for (String name : Arrays.asList("template", "chart", "placeholder")) if (node.has(name) && (!node.get(name).isTextual() || node.get(name).asText().length() > MAX_STRING)) throw invalid("Invalid " + name);
+        if (node.has("chart") && !"bar".equals(node.get("chart").asText())) throw invalid("Only bar charts are supported");
         if(node.has("required")&&!node.get("required").isBoolean())throw invalid("Invalid required setting");
-        if (node.has("metrics")) { if (!node.get("metrics").isArray() || node.get("metrics").size() == 0 || node.get("metrics").size() > 10) throw invalid("Invalid metrics"); for (JsonNode metric : node.get("metrics")) if (!metric.isTextual() || metric.asText().length() > 64) throw invalid("Invalid metric"); }
-        if (node.has("groupBy")) allowedField(node.get("groupBy"), "groupBy");
+        if ("GROUP_TEXT".equals(sectionType) && !node.has("groupBy")) throw invalid("GROUP_TEXT requires groupBy");
+        if (node.has("metrics")) { if (!node.get("metrics").isArray() || node.get("metrics").size() == 0 || node.get("metrics").size() > 10) throw invalid("Invalid metrics"); for (JsonNode metric : node.get("metrics")) if (!metric.isTextual() || metric.asText().length() > 64 || (supportedMetrics != null && !supportedMetrics.contains(metric.asText()))) throw invalid("Invalid metric"); }
+        if (node.has("groupBy")) allowedField(node.get("groupBy"), "groupBy", fields);
     }
-    private void validateColumn(JsonNode column) { if (column.isTextual()) { allowedField(column, "column"); return; } requireObject(column, "column"); assertOnly(column, set("field", "label", "align", "width"), "column"); allowedField(column.get("field"), "column field"); if (column.has("label") && (!column.get("label").isTextual() || column.get("label").asText().length() > 100)) throw invalid("Invalid column label"); if (column.has("align") && (!column.get("align").isTextual() || !set("LEFT", "CENTER", "RIGHT").contains(column.get("align").asText()))) throw invalid("Invalid column alignment"); if (column.has("width") && (!column.get("width").isTextual() || !column.get("width").asText().matches("([1-9][0-9]{0,2}%|[1-9][0-9]{0,3}px)"))) throw invalid("Invalid column width"); }
+    private void validateColumn(JsonNode column, Map<String, ReportFieldSpec> fields) { if (column.isTextual()) { allowedField(column, "column", fields); return; } requireObject(column, "column"); assertOnly(column, set("field", "label", "align", "width"), "column"); allowedField(column.get("field"), "column field", fields); if (column.has("label") && (!column.get("label").isTextual() || column.get("label").asText().length() > 100)) throw invalid("Invalid column label"); if (column.has("align") && (!column.get("align").isTextual() || !set("LEFT", "CENTER", "RIGHT").contains(column.get("align").asText()))) throw invalid("Invalid column alignment"); if (column.has("width") && (!column.get("width").isTextual() || !column.get("width").asText().matches("([1-9][0-9]{0,2}%|[1-9][0-9]{0,3}px)"))) throw invalid("Invalid column width"); }
     private void validateSectionStyle(JsonNode node) {
         requireObject(node, "section style configuration");
         assertOnly(node, set("titleLevel", "width", "align", "color", "backgroundColor", "fontSize", "bold", "pageBreakBefore", "keepTogether", "padding"), "section style configuration");
@@ -166,7 +182,15 @@ public final class ReportConfigValidator {
         if (node.has("pageSize") && (!node.get("pageSize").isTextual() || !set("A4", "LETTER").contains(node.get("pageSize").asText()))) throw invalid("Invalid template page size");
         if (node.has("orientation") && (!node.get("orientation").isTextual() || !set("PORTRAIT", "LANDSCAPE").contains(node.get("orientation").asText()))) throw invalid("Invalid template orientation");
     }
-    private void allowedField(JsonNode value, String name) { if (value == null || !value.isTextual() || !ALL_FIELDS.contains(value.asText())) throw invalid("Unknown " + name); }
+    private Map<String, ReportFieldSpec> providerFields(String provider) {
+        if (providers == null || provider == null) return null;
+        DataSourceProvider value = providers.require(provider); Map<String, ReportFieldSpec> result = new LinkedHashMap<String, ReportFieldSpec>();
+        for (ReportFieldSpec field : value.getFieldSpecs()) result.put(field.getName(), field);
+        if (result.isEmpty()) throw invalid("Provider field schema is unavailable");
+        return Collections.unmodifiableMap(result);
+    }
+    private Set<String> providerMetrics(String provider) { if (providers == null || provider == null) return null; return providers.require(provider).getSupportedMetrics(); }
+    private void allowedField(JsonNode value, String name, Map<String, ReportFieldSpec> fields) { if (value == null || !value.isTextual() || (fields == null ? !ALL_FIELDS.contains(value.asText()) : !fields.containsKey(value.asText()))) throw invalid("Unknown " + name); }
     private JsonNode parse(String source, String name) {
         try {
             if (source == null) return JSON.readTree("{}");

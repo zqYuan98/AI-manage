@@ -17,6 +17,7 @@ public interface LabReportMapper {
     LabReportTemplate selectTemplateForUpdate(@Param("id") Long id);
     List<LabReportTemplate> lockTemplateType(@Param("periodType") String periodType);
     List<LabReportSection> selectSections(@Param("templateId") Long templateId);
+    List<LabReportSection> selectDefaultManualSections(@Param("periodType") String periodType);
     Integer selectMaxTemplateRevisionForUpdate(@Param("templateCode") String templateCode);
     int clearLatestTemplate(@Param("templateCode") String templateCode, @Param("actor") String actor);
     int insertTemplate(LabReportTemplate template);
@@ -27,7 +28,11 @@ public interface LabReportMapper {
 
     List<LabReportSummary> selectSummaries(@Param("period") String period, @Param("bizLine") String bizLine);
     LabReportSummary selectSummary(@Param("period") String period,@Param("bizLine") String bizLine,@Param("sectionCode") String sectionCode);
+    LabReportSummary selectSummaryForUpdate(@Param("period") String period,@Param("bizLine") String bizLine,@Param("sectionCode") String sectionCode);
     int upsertSummary(LabReportSummary summary);
+    int deleteSummary(@Param("period") String period, @Param("bizLine") String bizLine,
+            @Param("sectionCode") String sectionCode, @Param("actor") String actor);
+    List<String> selectActiveBizLines();
 
     Integer selectMaxReportRevisionForUpdate(@Param("templateCode") String templateCode, @Param("period") String period,
             @Param("bizLine") String bizLine);

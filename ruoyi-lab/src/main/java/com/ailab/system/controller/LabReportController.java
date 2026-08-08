@@ -37,6 +37,9 @@ public class LabReportController extends BaseController {
     private final LabReportService service;
     public LabReportController(LabReportService service){this.service=service;}
 
+    @PreAuthorize("@ss.hasPermi('lab:report:list')") @GetMapping("/biz-lines")
+    public AjaxResult bizLines(HttpServletResponse response){preventCaching(response);return success(service.bizLines(SecurityUtils.getUserId()));}
+
     @PreAuthorize("@ss.hasPermi('lab:report:list')") @GetMapping("/history")
     public TableDataInfo history(@RequestParam(required=false)String period,@RequestParam(required=false)String bizLine,HttpServletResponse response){preventCaching(response);PageDomain page=TableSupport.buildPageRequest();if(page.getPageSize()==null||page.getPageSize()<1||page.getPageSize()>MAX_HISTORY_PAGE_SIZE)throw new ServiceException("Report history page size must be between 1 and "+MAX_HISTORY_PAGE_SIZE);PageHelper.startPage(page.getPageNum(),page.getPageSize()).setReasonable(page.getReasonable());return getDataTable(service.history(period,bizLine,SecurityUtils.getUserId()));}
 
@@ -71,9 +74,16 @@ public class LabReportController extends BaseController {
     @PreAuthorize("@ss.hasPermi('lab:report:list')") @GetMapping("/summary")
     public AjaxResult summaries(@RequestParam String period,@RequestParam String bizLine,HttpServletResponse response){preventCaching(response);return success(service.summaries(period,bizLine,SecurityUtils.getUserId()));}
 
+    @PreAuthorize("@ss.hasPermi('lab:report:list')") @GetMapping("/summary-sections")
+    public AjaxResult summarySections(@RequestParam String period,@RequestParam String bizLine,HttpServletResponse response){preventCaching(response);return success(service.summarySections(period,bizLine,SecurityUtils.getUserId()));}
+
     @PreAuthorize("@ss.hasPermi('lab:report:list')")
     @Log(title="AI lab report manual summary",businessType=BusinessType.UPDATE,isSaveRequestData=false,isSaveResponseData=false)
     @PutMapping("/summary") public AjaxResult saveSummary(@RequestBody LabReportSummary summary){return success(service.saveSummary(summary,SecurityUtils.getUserId()));}
+
+    @PreAuthorize("@ss.hasPermi('lab:report:list')")
+    @Log(title="AI lab report manual summaries",businessType=BusinessType.UPDATE,isSaveRequestData=false,isSaveResponseData=false)
+    @PutMapping("/summaries") public AjaxResult saveSummaries(@RequestBody java.util.List<LabReportSummary> summaries){return success(service.saveSummaries(summaries,SecurityUtils.getUserId()));}
 
     private void preventCaching(HttpServletResponse response){response.setHeader("Cache-Control","private, no-store");response.setHeader("Pragma","no-cache");response.setHeader("X-Content-Type-Options","nosniff");}
 }

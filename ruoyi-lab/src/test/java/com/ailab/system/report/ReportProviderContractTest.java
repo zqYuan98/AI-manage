@@ -382,6 +382,17 @@ class ReportProviderContractTest {
     }
 
     @Test
+    void datetimeFiltersCompareAbsoluteInstantsRatherThanTextOffsets() throws Exception {
+        TaskBlockProvider provider = new TaskBlockProvider();
+        Map<String,Object> blocked = row();
+        blocked.put("blockStartTime", java.sql.Timestamp.from(Instant.parse("2026-08-03T04:00:00Z")));
+        inject(provider, mapperWith(blocked));
+        ReportSectionData data = provider.load(context("2026-08"), sectionWithJson("TASK_BLOCK",
+                "{\"filters\":[{\"field\":\"blockStartTime\",\"operator\":\"EQ\",\"value\":\"2026-08-03T12:00:00+08:00\"}]}"));
+        assertEquals(1, data.getRows().size());
+    }
+
+    @Test
     void allSixCanonicalOperatorsAndSortLimitChangeTheReturnedTaskRows() throws Exception {
         TaskDetailProvider provider = new TaskDetailProvider();
         Map<String,Object> one=row(); one.put("id",1L); Map<String,Object> two=row(); two.put("id",2L); Map<String,Object> three=row(); three.put("id",3L);
