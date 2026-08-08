@@ -1,0 +1,22 @@
+package com.ailab.system.report.model;
+
+import java.time.Instant;
+import java.util.Map;
+
+/** Trusted report inputs. Values are copied so providers cannot mutate caller state. */
+public final class ReportContext {
+    private final String period;
+    private final String bizLine;
+    private final Long requesterId;
+    private final Instant generatedAt;
+    private final Map<String, Object> attributes;
+
+    public ReportContext(String period, String bizLine, Long requesterId, Instant generatedAt, Map<String, Object> attributes) {
+        this.period = require(period, "period"); this.bizLine = require(bizLine, "bizLine"); this.requesterId = requesterId;
+        this.generatedAt = generatedAt == null ? Instant.now() : generatedAt;
+        this.attributes = ImmutableReportValue.map(attributes);
+    }
+    public String getPeriod() { return period; } public String getBizLine() { return bizLine; } public Long getRequesterId() { return requesterId; }
+    public Instant getGeneratedAt() { return generatedAt; } public Map<String, Object> getAttributes() { return attributes; }
+    private static String require(String value, String field) { if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException(field + " is required"); return value; }
+}
