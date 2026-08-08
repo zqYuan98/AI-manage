@@ -28,7 +28,7 @@ class PdfReportExporterTest {
     @Test
     void runnerUsesArgumentListHandlesFakeSuccessFailureAndCleansIsolatedWork() throws Exception {
         Path temp = Files.createTempDirectory("pdf paths with spaces "); LabProperties properties = new LabProperties(); properties.setTempDirectory(temp.toString()); properties.setConversionTimeoutSeconds(1);
-        LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(System.getProperty("java.home") + java.io.File.separator + "bin" + java.io.File.separator + "java.exe", "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()));
+        LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()));
         byte[] pdf = runner.convert(new byte[] {1}, "safe report"); String captured = new String(pdf, java.nio.charset.StandardCharsets.US_ASCII); assertTrue(captured.startsWith("%PDF-")); assertTrue(captured.contains("-env:UserInstallation=file:")); assertTrue(captured.contains("pdf paths with spaces"));
         ReportExportException failed = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "nonzero")); assertTrue(failed.isRetryable());
         ReportExportException missing = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "missing")); assertTrue(missing.isRetryable());
@@ -45,18 +45,20 @@ class PdfReportExporterTest {
     @Test
     void cleanupFailureAfterSuccessfulConversionIsTypedAndDoesNotReturnThePdf() throws Exception {
         Path temp = Files.createTempDirectory("pdf cleanup seam "); LabProperties properties = new LabProperties(); properties.setTempDirectory(temp.toString());
-        LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(System.getProperty("java.home") + java.io.File.separator + "bin" + java.io.File.separator + "java.exe", "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()), root -> { throw new java.io.IOException("locked"); });
+        LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()), root -> { throw new java.io.IOException("locked"); });
         ReportExportException error = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "success"));
         assertTrue(error.getMessage().contains("cleanup"));
     }
 
     @Test
     void realLibreOfficeSmokeWhenAnAbsoluteExecutableIsAvailable() throws Exception {
-        LabProperties properties = new LabProperties(); java.nio.file.Path executable = java.nio.file.Paths.get(properties.getLibreOfficeExecutable());
-        org.junit.jupiter.api.Assumptions.assumeTrue(executable.isAbsolute() && Files.isExecutable(executable), "LibreOffice executable is not installed as an absolute executable");
+        LabProperties properties = new LabProperties(); java.nio.file.Path executable = locateOffice(properties.getLibreOfficeExecutable());
+        org.junit.jupiter.api.Assumptions.assumeTrue(executable != null, "LibreOffice executable was not found from configured path or PATH"); properties.setLibreOfficeExecutable(executable.toString());
         Path temp = Files.createTempDirectory("real libreoffice smoke "); properties.setTempDirectory(temp.toString());
         com.ailab.system.report.model.ReportData report = new com.ailab.system.report.model.ReportData(new com.ailab.system.report.model.ReportContext("2026-08", "实验室", 1L, java.time.Instant.EPOCH, java.util.Collections.<String,Object>emptyMap()), "t", 1, java.util.Collections.<com.ailab.system.report.model.ReportSectionData>emptyList(), java.util.Collections.<String,Object>emptyMap());
         byte[] pdf = new LibreOfficeProcessRunner(properties).convert(new com.ailab.system.report.exporter.WordReportExporter().export(report), "smoke");
         assertTrue(pdf.length > 5 && pdf[0] == '%');
     }
+    private String javaExecutable() { String executable = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win") ? "java.exe" : "java"; return java.nio.file.Paths.get(System.getProperty("java.home"), "bin", executable).toString(); }
+    private java.nio.file.Path locateOffice(String configured) { java.nio.file.Path direct = java.nio.file.Paths.get(configured); if (direct.isAbsolute() && Files.isExecutable(direct)) return direct; String[] candidates = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win") ? new String[] {configured, "soffice.exe", "soffice"} : new String[] {configured, "soffice"}; for (String folder : System.getenv("PATH").split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) for (String name : candidates) { java.nio.file.Path candidate = java.nio.file.Paths.get(folder, name); if (Files.isExecutable(candidate)) return candidate; } return null; }
 }
