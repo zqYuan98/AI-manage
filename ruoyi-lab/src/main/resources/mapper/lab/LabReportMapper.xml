@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabReportMapper">
+    <!-- Every statement is fixed SQL; no report/template JSON is interpolated into SQL text. -->
+    <resultMap id="TemplateResult" type="com.ailab.system.domain.LabReportTemplate">
+        <id property="id" column="id"/><result property="templateCode" column="template_code"/><result property="templateName" column="template_name"/>
+        <result property="periodType" column="period_type"/><result property="revisionNo" column="revision_no"/><result property="latestFlag" column="latest_flag"/>
+        <result property="defaultFlag" column="default_flag"/><result property="status" column="status"/><result property="headerJson" column="header_json"/>
+        <result property="styleJson" column="style_json"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="SectionResult" type="com.ailab.system.domain.LabReportSection">
+        <id property="id" column="id"/><result property="templateId" column="template_id"/><result property="sectionCode" column="section_code"/>
+        <result property="sectionName" column="section_name"/><result property="sectionType" column="section_type"/><result property="sortNo" column="sort_no"/>
+        <result property="dataSource" column="data_source"/><result property="queryConfigJson" column="query_config_json"/><result property="renderConfigJson" column="render_config_json"/>
+        <result property="styleConfigJson" column="style_config_json"/><result property="manualFlag" column="manual_flag"/><result property="visibleFlag" column="visible_flag"/>
+        <result property="sensitiveFlag" column="sensitive_flag"/><result property="sensitivePermission" column="sensitive_permission"/><result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/><result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="SummaryResult" type="com.ailab.system.domain.LabReportSummary">
+        <id property="id" column="id"/><result property="period" column="period"/><result property="bizLine" column="biz_line"/><result property="sectionCode" column="section_code"/>
+        <result property="summaryJson" column="summary_json"/><result property="summaryText" column="summary_text"/><result property="sourceRevision" column="source_revision"/>
+        <result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/><result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="ReportResult" type="com.ailab.system.domain.LabReportInstance">
+        <id property="id" column="id"/><result property="reportNo" column="report_no"/><result property="templateId" column="template_id"/>
+        <result property="templateCode" column="template_code"/><result property="templateRevision" column="template_revision"/><result property="period" column="period"/>
+        <result property="bizLine" column="biz_line"/><result property="revisionNo" column="revision_no"/><result property="lifecycleStatus" column="lifecycle_status"/>
+        <result property="currentFlag" column="current_flag"/><result property="finalFlag" column="final_flag"/><result property="sensitiveFlag" column="sensitive_flag"/>
+        <result property="sourceType" column="source_type"/><result property="sourceDataJson" column="source_data_json"/><result property="sourcePerfRevision" column="source_perf_revision"/>
+        <result property="contentJson" column="content_json"/><result property="contentMarkdown" column="content_markdown"/><result property="jsonStatus" column="json_status"/>
+        <result property="jsonPath" column="json_path"/><result property="jsonError" column="json_error"/><result property="markdownStatus" column="markdown_status"/>
+        <result property="markdownPath" column="markdown_path"/><result property="markdownError" column="markdown_error"/><result property="wordStatus" column="word_status"/>
+        <result property="wordPath" column="word_path"/><result property="wordError" column="word_error"/><result property="pdfStatus" column="pdf_status"/>
+        <result property="pdfPath" column="pdf_path"/><result property="pdfError" column="pdf_error"/><result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/><result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/><result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <resultMap id="JobResult" type="com.ailab.system.domain.LabReportJob">
+        <id property="id" column="id"/><result property="jobNo" column="job_no"/><result property="reportId" column="report_id"/><result property="jobType" column="job_type"/>
+        <result property="jobStatus" column="job_status"/><result property="progressRate" column="progress_rate"/><result property="attemptCount" column="attempt_count"/>
+        <result property="errorMessage" column="error_message"/><result property="startedTime" column="started_time"/><result property="finishedTime" column="finished_time"/>
+        <result property="idempotencyKey" column="idempotency_key"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+
+    <sql id="templateColumns">id,template_code,template_name,period_type,revision_no,latest_flag,default_flag,status,header_json,style_json,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
+    <sql id="sectionColumns">id,template_id,section_code,section_name,section_type,sort_no,data_source,query_config_json,render_config_json,style_config_json,manual_flag,visible_flag,sensitive_flag,sensitive_permission,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
+    <sql id="reportColumns">id,report_no,template_id,template_code,template_revision,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,source_type,source_data_json,source_perf_revision,content_json,content_markdown,json_status,json_path,json_error,markdown_status,markdown_path,markdown_error,word_status,word_path,word_error,pdf_status,pdf_path,pdf_error,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
+    <sql id="jobColumns">id,job_no,report_id,job_type,job_status,progress_rate,attempt_count,error_message,started_time,finished_time,idempotency_key,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
+
+    <select id="selectTemplates" resultMap="TemplateResult">select <include refid="templateColumns"/> from lab_report_template where del_flag='0' order by period_type,template_code,revision_no desc</select>
+    <select id="selectTemplateById" parameterType="long" resultMap="TemplateResult">select <include refid="templateColumns"/> from lab_report_template where id=#{id} and del_flag='0'</select>
+    <select id="selectTemplateForUpdate" parameterType="long" resultMap="TemplateResult">select <include refid="templateColumns"/> from lab_report_template where id=#{id} and del_flag='0' for update</select>
+    <select id="lockTemplateType" parameterType="string" resultMap="TemplateResult">select <include refid="templateColumns"/> from lab_report_template where period_type=#{periodType} and del_flag='0' order by id for update</select>
+    <select id="selectSections" parameterType="long" resultMap="SectionResult">select <include refid="sectionColumns"/> from lab_report_section where template_id=#{templateId} and del_flag='0' order by sort_no,id</select>
+    <select id="selectMaxTemplateRevisionForUpdate" parameterType="string" resultType="int">select revision_no from lab_report_template where template_code=#{templateCode} and del_flag='0' order by revision_no desc limit 1 for update</select>
+    <update id="clearLatestTemplate">update lab_report_template set latest_flag='0',update_by=#{actor},update_time=sysdate(),version=version+1 where template_code=#{templateCode} and latest_flag='1' and del_flag='0'</update>
+    <insert id="insertTemplate" parameterType="com.ailab.system.domain.LabReportTemplate" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_report_template(template_code,template_name,period_type,revision_no,latest_flag,default_flag,status,header_json,style_json,version,del_flag,create_by,create_time,remark)
+        values(#{templateCode},#{templateName},#{periodType},#{revisionNo},#{latestFlag},#{defaultFlag},#{status},#{headerJson},#{styleJson},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <insert id="insertSections">
+        insert into lab_report_section(template_id,section_code,section_name,section_type,sort_no,data_source,query_config_json,render_config_json,style_config_json,manual_flag,visible_flag,sensitive_flag,sensitive_permission,version,del_flag,create_by,create_time,remark) values
+        <foreach collection="sections" item="s" separator=",">(#{templateId},#{s.sectionCode},#{s.sectionName},#{s.sectionType},#{s.sortNo},#{s.dataSource},#{s.queryConfigJson},#{s.renderConfigJson},#{s.styleConfigJson},#{s.manualFlag},#{s.visibleFlag},#{s.sensitiveFlag},#{s.sensitivePermission},#{s.version},#{s.delFlag},#{s.createBy},sysdate(),#{s.remark})</foreach>
+    </insert>
+    <update id="clearDefaultTemplate">update lab_report_template set default_flag='0',update_by=#{actor},update_time=sysdate(),version=version+1 where period_type=#{periodType} and id&lt;&gt;#{excludeId} and default_flag='1' and del_flag='0'</update>
+    <update id="markDefaultTemplate">update lab_report_template set default_flag='1',update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and latest_flag='1' and status='ENABLED' and del_flag='0'</update>
+
+    <select id="selectSummaries" resultMap="SummaryResult">select * from lab_report_summary where period=#{period} and biz_line=#{bizLine} and del_flag='0' order by section_code</select>
+    <insert id="upsertSummary" parameterType="com.ailab.system.domain.LabReportSummary" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_report_summary(period,biz_line,section_code,summary_json,summary_text,source_revision,del_flag,create_by,create_time,remark)
+        values(#{period},#{bizLine},#{sectionCode},#{summaryJson},#{summaryText},1,'0',#{createBy},sysdate(),#{remark})
+        on duplicate key update summary_json=values(summary_json),summary_text=values(summary_text),source_revision=source_revision+1,update_by=values(create_by),update_time=sysdate(),remark=values(remark)
+    </insert>
+
+    <select id="selectMaxReportRevisionForUpdate" resultType="int">select revision_no from lab_report_instance where template_code=#{templateCode} and period=#{period} and biz_line=#{bizLine} and del_flag='0' order by revision_no desc limit 1 for update</select>
+    <select id="selectSourcePerformancePins" resultType="com.ailab.system.report.model.ReportPerformancePin">
+        select p.member_id memberId,p.revision_no revisionNo from lab_perf_score p
+        join lab_member m on m.id=p.member_id and m.del_flag='0'
+        where p.period=#{period} and p.current_flag='1' and p.del_flag='0'
+        <if test="bizLine != 'ALL'">and m.biz_line=#{bizLine}</if>
+        order by p.member_id
+    </select>
+    <insert id="insertReportInstance" parameterType="com.ailab.system.domain.LabReportInstance" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_report_instance(report_no,template_id,template_code,template_revision,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,source_type,source_data_json,source_perf_revision,content_json,content_markdown,json_status,json_path,json_error,markdown_status,markdown_path,markdown_error,word_status,word_path,word_error,pdf_status,pdf_path,pdf_error,version,del_flag,create_by,create_time,remark)
+        values(#{reportNo},#{templateId},#{templateCode},#{templateRevision},#{period},#{bizLine},#{revisionNo},#{lifecycleStatus},#{currentFlag},#{finalFlag},#{sensitiveFlag},#{sourceType},#{sourceDataJson},#{sourcePerfRevision},#{contentJson},#{contentMarkdown},#{jsonStatus},#{jsonPath},#{jsonError},#{markdownStatus},#{markdownPath},#{markdownError},#{wordStatus},#{wordPath},#{wordError},#{pdfStatus},#{pdfPath},#{pdfError},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <select id="selectReportById" parameterType="long" resultMap="ReportResult">select <include refid="reportColumns"/> from lab_report_instance where id=#{id} and del_flag='0'</select>
+    <select id="selectReportForUpdate" parameterType="long" resultMap="ReportResult">select <include refid="reportColumns"/> from lab_report_instance where id=#{id} and del_flag='0' for update</select>
+    <select id="lockReportFamily" resultMap="ReportResult">select <include refid="reportColumns"/> from lab_report_instance where template_code=#{templateCode} and period=#{period} and biz_line=#{bizLine} and del_flag='0' order by id for update</select>
+    <select id="selectReportHistory" resultMap="ReportResult">
+        select <include refid="reportColumns"/> from lab_report_instance where del_flag='0'
+        <if test="period != null and period != ''">and period=#{period}</if><if test="bizLine != null and bizLine != ''">and biz_line=#{bizLine}</if>
+        <if test="!manager">and lifecycle_status in ('FINALIZED','SUPERSEDED')</if>
+        <if test="!sensitive">and sensitive_flag='0'</if>
+        order by period desc,template_code,revision_no desc,id desc
+    </select>
+    <update id="supersedeCurrentReport">update lab_report_instance set lifecycle_status='SUPERSEDED',current_flag='0',update_by=#{actor},update_time=sysdate(),version=version+1 where template_code=#{templateCode} and period=#{period} and biz_line=#{bizLine} and id&lt;&gt;#{excludeId} and lifecycle_status='FINALIZED' and current_flag='1' and del_flag='0'</update>
+    <update id="finalizeReport">update lab_report_instance set lifecycle_status='FINALIZED',current_flag='1',final_flag='1',update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and lifecycle_status='DRAFT' and json_status='SUCCESS' and markdown_status='SUCCESS' and word_status='SUCCESS' and pdf_status='SUCCESS' and del_flag='0'</update>
+
+    <update id="markDataPending">update lab_report_instance set json_status=if(json_status='SUCCESS','SUCCESS','PENDING'),json_error=if(json_status='SUCCESS',json_error,null),markdown_status=if(markdown_status='SUCCESS','SUCCESS','PENDING'),markdown_error=if(markdown_status='SUCCESS',markdown_error,null),update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and (json_status in ('PENDING','FAILED') or markdown_status in ('PENDING','FAILED')) and json_status in ('PENDING','FAILED','SUCCESS') and markdown_status in ('PENDING','FAILED','SUCCESS') and del_flag='0'</update>
+    <update id="completeJson">update lab_report_instance set content_json=#{contentJson},json_status='SUCCESS',json_path=#{path},json_error=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and json_status='PENDING' and del_flag='0'</update>
+    <update id="completeMarkdown">update lab_report_instance set content_markdown=#{contentMarkdown},markdown_status='SUCCESS',markdown_path=#{path},markdown_error=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and markdown_status='PENDING' and del_flag='0'</update>
+    <update id="failData">update lab_report_instance set json_status=case when json_status='SUCCESS' then json_status else 'FAILED' end,json_error=case when json_status='SUCCESS' then json_error else #{error} end,markdown_status=case when markdown_status='SUCCESS' then markdown_status else 'FAILED' end,markdown_error=case when markdown_status='SUCCESS' then markdown_error else #{error} end,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and (json_status&lt;&gt;'SUCCESS' or markdown_status&lt;&gt;'SUCCESS') and del_flag='0'</update>
+    <update id="markWordPending">update lab_report_instance set word_status='PENDING',word_error=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and json_status='SUCCESS' and markdown_status='SUCCESS' and word_status in ('PENDING','FAILED') and del_flag='0'</update>
+    <update id="completeWord">update lab_report_instance set word_status='SUCCESS',word_path=#{path},word_error=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and word_status='PENDING' and del_flag='0'</update>
+    <update id="failWord">update lab_report_instance set word_status='FAILED',word_error=#{error},update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and word_status&lt;&gt;'SUCCESS' and del_flag='0'</update>
+    <update id="markPdfPending">update lab_report_instance set pdf_status='PENDING',pdf_error=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and word_status='SUCCESS' and pdf_status in ('PENDING','FAILED') and del_flag='0'</update>
+    <update id="completePdf">update lab_report_instance set pdf_status='SUCCESS',pdf_path=#{path},pdf_error=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and pdf_status='PENDING' and del_flag='0'</update>
+    <update id="failPdf">update lab_report_instance set pdf_status='FAILED',pdf_error=#{error},update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and lifecycle_status='DRAFT' and pdf_status&lt;&gt;'SUCCESS' and del_flag='0'</update>
+
+    <select id="selectActiveReportJob" resultMap="JobResult">select <include refid="jobColumns"/> from lab_report_job where report_id=#{reportId} and job_type=#{jobType} and job_status in ('QUEUED','RUNNING') and del_flag='0' order by id desc limit 1</select>
+    <insert id="insertReportJob" parameterType="com.ailab.system.domain.LabReportJob" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_report_job(job_no,report_id,job_type,job_status,progress_rate,attempt_count,error_message,started_time,finished_time,idempotency_key,version,del_flag,create_by,create_time,remark)
+        values(#{jobNo},#{reportId},#{jobType},#{jobStatus},#{progressRate},#{attemptCount},#{errorMessage},#{startedTime},#{finishedTime},#{idempotencyKey},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <select id="selectReportJobById" parameterType="long" resultMap="JobResult">select <include refid="jobColumns"/> from lab_report_job where id=#{id} and del_flag='0'</select>
+    <update id="claimReportJob">update lab_report_job set job_status='RUNNING',progress_rate=1,attempt_count=case when attempt_count&lt;1 then 1 else attempt_count end,started_time=#{startedTime},finished_time=null,error_message=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and job_status='QUEUED' and del_flag='0'</update>
+    <update id="heartbeatReportJob">update lab_report_job set update_by=#{actor},update_time=sysdate() where id=#{id} and job_status='RUNNING' and del_flag='0'</update>
+    <update id="completeReportJob">update lab_report_job set job_status='SUCCESS',progress_rate=100,finished_time=#{finishedTime},error_message=null,update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and job_status='RUNNING' and del_flag='0'</update>
+    <update id="failReportJob">update lab_report_job set job_status='FAILED',finished_time=#{finishedTime},error_message=#{error},update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and job_status in ('QUEUED','RUNNING') and del_flag='0'</update>
+    <select id="selectReportJobs" parameterType="long" resultMap="JobResult">select <include refid="jobColumns"/> from lab_report_job where report_id=#{reportId} and del_flag='0' order by id</select>
+    <select id="selectRecoverableReportJobs" parameterType="date" resultMap="JobResult">select <include refid="jobColumns"/> from lab_report_job where del_flag='0' and (job_status='QUEUED' or (job_status='RUNNING' and coalesce(update_time,started_time,create_time)&lt;=#{staleBefore})) order by id limit 100</select>
+    <update id="resetStaleReportJob">update lab_report_job set job_status='QUEUED',progress_rate=0,started_time=null,finished_time=null,error_message='Recovered after an interrupted worker',update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and job_status='RUNNING' and del_flag='0'</update>
+    <select id="countActiveReportJobs" parameterType="long" resultType="int">select count(1) from lab_report_job where report_id=#{reportId} and job_status in ('QUEUED','RUNNING') and del_flag='0'</select>
+    <select id="countTerminalReportJobs" parameterType="long" resultType="int">select count(1) from lab_report_job where report_id=#{reportId} and job_status in ('SUCCESS','FAILED') and del_flag='0'</select>
+</mapper>

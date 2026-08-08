@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 
 /** Strict whitelist validation used identically for REST saves and template imports. */
+@org.springframework.stereotype.Component
 public final class ReportConfigValidator {
     private static final int MAX_JSON_CHARS = 16000, MAX_JSON_BYTES = 32000, MAX_JSON_TOKENS = 2000;
     private static final int MAX_JSON_DEPTH = 8, MAX_FILTERS = 10, MAX_COLUMNS = 10, MAX_STRING = 500;

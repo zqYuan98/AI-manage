@@ -24,7 +24,7 @@ public final class MarkdownReportExporter implements ReportExporter {
 
     @Override public byte[] export(ReportData data) throws IOException {
         if (data == null) throw new IllegalArgumentException("report data is required");
-        BoundedMarkdown out = new BoundedMarkdown(MAX_BYTES); out.append("# 人工智能实验室月报\n\n");
+        BoundedMarkdown out = new BoundedMarkdown(MAX_BYTES); out.append("# ");appendEscaped(out,title(data),true);out.append("\n\n");
         for (ReportSectionData section : data.getSections()) { out.append("## "); appendEscaped(out, section.getTitle(), true); out.append("\n\n"); render(out, section); }
         return out.bytes();
     }
@@ -74,6 +74,8 @@ public final class MarkdownReportExporter implements ReportExporter {
     }
 
     private List<String> strings(Object raw) { if (!(raw instanceof List)) return Collections.emptyList(); List<String> result = new ArrayList<String>(); for (Object item : (List<?>) raw) result.add(String.valueOf(item)); return result; }
+    private String title(ReportData data) { Object raw=data.getMetadata().get("header");if(raw instanceof Map){Object value=((Map<?,?>)raw).get("title");if(value instanceof String&&!((String)value).trim().isEmpty())return (String)value;}return "人工智能实验室"+periodName(data.getContext().getPeriod()); }
+    private String periodName(String period){return period!=null&&period.contains("-W")?"周报":period!=null&&period.matches("[0-9]{4}Q[1-4]")?"季报":period!=null&&period.matches("[0-9]{4}")?"年报":"月报";}
     private List<Map<?, ?>> series(Object raw) { if (!(raw instanceof List)) return Collections.emptyList(); List<Map<?, ?>> result = new ArrayList<Map<?, ?>>(); for (Object item : (List<?>) raw) if (item instanceof Map) result.add((Map<?, ?>) item); return result; }
     private String seriesName(Map<?, ?> item, int index) { Object value = item.get("name"); return value == null ? (index == 0 ? "数值" : "数值" + (index + 1)) : String.valueOf(value); }
     private Object value(List<?> values, int index) { return index < values.size() && values.get(index) != null ? values.get(index) : "—"; }

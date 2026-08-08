@@ -1,0 +1,100 @@
+package com.ailab.system.report.model;
+
+import com.ailab.system.report.exporter.JsonReportExporter;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/** Bounded codec for the canonical persisted ReportData JSON. */
+@org.springframework.stereotype.Component
+public final class ReportDataCodec {
+    private static final int MAX_BYTES = 2 * 1024 * 1024;
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    public String encode(ReportData data) {
+        try { return new String(new JsonReportExporter().export(data), StandardCharsets.UTF_8); }
+        catch (IOException ex) { throw new IllegalArgumentException("Cannot encode report data", ex); }
+    }
+
+    public ReportData decode(String source) {
+        if (source == null || source.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) {
+            throw new IllegalArgumentException("Report data JSON is missing or too large");
+        }
+        try {
+            JsonNode root = JSON.readTree(source); requiredObject(root, "report data");
+            JsonNode contextNode = root.get("context"); requiredObject(contextNode, "report context");
+            String period = text(contextNode, "period"); String bizLine = text(contextNode, "bizLine");
+            Long requesterId = contextNode.hasNonNull("requesterId") ? contextNode.get("requesterId").longValue() : null;
+            if (requesterId == null) throw new IllegalArgumentException("Report requester is required");
+            Instant generatedAt = Instant.parse(text(contextNode, "generatedAt"));
+            Map<String,Object> attributes = object(contextNode.get("attributes"));
+            ReportContext context = new ReportContext(period, bizLine, requesterId, generatedAt,
+                    ReportAccessScope.member(bizLine, requesterId), attributes);
+            JsonNode rawSections = root.get("sections");
+            if (rawSections == null || !rawSections.isArray() || rawSections.size() > 200) throw new IllegalArgumentException("Invalid report sections");
+            List<ReportSectionData> sections = new ArrayList<ReportSectionData>();
+            for (JsonNode raw : rawSections) {
+                List<Map<String,Object>> rows = raw.has("rows")
+                        ? JSON.convertValue(raw.get("rows"), new TypeReference<List<Map<String,Object>>>() { })
+                        : Collections.<Map<String,Object>>emptyList();
+                if (rows.size() > 10000) throw new IllegalArgumentException("Report section row limit exceeded");
+                sections.add(new ReportSectionData(text(raw, "sectionCode"), text(raw, "sectionType"),
+                        text(raw, "title"), rows, object(raw.get("summary"))));
+            }
+            return new ReportData(context, text(root, "templateCode"), root.get("templateRevision").intValue(),
+                    sections, object(root.get("metadata")));
+        } catch (IOException | RuntimeException ex) {
+            if (ex instanceof IllegalArgumentException) throw (IllegalArgumentException) ex;
+            throw new IllegalArgumentException("Invalid report data JSON", ex);
+        }
+    }
+
+    public String encodeSourceSnapshot(List<ReportPerformancePin> pins) {
+        if (pins == null || pins.size() > 5000) throw new IllegalArgumentException("Performance snapshot is too large");
+        Map<String,Object> value=new LinkedHashMap<String,Object>();value.put("performancePins",pins);
+        try{return JSON.writeValueAsString(value);}catch(IOException ex){throw new IllegalArgumentException("Cannot encode performance snapshot",ex);}
+    }
+
+    public List<ReportPerformancePin> decodePerformancePins(String source) {
+        if (source == null || source.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) throw new IllegalArgumentException("Performance snapshot is missing or too large");
+        try {
+            JsonNode root=JSON.readTree(source);requiredObject(root,"performance snapshot");
+            if(root.size()==1&&root.has("performanceRevision")&&root.get("performanceRevision").canConvertToInt())return null;
+            if(root.size()!=1||!root.has("performancePins")||!root.get("performancePins").isArray()||root.get("performancePins").size()>5000)throw new IllegalArgumentException("Invalid performance snapshot");
+            List<ReportPerformancePin> result=new ArrayList<ReportPerformancePin>();java.util.Set<Long> members=new java.util.HashSet<Long>();
+            for(JsonNode item:root.get("performancePins")){
+                if(!item.isObject()||item.size()!=2||!item.has("memberId")||!item.has("revisionNo")||!item.get("memberId").canConvertToLong()||!item.get("revisionNo").canConvertToInt())throw new IllegalArgumentException("Invalid performance pin");
+                ReportPerformancePin pin=new ReportPerformancePin(item.get("memberId").longValue(),item.get("revisionNo").intValue());if(!members.add(pin.getMemberId()))throw new IllegalArgumentException("Duplicate performance pin");result.add(pin);
+            }
+            return Collections.unmodifiableList(result);
+        } catch(IOException ex){throw new IllegalArgumentException("Invalid performance snapshot",ex);}
+    }
+
+    public Map<String,Object> decodeObject(String source, String name) {
+        if (source == null || source.getBytes(StandardCharsets.UTF_8).length > 32000) throw new IllegalArgumentException(name + " is missing or too large");
+        try { JsonNode root=JSON.readTree(source);requiredObject(root,name);return object(root); }
+        catch(IOException ex){throw new IllegalArgumentException("Invalid " + name,ex);}
+    }
+
+    private static Map<String,Object> object(JsonNode node) {
+        if (node == null || node.isNull()) return Collections.emptyMap();
+        requiredObject(node, "JSON object");
+        return JSON.convertValue(node, new TypeReference<LinkedHashMap<String,Object>>() { });
+    }
+    private static String text(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        if (value == null || !value.isTextual() || value.asText().length() > 1000) throw new IllegalArgumentException("Invalid " + field);
+        return value.asText();
+    }
+    private static void requiredObject(JsonNode node, String name) {
+        if (node == null || !node.isObject()) throw new IllegalArgumentException("Invalid " + name);
+    }
+}

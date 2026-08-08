@@ -7,7 +7,7 @@ public class LabReportInstance extends BaseEntity {
     private static final long serialVersionUID = 1L;
     private Long id; private String reportNo; private Long templateId; private String templateCode; private Integer templateRevision;
     private String period; private String bizLine; private Integer revisionNo; private String lifecycleStatus; private String currentFlag;
-    private String finalFlag; private String sensitiveFlag; private String sourceDataJson; private Integer sourcePerfRevision;
+    private String finalFlag; private String sensitiveFlag; private String sourceType; private String sourceDataJson; private Integer sourcePerfRevision;
     private String contentJson; private String contentMarkdown; private String jsonStatus; private String jsonPath; private String jsonError;
     private String markdownStatus; private String markdownPath; private String markdownError; private String wordStatus; private String wordPath;
     private String wordError; private String pdfStatus; private String pdfPath; private String pdfError; private Integer version; private String delFlag;
@@ -23,6 +23,7 @@ public class LabReportInstance extends BaseEntity {
     public String getCurrentFlag() { return currentFlag; } public void setCurrentFlag(String value) { currentFlag = value; }
     public String getFinalFlag() { return finalFlag; } public void setFinalFlag(String value) { finalFlag = value; }
     public String getSensitiveFlag() { return sensitiveFlag; } public void setSensitiveFlag(String value) { sensitiveFlag = value; }
+    public String getSourceType() { return sourceType; } public void setSourceType(String value) { sourceType = value; }
     public String getSourceDataJson() { return sourceDataJson; } public void setSourceDataJson(String value) { sourceDataJson = value; }
     public Integer getSourcePerfRevision() { return sourcePerfRevision; } public void setSourcePerfRevision(Integer value) { sourcePerfRevision = value; }
     public String getContentJson() { return contentJson; } public void setContentJson(String value) { contentJson = value; }

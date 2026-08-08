@@ -288,10 +288,31 @@ class ReportProviderContractTest {
     }
 
     @Test
-    void iprProjectionIsAllReadableAndUsesTypedDateRange() throws Exception {
+    void iprProjectionUsesTypedDateRangeAndTrustedTargetLineWithoutActorNarrowing() throws Exception {
         String xml = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportDataMapper.xml")), java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(xml.contains("coalesce(i.actual_submit_date,i.planned_submit_date) between #{dateStart} and #{dateEnd}"));
-        assertTrue(!xml.substring(xml.indexOf("<select id=\"selectIprs\""), xml.indexOf("</select>", xml.indexOf("<select id=\"selectIprs\""))).contains("iprScope"));
+        String statement=xml.substring(xml.indexOf("<select id=\"selectIprs\""), xml.indexOf("</select>", xml.indexOf("<select id=\"selectIprs\"")));
+        assertTrue(statement.contains("iprScope"));
+        assertTrue(xml.contains("owner_member.biz_line=#{targetBizLine}"));
+    }
+
+    @Test
+    void historicalReportPinsPerformanceReadsToItsCapturedRevision() throws Exception {
+        ReportContext original = context("2026-08");
+        Map<String,Object> first=new LinkedHashMap<String,Object>();first.put("memberId",30005L);first.put("revisionNo",7);
+        Map<String,Object> second=new LinkedHashMap<String,Object>();second.put("memberId",30006L);second.put("revisionNo",2);
+        Map<String,Object> attributes = new LinkedHashMap<String,Object>(); attributes.put("performanceRevision", 7);attributes.put("performancePins",Arrays.asList(first,second));
+        ReportContext pinned = new ReportContext(original.getPeriod(), original.getBizLine(), original.getRequesterId(),
+                original.getGeneratedAt(), original.getAccessScope(), attributes);
+        ReportQueryCriteria criteria = ReportQueryCriteria.from(pinned, sectionFor("PERF_SUMMARY"));
+        assertEquals(7, criteria.getPerformanceRevision());
+        assertEquals(2,criteria.getPerformancePins().size());assertEquals(2,criteria.getPerformancePins().get(1).getRevisionNo());
+        assertEquals("platform",criteria.getTargetBizLine());
+        String xml = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportDataMapper.xml")), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(xml.contains("<when test=\"performanceRevision != null\">and p.revision_no=#{performanceRevision}</when>"));
+        assertTrue(xml.contains("p.member_id=#{pin.memberId} and p.revision_no=#{pin.revisionNo}"));
+        assertTrue(xml.contains("m.biz_line=#{targetBizLine}"));
+        assertTrue(xml.contains("<otherwise>and p.current_flag='1'</otherwise>"));
     }
 
     @Test

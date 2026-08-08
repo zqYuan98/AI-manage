@@ -52,6 +52,8 @@ public final class WordReportExporter implements ReportExporter {
     private static final int MAX_SECTIONS = 200, MAX_ROWS = 10000, MAX_CELLS = 100000, MAX_TEXT = 1024 * 1024;
     private static final int MAX_GROUPS = 5000, MAX_PARAGRAPHS = 10000;
     private static final int MAX_IMAGE = 512 * 1024, MAX_OUTPUT = 8 * 1024 * 1024;
+    private final ThreadLocal<String> templateFont = new ThreadLocal<String>();
+    private final ThreadLocal<Double> templateBodySize = new ThreadLocal<Double>();
     @Override public String getId() { return "WORD"; }
     @Override public boolean supports(String value) { return "WORD".equals(value); }
 
@@ -59,32 +61,33 @@ public final class WordReportExporter implements ReportExporter {
         if (data == null) throw new IllegalArgumentException("report data is required");
         if (data.getSections().size() > MAX_SECTIONS) throw new ReportExportException("DOCX section limit exceeded", false);
         preflight(data);
+        String title=title(data);templateFont.set(font(data));templateBodySize.set(bodySize(data));
         try (XWPFDocument document = new XWPFDocument()) {
-            document.getProperties().getCoreProperties().setTitle("人工智能实验室月报");
+            document.getProperties().getCoreProperties().setTitle(title);
             document.getProperties().getCoreProperties().setCreator("AI Lab");
             document.getProperties().getCoreProperties().setCreated(Optional.of(Date.from(data.getContext().getGeneratedAt())));
             document.getProperties().getCoreProperties().setModified(Optional.of(Date.from(data.getContext().getGeneratedAt())));
             styles(document);
             Limits limits = new Limits();
-            paragraph(document, "人工智能实验室月报", "ReportTitle", ParagraphAlignment.CENTER, true, limits);
+            paragraph(document, title, "ReportTitle", ParagraphAlignment.CENTER, true, limits);
             paragraph(document, data.getContext().getPeriod() + " · " + data.getContext().getBizLine(), "ReportBody", ParagraphAlignment.CENTER, false, limits);
             for (ReportSectionData section : data.getSections()) render(document, section, limits);
             ByteArrayOutputStream raw = new ByteArrayOutputStream(); document.write(new BoundedOutputStream(raw, MAX_OUTPUT));
             byte[] stable = normalizeZip(raw.toByteArray());
             if (stable.length > MAX_OUTPUT) throw new ReportExportException("DOCX output byte limit exceeded", false);
             return stable;
-        }
+        } finally { templateFont.remove();templateBodySize.remove(); }
     }
 
     private void styles(XWPFDocument document) {
         addStyle(document, "ReportTitle", 30, true);
         addStyle(document, "ReportSection", 24, true);
-        addStyle(document, "ReportBody", 21, false);
+        addStyle(document, "ReportBody", (int)Math.round(currentBodySize()*2), false);
         addStyle(document, "ReportTable", 17, false);
     }
     private void addStyle(XWPFDocument document, String id, int halfPoints, boolean bold) {
         CTStyle style = CTStyle.Factory.newInstance(); style.setStyleId(id); style.setType(STStyleType.PARAGRAPH);
-        CTFonts fonts = style.addNewRPr().addNewRFonts(); fonts.setAscii(FONT); fonts.setHAnsi(FONT); fonts.setEastAsia(FONT);
+        CTFonts fonts = style.addNewRPr().addNewRFonts(); fonts.setAscii(currentFont()); fonts.setHAnsi(currentFont()); fonts.setEastAsia(currentFont());
         CTHpsMeasure size = style.getRPr().addNewSz(); size.setVal(BigInteger.valueOf(halfPoints));
         style.getRPr().addNewSzCs().setVal(BigInteger.valueOf(halfPoints)); if (bold) style.getRPr().addNewB();
         document.createStyles().addStyle(new XWPFStyle(style));
@@ -161,7 +164,7 @@ public final class WordReportExporter implements ReportExporter {
         java.util.LinkedHashMap<String,Object> summary = new java.util.LinkedHashMap<String,Object>(); summary.put("headers", java.util.Arrays.asList("分类", "数值")); summary.put("alignments", java.util.Arrays.asList("left", "right")); table(document, new ReportSectionData(section.getSectionCode(), "TABLE", section.getTitle(), rows, summary), limits);
     }
     private void run(XWPFParagraph paragraph, String value, double points, boolean bold) { XWPFRun run = paragraph.createRun(); fonts(run, points, bold); run.setText(value == null || value.length() == 0 ? "暂无数据" : value); }
-    private void fonts(XWPFRun run, double points, boolean bold) { org.openxmlformats.schemas.wordprocessingml.x2006.main.CTRPr props = run.getCTR().isSetRPr() ? run.getCTR().getRPr() : run.getCTR().addNewRPr(); CTFonts fonts = props.isSetRFonts() ? props.getRFonts() : props.addNewRFonts(); fonts.setAscii(FONT); fonts.setHAnsi(FONT); fonts.setEastAsia(FONT); CTHpsMeasure size = props.isSetSz() ? props.getSz() : props.addNewSz(); size.setVal(BigInteger.valueOf(Math.round(points * 2))); CTHpsMeasure complex = props.isSetSzCs() ? props.getSzCs() : props.addNewSzCs(); complex.setVal(BigInteger.valueOf(Math.round(points * 2))); if (bold && !props.isSetB()) props.addNewB(); }
+    private void fonts(XWPFRun run, double points, boolean bold) { if(points==10.5)points=currentBodySize();org.openxmlformats.schemas.wordprocessingml.x2006.main.CTRPr props = run.getCTR().isSetRPr() ? run.getCTR().getRPr() : run.getCTR().addNewRPr(); CTFonts fonts = props.isSetRFonts() ? props.getRFonts() : props.addNewRFonts(); fonts.setAscii(currentFont()); fonts.setHAnsi(currentFont()); fonts.setEastAsia(currentFont()); CTHpsMeasure size = props.isSetSz() ? props.getSz() : props.addNewSz(); size.setVal(BigInteger.valueOf(Math.round(points * 2))); CTHpsMeasure complex = props.isSetSzCs() ? props.getSzCs() : props.addNewSzCs(); complex.setVal(BigInteger.valueOf(Math.round(points * 2))); if (bold && !props.isSetB()) props.addNewB(); }
     private void margins(XWPFTableCell cell) {
         XmlCursor cursor = cell.getCTTc().getTcPr().newCursor(); try {
             cursor.toEndToken(); cursor.beginElement(new QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "tcMar", "w"));
@@ -178,8 +181,13 @@ public final class WordReportExporter implements ReportExporter {
     private void preflight(ReportData data) throws IOException {
         Limits structure = new Limits();
         for (ReportSectionData section : data.getSections()) structure(structure, section);
-        Limits limits = new Limits(); paragraphs(limits, 2); addText(limits, "人工智能实验室月报"); addText(limits, data.getContext().getPeriod()); addText(limits, data.getContext().getBizLine()); for (ReportSectionData section : data.getSections()) { paragraphs(limits, 1); addText(limits, section.getTitle()); grid(limits, section); for (Map<String,Object> row : section.getRows()) { for (Map.Entry<String,Object> entry : row.entrySet()) { addText(limits, entry.getKey()); addText(limits, text(entry.getValue())); } } scan(limits, section.getSummary()); }
+        Limits limits = new Limits(); paragraphs(limits, 2); addText(limits, title(data)); addText(limits, data.getContext().getPeriod()); addText(limits, data.getContext().getBizLine()); for (ReportSectionData section : data.getSections()) { paragraphs(limits, 1); addText(limits, section.getTitle()); grid(limits, section); for (Map<String,Object> row : section.getRows()) { for (Map.Entry<String,Object> entry : row.entrySet()) { addText(limits, entry.getKey()); addText(limits, text(entry.getValue())); } } scan(limits, section.getSummary()); }
     }
+
+    private String title(ReportData data){Object raw=data.getMetadata().get("header");if(raw instanceof Map){Object value=((Map<?,?>)raw).get("title");if(value instanceof String&&!((String)value).trim().isEmpty())return (String)value;}String period=data.getContext().getPeriod();return "人工智能实验室"+(period!=null&&period.contains("-W")?"周报":period!=null&&period.matches("[0-9]{4}Q[1-4]")?"季报":period!=null&&period.matches("[0-9]{4}")?"年报":"月报");}
+    private String font(ReportData data){Object raw=data.getMetadata().get("style");if(raw instanceof Map){Object value=((Map<?,?>)raw).get("font");if(value instanceof String&&!((String)value).trim().isEmpty())return (String)value;}return FONT;}
+    private double bodySize(ReportData data){Object raw=data.getMetadata().get("style");if(raw instanceof Map){Object value=((Map<?,?>)raw).get("bodyFontSize");if(value instanceof Number){double size=((Number)value).doubleValue();if(size>=6&&size<=72)return size;}}return 10.5;}
+    private String currentFont(){String value=templateFont.get();return value==null?FONT:value;}private double currentBodySize(){Double value=templateBodySize.get();return value==null?10.5:value.doubleValue();}
     private void structure(Limits limits, ReportSectionData section) throws IOException {
         String type = section.getSectionType();
         if ("TABLE".equals(type) || ("STAT".equals(type) && section.getSummary().get("text") == null)) {

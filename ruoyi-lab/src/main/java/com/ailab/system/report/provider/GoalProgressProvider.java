@@ -40,7 +40,7 @@ public final class GoalProgressProvider extends AbstractLabDataSourceProvider {
         if (dashboardMapper == null) throw new IllegalStateException("Dashboard goal projection is unavailable");
         Date asOf = endOfPeriod(criteria.getReportPeriod());
         List<GoalHealthFact> facts = dashboardMapper.selectGoalHealthFacts(year(criteria.getReportPeriod()), asOf,
-                allGoalsScope(), criteria.getSourceFetchLimit());
+                goalsScope(criteria.getTargetBizLine()), criteria.getSourceFetchLimit());
         requireSourceWithinLimit(facts == null ? 0 : facts.size());
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
         if (facts != null) for (GoalHealthFact fact : facts) {
@@ -60,8 +60,11 @@ public final class GoalProgressProvider extends AbstractLabDataSourceProvider {
         summary.put("averageProgressRate", rows.isEmpty() ? BigDecimal.ZERO : total.divide(BigDecimal.valueOf(rows.size()), 2, RoundingMode.HALF_UP));
     }
 
-    private static LabAccessContext allGoalsScope() {
-        LabAccessContext scope = new LabAccessContext(); scope.setRoleKey("lab_manager"); return scope;
+    private static LabAccessContext goalsScope(String targetBizLine) {
+        LabAccessContext scope = new LabAccessContext();
+        if ("ALL".equals(targetBizLine)) scope.setRoleKey("lab_manager");
+        else { scope.setRoleKey("lab_lead"); scope.setBizLine(targetBizLine); }
+        return scope;
     }
     private static int year(ReportPeriod period) { return Integer.parseInt(period.getValue().substring(0, 4)); }
     private static Date endOfPeriod(ReportPeriod period) {
