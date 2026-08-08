@@ -36,7 +36,7 @@ public final class ReportConfigCatalog {
     private static final Set<String> FILTER_OPERATORS = set("EQ", "NE", "IN", "GTE", "LTE", "BETWEEN");
     private static final Set<String> REPORT_TYPES = set("WEEK", "MONTH", "QUARTER", "YEAR");
     private static final Set<String> TEMPLATE_STATUSES = set("ENABLED", "DISABLED");
-    private static final Set<String> QUERY_FIELDS = set("id", "period", "bizLine", "owner", "ownerId", "ownerName", "memberId",
+    private static final Set<String> QUERY_FIELDS = set("id", "period", "taskPeriod", "bizLine", "owner", "ownerId", "ownerName", "memberId",
             "status", "resultStatus", "taskLevel", "planDate", "title", "deliverable", "failReason", "nextAction",
             "coordination", "coordinationSupport", "block", "blockType", "blockReason", "blockStartTime", "goalId", "goalTitle", "year", "expectedProgress", "progressRate",
             "assetNo", "assetName", "assetStage", "assetType", "backupOwnerId", "criticalFlag", "backupOwnerStatus", "singlePointRisk",

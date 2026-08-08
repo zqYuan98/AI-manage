@@ -58,6 +58,7 @@ class ReportProviderContractTest {
             assertTrue(provider.supports(provider.getId()));
         }
         assertEquals(ReportConfigCatalog.providerIds(), ids);
+        assertTrue(ReportConfigCatalog.queryFields().contains("taskPeriod"));
     }
 
     @Test
@@ -191,6 +192,10 @@ class ReportProviderContractTest {
         assertEquals("2026-08-09", new java.text.SimpleDateFormat("yyyy-MM-dd").format(week.getDateEnd()));
         assertEquals("2026-07", quarter.getMonthStart());
         assertEquals("2026-09", quarter.getMonthEnd());
+        assertThrows(IllegalArgumentException.class, () -> new ReportQueryCriteria("2025-W53", context("2025").getAccessScope()));
+        ReportQueryCriteria week53 = new ReportQueryCriteria("2026-W53", context("2026-W53").getAccessScope());
+        assertEquals("2026-12-28", new java.text.SimpleDateFormat("yyyy-MM-dd").format(week53.getDateStart()));
+        assertEquals("2027-01-03", new java.text.SimpleDateFormat("yyyy-MM-dd").format(week53.getDateEnd()));
     }
 
     @Test
@@ -219,6 +224,85 @@ class ReportProviderContractTest {
         assertEquals(1, data.getSummary().get("matchedCount"));
     }
 
+    @Test
+    void taskNextUsesNextMonthAsItsNormalizedPeriodAndPlaceholderFilter() throws Exception {
+        TaskNextProvider provider = new TaskNextProvider(); Map<String,Object> value = row(); value.put("period", "2026-09"); value.put("taskPeriod", "2026-09");
+        inject(provider, mapperWith(value));
+        ReportSectionData data = provider.load(context("2026-08"), sectionWithNextPeriodPlaceholder());
+        assertEquals("2026-09", data.getRows().get(0).get("period"));
+        assertEquals("2026-09", data.getRows().get(0).get("taskPeriod"));
+        assertEquals("2026-09", data.getSummary().get("nextPeriod"));
+        String xml = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportDataMapper.xml")), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(xml.substring(xml.indexOf("<sql id=\"nextTaskColumns\""), xml.indexOf("</sql>", xml.indexOf("<sql id=\"nextTaskColumns\""))).contains("#{nextPeriod} as period"));
+    }
+
+    @Test
+    void everyProviderPublishesAFixedOrderedSchemaAndRetainsNullableColumns() throws Exception {
+        Map<String,Object> sparse = new LinkedHashMap<String,Object>(); sparse.put("id", 1L);
+        for (AbstractLabDataSourceProvider provider : providers()) {
+            if (provider instanceof ManualSummaryProvider) {
+                assertEquals(Collections.singletonList("sectionCode"), provider.getOutputSchema());
+                continue;
+            }
+            if (provider instanceof GoalProgressProvider) {
+                GoalHealthFact fact = new GoalHealthFact(); fact.setGoalId(1L);
+                injectDashboard((GoalProgressProvider) provider, (LabDashboardMapper) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {LabDashboardMapper.class},
+                        (proxy, method, args) -> Collections.singletonList(fact)));
+            } else inject(provider, mapperWith(sparse));
+            ReportContext providerContext = provider instanceof PerfSummaryProvider
+                    ? new ReportContext("2026-08", "platform", 30005L, Instant.EPOCH, trustedManagerScope(), Collections.<String,Object>emptyMap())
+                    : context("2026-08");
+            ReportSectionData data = provider.load(providerContext, sectionFor(provider.getId()));
+            assertEquals(provider.getOutputSchema(), new java.util.ArrayList<String>(data.getRows().get(0).keySet()), provider.getId());
+            assertThrows(UnsupportedOperationException.class, () -> data.getRows().get(0).put("id", 2L));
+        }
+    }
+
+    @Test
+    void jdbcTemporalValuesAreNormalizedToImmutableStableIsoScalars() throws Exception {
+        TaskDetailProvider detail = new TaskDetailProvider(); Map<String,Object> task = row(); task.put("planDate", java.sql.Date.valueOf("2026-08-03")); inject(detail, mapperWith(task));
+        assertEquals("2026-08-03", detail.load(context("2026-08"), sectionFor("TASK_DETAIL")).getRows().get(0).get("planDate"));
+        TaskBlockProvider block = new TaskBlockProvider(); Map<String,Object> blocked = row(); blocked.put("blockStartTime", java.sql.Timestamp.from(Instant.parse("2026-08-03T10:15:30Z"))); inject(block, mapperWith(blocked));
+        assertEquals("2026-08-03T10:15:30Z", block.load(context("2026-08"), sectionFor("TASK_BLOCK")).getRows().get(0).get("blockStartTime"));
+    }
+
+    @Test
+    void allSixCanonicalOperatorsAndSortLimitChangeTheReturnedTaskRows() throws Exception {
+        TaskDetailProvider provider = new TaskDetailProvider();
+        Map<String,Object> one=row(); one.put("id",1L); Map<String,Object> two=row(); two.put("id",2L); Map<String,Object> three=row(); three.put("id",3L);
+        inject(provider, (LabReportDataMapper) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {LabReportDataMapper.class},
+                (proxy, method, args) -> Arrays.asList(one,two,three)));
+        assertEquals(1, provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"id\",\"operator\":\"EQ\",\"value\":2}]}" )).getRows().size());
+        assertEquals(2, provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"id\",\"operator\":\"NE\",\"value\":2}]}" )).getRows().size());
+        assertEquals(2, provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"id\",\"operator\":\"IN\",\"value\":[1,3]}]}" )).getRows().size());
+        assertEquals(2, provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"id\",\"operator\":\"GTE\",\"value\":2}]}" )).getRows().size());
+        assertEquals(2, provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"id\",\"operator\":\"LTE\",\"value\":2}]}" )).getRows().size());
+        ReportSectionData sorted = provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"id\",\"operator\":\"BETWEEN\",\"value\":[1,2]}],\"sort\":\"id\",\"limit\":1}"));
+        assertEquals(1, sorted.getRows().size()); assertEquals(1L, sorted.getRows().get(0).get("id")); assertEquals(2, sorted.getSummary().get("matchedCount"));
+    }
+
+    @Test
+    void filteredAggregateSummariesUseThePreLimitRows() throws Exception {
+        GoalProgressProvider goal = new GoalProgressProvider(); GoalHealthFact first = new GoalHealthFact(); first.setGoalId(1L); first.setActualProgress(new java.math.BigDecimal("40")); GoalHealthFact second = new GoalHealthFact(); second.setGoalId(2L); second.setActualProgress(new java.math.BigDecimal("80"));
+        injectDashboard(goal, (LabDashboardMapper) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {LabDashboardMapper.class}, (proxy, method, args) -> Arrays.asList(first, second)));
+        assertEquals(new java.math.BigDecimal("40.00"), goal.load(context("2026-08"), sectionWithFilter("GOAL_PROGRESS", "goalId", "EQ", 1)).getSummary().get("averageProgressRate"));
+        PerfSummaryProvider perf = new PerfSummaryProvider(); Map<String,Object> low=row(); low.put("memberId",1L); low.put("score",80); Map<String,Object> high=row(); high.put("memberId",2L); high.put("score",100); inject(perf, (LabReportDataMapper) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {LabReportDataMapper.class}, (proxy, method, args) -> Arrays.asList(low,high)));
+        ReportContext manager = new ReportContext("2026-08", "platform", 30005L, Instant.EPOCH, trustedManagerScope(), Collections.<String,Object>emptyMap());
+        assertEquals(new java.math.BigDecimal("80.00"), perf.load(manager, sectionWithFilter("PERF_SUMMARY", "memberId", "EQ", 1)).getSummary().get("averageScore"));
+        AssetSummaryProvider assets = new AssetSummaryProvider(); Map<String,Object> risky=row(); risky.put("assetNo","RISK"); risky.put("status","ACTIVE"); risky.put("assetStage","DEPLOYED"); risky.put("criticalFlag","1"); risky.put("backupOwnerId",null); Map<String,Object> safe=row(); safe.put("assetNo","SAFE"); safe.put("status","ACTIVE"); safe.put("assetStage","DEPLOYED"); safe.put("criticalFlag","1"); safe.put("backupOwnerId",2L); safe.put("backupOwnerStatus","ACTIVE"); inject(assets, (LabReportDataMapper) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {LabReportDataMapper.class}, (proxy, method, args) -> Arrays.asList(risky,safe)));
+        assertEquals(1, assets.load(context("2026-08"), sectionWithFilter("ASSET_SUMMARY", "assetNo", "EQ", "RISK")).getSummary().get("singlePointRiskCount"));
+    }
+
+    @Test
+    void standardSeedTaskDetailAndStatPeriodConfigsAreExecutable() throws Exception {
+        String seed = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("..", "sql", "ailab.sql")), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(seed.contains("'TASK_TABLE'") && seed.contains("'SCORE_STAT'"));
+        TaskDetailProvider detail = new TaskDetailProvider(); Map<String,Object> weekly=row(); weekly.put("period","2026-W32"); weekly.put("taskPeriod","2026-W32"); inject(detail,mapperWith(weekly));
+        assertEquals(1, detail.load(context("2026-W32"), sectionWithPeriodPlaceholder()).getRows().size());
+        TaskStatProvider stat = new TaskStatProvider(); Map<String,Object> bucket=row(); bucket.put("period","2026-W32"); bucket.put("total",1); inject(stat,mapperWith(bucket));
+        assertEquals(1, stat.load(context("2026-W32"), sectionWithFilter("TASK_STAT", "period", "EQ", "${period}")).getRows().size());
+    }
+
     @Test void taskDetailProviderContract() throws Exception { assertReadOnlyProvider(new TaskDetailProvider()); }
     @Test void taskUndoneProviderContract() throws Exception { assertReadOnlyProvider(new TaskUndoneProvider()); }
     @Test void taskNextProviderContract() throws Exception { assertReadOnlyProvider(new TaskNextProvider()); }
@@ -242,6 +326,9 @@ class ReportProviderContractTest {
         }
         assertTrue(configuration.getMappedStatement("com.ailab.system.mapper.LabReportDataMapper.selectTasks").getBoundSql(member).getSql().contains("? as period"));
         assertTrue(configuration.getMappedStatement("com.ailab.system.mapper.LabReportDataMapper.selectTaskStats").getBoundSql(member).getSql().contains("? as period"));
+        ReportQueryCriteria next = new ReportQueryCriteria("2026-08", member.getScope());
+        assertEquals("nextPeriod", configuration.getMappedStatement("com.ailab.system.mapper.LabReportDataMapper.selectNextTasks")
+                .getBoundSql(next).getParameterMappings().get(0).getProperty(), "next rows must be projected and filtered as the next month");
     }
 
     private ReportContext context(String period) {
@@ -303,9 +390,17 @@ class ReportProviderContractTest {
         LabReportSection section = new LabReportSection(); section.setSectionCode("TASK_DETAIL"); section.setSectionName("Tasks"); section.setSectionType("TABLE"); section.setDataSource("TASK_DETAIL");
         section.setManualFlag("0"); section.setVisibleFlag("1"); section.setQueryConfigJson("{\"filters\":[{\"field\":\"period\",\"operator\":\"EQ\",\"value\":\"${period}\"}]}"); section.setRenderConfigJson("{}"); section.setStyleConfigJson("{}"); return new ReportSectionConfig(section);
     }
+    private ReportSectionConfig sectionWithNextPeriodPlaceholder() {
+        LabReportSection section = new LabReportSection(); section.setSectionCode("TASK_NEXT"); section.setSectionName("Next"); section.setSectionType("TABLE"); section.setDataSource("TASK_NEXT");
+        section.setManualFlag("0"); section.setVisibleFlag("1"); section.setQueryConfigJson("{\"filters\":[{\"field\":\"period\",\"operator\":\"EQ\",\"value\":\"${nextPeriod}\"}]}"); section.setRenderConfigJson("{}"); section.setStyleConfigJson("{}"); return new ReportSectionConfig(section);
+    }
     private ReportSectionConfig sectionWithFilter(String providerId, String field, String operator, Object value) {
-        LabReportSection section = new LabReportSection(); section.setSectionCode(providerId); section.setSectionName(providerId); section.setSectionType(providerId.equals("ASSET_SUMMARY") || providerId.equals("TASK_STAT") ? "STAT" : "TABLE"); section.setDataSource(providerId);
+        LabReportSection section = new LabReportSection(); section.setSectionCode(providerId); section.setSectionName(providerId); section.setSectionType(providerId.equals("ASSET_SUMMARY") || providerId.equals("TASK_STAT") || providerId.equals("GOAL_PROGRESS") || providerId.equals("PERF_SUMMARY") ? "STAT" : "TABLE"); section.setDataSource(providerId);
         section.setManualFlag("0"); section.setVisibleFlag("1"); section.setQueryConfigJson("{\"filters\":[{\"field\":\"" + field + "\",\"operator\":\"" + operator + "\",\"value\":\"" + value + "\"}]}"); section.setRenderConfigJson("{}"); section.setStyleConfigJson("{}"); return new ReportSectionConfig(section);
+    }
+    private ReportSectionConfig sectionWithJson(String providerId, String queryConfig) {
+        LabReportSection section = new LabReportSection(); section.setSectionCode(providerId); section.setSectionName(providerId); section.setDataSource(providerId); section.setManualFlag("0"); section.setVisibleFlag("1");
+        section.setSectionType("TABLE"); section.setQueryConfigJson(queryConfig); section.setRenderConfigJson("{}"); section.setStyleConfigJson("{}"); return new ReportSectionConfig(section);
     }
     private ReportSectionConfig sectionFor(String providerId) {
         if (ReportConfigCatalog.MANUAL_SUMMARY.equals(providerId)) return manual();

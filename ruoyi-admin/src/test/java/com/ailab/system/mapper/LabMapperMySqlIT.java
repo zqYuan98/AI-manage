@@ -38,6 +38,8 @@ import com.ailab.system.service.LabTaskService;
 import com.ailab.system.service.LabPerformanceService;
 import com.ailab.system.service.LabDashboardService;
 import com.ailab.system.service.LabReminderService;
+import com.ailab.system.report.model.ReportContext;
+import com.ailab.system.report.model.ReportQueryCriteria;
 import com.ruoyi.RuoYiApplication;
 import com.ruoyi.common.core.domain.entity.SysRole;
 import com.ruoyi.common.core.domain.entity.SysUser;
@@ -54,6 +56,7 @@ import java.util.Collections;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.function.Supplier;
@@ -102,6 +105,7 @@ class LabMapperMySqlIT {
     @Autowired private LabDashboardMapper dashboardMapper;
     @Autowired private LabDashboardService dashboardService;
     @Autowired private LabReminderService reminderService;
+    @Autowired private LabReportDataMapper reportDataMapper;
     @Autowired private ISysUserService userService;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -168,6 +172,20 @@ class LabMapperMySqlIT {
         assertEquals(Long.valueOf(39001L), rows.get(0).getId());
         query.getParams().put("dataScope", " AND t.dept_id = 999 ");
         assertEquals(1, taskMapper.selectTaskList(query).size(), "client SQL fragments must never change mapper scope");
+    }
+
+    @Test
+    void reportProjectionMappersBindNormalizedAndNextPeriodsWithRealMaps() {
+        long currentTask = 39895L, nextTask = 39896L;
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values(?,0,39001,39002,'month','2026-08','algorithm','key','IT report current',39203,101,'2026-08-15','report',1,1,'ACTIVE','DOING','0','0','0',0,'0','it',now())", currentTask);
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values(?,0,39001,39002,'month','2026-09','algorithm','key','IT report next',39203,101,'2026-09-15','report',1,1,'ACTIVE','DOING','0','0','0',0,'0','it',now())", nextTask);
+        ReportContext context = new ReportContext("2026-08", "algorithm", 39203L, new Date().toInstant(), Collections.<String,Object>emptyMap());
+        ReportQueryCriteria criteria = new ReportQueryCriteria("2026-08", context.getAccessScope());
+        Map<String,Object> current = reportDataMapper.selectTasks(criteria).stream().filter(item -> Long.valueOf(currentTask).equals(((Number)item.get("id")).longValue())).findFirst().orElseThrow(() -> new AssertionError("current report task missing"));
+        Map<String,Object> next = reportDataMapper.selectNextTasks(criteria).stream().filter(item -> Long.valueOf(nextTask).equals(((Number)item.get("id")).longValue())).findFirst().orElseThrow(() -> new AssertionError("next report task missing"));
+        assertEquals("2026-08", current.get("period")); assertEquals("2026-08", current.get("taskPeriod"));
+        assertEquals("2026-09", next.get("period")); assertEquals("2026-09", next.get("taskPeriod"));
+        assertTrue(reportDataMapper.selectTaskStats(criteria).stream().allMatch(item -> "2026-08".equals(item.get("period"))));
     }
 
     @Test

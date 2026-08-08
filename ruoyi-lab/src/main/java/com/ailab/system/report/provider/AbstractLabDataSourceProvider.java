@@ -23,8 +23,17 @@ import org.springframework.beans.factory.annotation.Autowired;
  * before a provider reaches MyBatis. */
 public abstract class AbstractLabDataSourceProvider implements DataSourceProvider {
     @Autowired(required = false) private LabReportDataMapper mapper;
-    private final String id; private final Set<String> fields;
-    protected AbstractLabDataSourceProvider(String id, Set<String> fields) { this.id = id; this.fields = fields; }
+    private final String id; private final List<String> schema; private final Set<String> fields;
+    /**
+     * The schema is both the sole query-field allow-list and the published row contract.  Keeping a
+     * copied insertion-order list prevents a JDBC driver's sparse Map (it may omit NULL columns)
+     * from changing the shape or field order of a report section.
+     */
+    protected AbstractLabDataSourceProvider(String id, Set<String> fields) {
+        this.id = id;
+        this.schema = Collections.unmodifiableList(new ArrayList<String>(fields));
+        this.fields = Collections.unmodifiableSet(new java.util.LinkedHashSet<String>(this.schema));
+    }
     @Override public final String getId() { return id; }
     @Override public final boolean supports(String providerId) { return id.equals(providerId); }
     @Override public final ReportSectionData load(ReportContext context, ReportSectionConfig section) {
@@ -37,7 +46,7 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
     protected boolean supports(ReportPeriod.Kind kind) { return kind == ReportPeriod.Kind.MONTH; }
     protected final LabReportDataMapper mapper() { if (mapper == null) throw new IllegalStateException("Report data mapper is unavailable"); return mapper; }
     protected final ReportSectionData section(ReportQueryCriteria criteria, ReportSectionConfig cfg, List<Map<String, Object>> rows, Map<String, Object> summary) {
-        List<Map<String, Object>> filtered = applyQueryConfig(criteria, rows); List<Map<String, Object>> preLimit = filtered; int matched = filtered.size();
+        List<Map<String, Object>> filtered = applyQueryConfig(criteria, normalizeRows(rows)); List<Map<String, Object>> preLimit = filtered; int matched = filtered.size();
         Object rawLimit = cfg.getQueryConfig().get("limit"); if (rawLimit instanceof Number && ((Number) rawLimit).intValue() < filtered.size()) filtered = new ArrayList<Map<String, Object>>(filtered.subList(0, ((Number) rawLimit).intValue()));
         Map<String, Object> summaryCopy = new LinkedHashMap<String, Object>(summary == null ? Collections.<String, Object>emptyMap() : summary);
         recomputeFilteredSummary(preLimit, summaryCopy);
@@ -49,6 +58,25 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
     /** Providers with aggregate metrics override this so summaries match the filtered, pre-limit rows. */
     protected void recomputeFilteredSummary(List<Map<String, Object>> rows, Map<String, Object> summary) { }
     protected final List<Map<String, Object>> copyRows(List<Map<String, Object>> rows) { return rows == null ? Collections.<Map<String,Object>>emptyList() : new ArrayList<Map<String,Object>>(rows); }
+    /** Normalizes every row before filtering so NULL output columns remain filterable and visible. */
+    private List<Map<String, Object>> normalizeRows(List<Map<String, Object>> rows) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> raw : copyRows(rows)) {
+            Map<String, Object> row = new LinkedHashMap<String, Object>();
+            for (String field : schema) row.put(field, normalizeValue(field, raw == null ? null : raw.get(field)));
+            result.add(row);
+        }
+        return result;
+    }
+    /** Provider-specific JDBC type normalization without mutating global MyBatis null-map behaviour. */
+    protected Object normalizeValue(String field, Object value) {
+        if (value instanceof java.sql.Date) return ((java.sql.Date) value).toLocalDate().toString();
+        if (value instanceof java.sql.Timestamp) return ((java.sql.Timestamp) value).toInstant().toString();
+        if (value instanceof java.util.Date) return ((java.util.Date) value).toInstant().toString();
+        return value;
+    }
+    /** Exposed for contract tests and renderer integration; list order is the stable output order. */
+    public final List<String> getOutputSchema() { return schema; }
     protected final BigDecimal number(Object value) { return value instanceof BigDecimal ? (BigDecimal) value : value == null ? BigDecimal.ZERO : new BigDecimal(String.valueOf(value)); }
     private void validateConfig(ReportSectionConfig section) {
         checkField(section.getQueryConfig().get("sort")); checkField(section.getQueryConfig().get("groupBy"));
