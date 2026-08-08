@@ -87,3 +87,19 @@ mvn -pl ruoyi-admin -am -Dspring.profiles.active=lab-it -Dtest=LabMapperMySqlIT 
 - [ ] Linux 内核/架构/seccomp 满足 pidfd；不允许 raw PID kill fallback
 - [ ] 报告输出、临时目录仅服务账号可读写；Web 服务器不直接暴露目录
 - [ ] 最终 `git status --short` 为空，独立 code/spec review 无 Critical/Important
+
+## H. 本地验收记录（2026-08-09，Asia/Shanghai）
+
+Task17 基线提交：`223cd8dabc9e606e44789c78bf80483d96ef42eb`。
+
+| 项目 | 命令/端口 | 结果 |
+| --- | --- | --- |
+| 自动化总门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-project.ps1` | PASS：8/8 阶段；clean backend 34 suites / 497 tests / 0F / 0E / 2 个条件式 LibreOffice skip；SQL 20/59/48/5/6；10 个 Mapper XML；admin package；前端定向 lint 与生产 build；四制品检查 |
+| MySQL | `127.0.0.1:3306` | BLOCKED：端口关闭；Windows/WSL 均未安装 MySQL 服务 |
+| Redis | `127.0.0.1:6379` | BLOCKED：端口关闭；Windows/WSL 均未安装 Redis 服务 |
+| 后端/前端 | `127.0.0.1:8080` / `127.0.0.1:1024` | NOT STARTED：真实验收所需的 MySQL/Redis 未就绪，端口均关闭 |
+| 真实 Mapper IT | `mvn -pl ruoyi-admin -am -Dspring.profiles.active=lab-it -Dtest=LabMapperMySqlIT -Dsurefire.failIfNoSpecifiedTests=false test` | BLOCKED：19 tests / 0 failures / 19 context errors；统一根因 `Connection refused: 3306`，未进入业务断言 |
+| LibreOffice/PDF | WSL `/usr/bin/libreoffice`；Poppler 120dpi 渲染 | PASS：tracked PDF 为真实 LibreOffice 输出，单页 Letter，中文/表格/图表完整且无裁切；Windows PATH 无 LibreOffice，因此 Windows 单测有 2 个 capability skip |
+| 浏览器业务路径 | Dashboard/模板/权限/关期/异步恢复/下载 | NOT RUN：没有数据库、Redis 和后端；不得以 mock 或静态页面替代真实验收 |
+
+解除阻塞后，先按 [部署说明](deployment.md) 初始化 MySQL 8 与 Redis，再重跑真实 Mapper IT、启动 8080/1024，并逐项勾选 B–G。不要把本表中的环境性 BLOCKED 解释为业务断言通过。
