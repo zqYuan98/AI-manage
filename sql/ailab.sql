@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS `lab_goal` (
 
 CREATE TABLE IF NOT EXISTS `lab_task` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `parent_id` bigint DEFAULT 0 COMMENT 'parent task', `goal_id` bigint DEFAULT NULL COMMENT 'goal reference', `milestone_id` bigint DEFAULT NULL COMMENT 'milestone reference', `task_level` varchar(16) NOT NULL COMMENT 'month or week', `period` varchar(16) NOT NULL COMMENT 'business period', `biz_line` varchar(32) NOT NULL COMMENT 'business line', `task_type` varchar(16) NOT NULL COMMENT 'key or daily', `title` varchar(200) NOT NULL COMMENT 'task title', `owner_id` bigint NOT NULL COMMENT 'member owner', `dept_id` bigint DEFAULT NULL COMMENT 'department', `plan_date` date DEFAULT NULL COMMENT 'planned finish date', `actual_finish_time` datetime DEFAULT NULL COMMENT 'actual finish time', `deliverable` varchar(1000) DEFAULT NULL COMMENT 'deliverable', `perf_weight` decimal(8,2) DEFAULT 0 COMMENT 'performance weight', `goal_weight` decimal(8,2) DEFAULT 0 COMMENT 'goal contribution weight', `workflow_status` varchar(32) DEFAULT 'DRAFT' COMMENT 'workflow status', `result_status` varchar(32) DEFAULT 'DOING' COMMENT 'result status', `result_desc` varchar(1000) DEFAULT NULL COMMENT 'result description', `fail_reason` varchar(1000) DEFAULT NULL COMMENT 'failure reason', `next_action` varchar(1000) DEFAULT NULL COMMENT 'next action', `asset_id` bigint DEFAULT NULL COMMENT 'related asset', `coordination_required` char(1) DEFAULT '0' COMMENT 'requires coordination', `coordination_owner_id` bigint DEFAULT NULL COMMENT 'coordination owner', `coordination_dept_id` bigint DEFAULT NULL COMMENT 'coordination department', `coordination_content` varchar(1000) DEFAULT NULL COMMENT 'coordination content', `coordination_support` varchar(1000) DEFAULT NULL COMMENT 'requested support', `coordination_desc` varchar(1000) DEFAULT NULL COMMENT 'coordination description', `current_block_flag` char(1) DEFAULT '0' COMMENT 'currently blocked', `current_block_start` datetime DEFAULT NULL COMMENT 'current block start', `period_lock_flag` char(1) DEFAULT '0' COMMENT 'period locked', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), KEY `idx_lab_task_parent` (`parent_id`), KEY `idx_lab_task_goal` (`goal_id`), KEY `idx_lab_task_milestone` (`milestone_id`), KEY `idx_lab_task_owner_period_workflow` (`owner_id`,`period`,`workflow_status`), KEY `idx_lab_task_period_workflow` (`period`,`workflow_status`,`period_lock_flag`), KEY `idx_lab_task_dept` (`dept_id`), KEY `idx_lab_task_coordination_owner` (`coordination_required`,`coordination_owner_id`), KEY `idx_lab_task_owner_status` (`owner_id`,`workflow_status`,`result_status`), KEY `idx_lab_task_period_line` (`period`,`biz_line`), KEY `idx_lab_task_asset` (`asset_id`)
+ PRIMARY KEY (`id`), KEY `idx_lab_task_parent` (`parent_id`), KEY `idx_lab_task_goal` (`goal_id`), KEY `idx_lab_task_milestone` (`milestone_id`), KEY `idx_lab_task_owner_period_workflow` (`owner_id`,`period`,`workflow_status`), KEY `idx_lab_task_owner_plan_level` (`owner_id`,`plan_date`,`task_level`), KEY `idx_lab_task_period_workflow` (`period`,`workflow_status`,`period_lock_flag`), KEY `idx_lab_task_dept` (`dept_id`), KEY `idx_lab_task_coordination_owner` (`coordination_required`,`coordination_owner_id`), KEY `idx_lab_task_owner_status` (`owner_id`,`workflow_status`,`result_status`), KEY `idx_lab_task_period_line` (`period`,`biz_line`), KEY `idx_lab_task_asset` (`asset_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='laboratory task';
 
 CREATE TABLE IF NOT EXISTS `lab_task_evidence` (
@@ -82,6 +82,14 @@ SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
  'ALTER TABLE `lab_task` ADD INDEX `idx_lab_task_period_workflow` (`period`,`workflow_status`,`period_lock_flag`)',
  'SELECT 1') FROM information_schema.statistics
  WHERE table_schema = DATABASE() AND table_name = 'lab_task' AND index_name = 'idx_lab_task_period_workflow');
+PREPARE ailab_ddl FROM @ailab_ddl;
+EXECUTE ailab_ddl;
+DEALLOCATE PREPARE ailab_ddl;
+
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
+ 'ALTER TABLE `lab_task` ADD INDEX `idx_lab_task_owner_plan_level` (`owner_id`,`plan_date`,`task_level`)',
+ 'SELECT 1') FROM information_schema.statistics
+ WHERE table_schema = DATABASE() AND table_name = 'lab_task' AND index_name = 'idx_lab_task_owner_plan_level');
 PREPARE ailab_ddl FROM @ailab_ddl;
 EXECUTE ailab_ddl;
 DEALLOCATE PREPARE ailab_ddl;

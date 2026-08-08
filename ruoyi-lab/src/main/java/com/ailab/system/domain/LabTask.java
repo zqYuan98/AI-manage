@@ -17,6 +17,8 @@ public class LabTask extends BaseEntity {
     private Long milestoneId;
     private String taskLevel;
     private String period;
+    /** Query-only inclusive month upper bound used by cumulative dashboard drill-downs. */
+    private String periodTo;
     private String bizLine;
     private String taskType;
     private String title;
@@ -72,6 +74,8 @@ public class LabTask extends BaseEntity {
     public void setTaskLevel(String taskLevel) { this.taskLevel = taskLevel; }
     public String getPeriod() { return period; }
     public void setPeriod(String period) { this.period = period; }
+    public String getPeriodTo() { return periodTo; }
+    public void setPeriodTo(String periodTo) { this.periodTo = periodTo; }
     public String getBizLine() { return bizLine; }
     public void setBizLine(String bizLine) { this.bizLine = bizLine; }
     public String getTaskType() { return taskType; }

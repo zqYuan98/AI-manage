@@ -216,6 +216,18 @@ class LabTaskServiceTest {
     }
 
     @Test
+    void cumulativeTrendDrillBindsAValidatedMonthUpperBound() {
+        LabTask query = new LabTask();
+        BeanWrapper requestBinder = new BeanWrapperImpl(query);
+        assertTrue(requestBinder.isWritableProperty("periodTo"), "Spring GET binding needs a typed periodTo property");
+        requestBinder.setPropertyValue("periodTo", "2026-08");
+        service.listTasks(query, 9L);
+
+        requestBinder.setPropertyValue("periodTo", "2026-W32");
+        assertThrows(ServiceException.class, () -> service.listTasks(query, 9L));
+    }
+
+    @Test
     void taskListRejectsUnknownTaskLevelBeforeMapperUse() {
         LabTask query = new LabTask(); query.setTaskLevel("quarter");
         assertThrows(ServiceException.class, () -> service.listTasks(query, 9L));

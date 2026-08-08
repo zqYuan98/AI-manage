@@ -5,6 +5,7 @@ import com.ailab.system.mapper.LabDashboardMapper;
 import com.ailab.system.service.LabPerformanceService;
 import com.ailab.system.service.LabReminderService;
 import com.ailab.system.service.LabReportRecoveryWorker;
+import com.ailab.system.service.LabReportTempFileEligibility;
 import com.ruoyi.common.exception.ServiceException;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -36,28 +37,37 @@ public class LabScheduleTask {
     private final LabProperties properties;
     private final Clock clock;
     private final LabReportRecoveryWorker reportRecoveryWorker;
+    private final LabReportTempFileEligibility tempFileEligibility;
 
     @Autowired
     public LabScheduleTask(LabReminderService reminders, LabPerformanceService performance,
-            LabDashboardMapper mapper, LabProperties properties, Optional<LabReportRecoveryWorker> recoveryWorker) {
+            LabDashboardMapper mapper, LabProperties properties, Optional<LabReportRecoveryWorker> recoveryWorker,
+            Optional<LabReportTempFileEligibility> tempFileEligibility) {
         this(reminders, performance, mapper, properties, Clock.system(ZoneId.of("Asia/Shanghai")),
-                recoveryWorker.orElse(null));
+                recoveryWorker.orElse(null), tempFileEligibility.orElse(null));
     }
 
     public LabScheduleTask(LabReminderService reminders, LabPerformanceService performance,
             LabDashboardMapper mapper, LabProperties properties, Clock clock, LabReportRecoveryWorker reportRecoveryWorker) {
+        this(reminders, performance, mapper, properties, clock, reportRecoveryWorker, null);
+    }
+
+    public LabScheduleTask(LabReminderService reminders, LabPerformanceService performance,
+            LabDashboardMapper mapper, LabProperties properties, Clock clock, LabReportRecoveryWorker reportRecoveryWorker,
+            LabReportTempFileEligibility tempFileEligibility) {
         this.reminders = reminders; this.performance = performance; this.mapper = mapper;
         this.properties = properties; this.clock = clock; this.reportRecoveryWorker = reportRecoveryWorker;
+        this.tempFileEligibility = tempFileEligibility;
     }
 
     public void scanBlocks() {
         try { LOG.info("AI Lab block reminder scan inserted {} rows", reminders.scanBlocks()); }
-        catch (RuntimeException error) { LOG.error("AI Lab block reminder scan failed", error); }
+        catch (RuntimeException error) { LOG.error("AI Lab block reminder scan failed", error); throw error; }
     }
 
     public void scanPendingTasks() {
         try { LOG.info("AI Lab pending-task scan inserted {} rows", reminders.scanPendingTasks()); }
-        catch (RuntimeException error) { LOG.error("AI Lab pending-task scan failed", error); }
+        catch (RuntimeException error) { LOG.error("AI Lab pending-task scan failed", error); throw error; }
     }
 
     public void closeDuePeriods() {
@@ -68,13 +78,13 @@ public class LabScheduleTask {
             List<Long> managerUsers = mapper.selectActiveManagerUserIds();
             if (managerUsers == null) managerUsers = Collections.emptyList();
             if (managerUsers.isEmpty()) {
-                LOG.error("AI Lab scheduled close skipped: no enabled manager user is mapped to an active lab member");
-                return;
+                throw new ServiceException("AI Lab scheduled close requires an enabled manager mapped to an active lab member");
             }
             performance.closePeriod(period, "scheduled month close", managerUsers.get(0));
             LOG.info("AI Lab period {} closed or already closed", period);
         } catch (RuntimeException error) {
-            LOG.error("AI Lab period {} close failed; later jobs remain isolated", period, error);
+            LOG.error("AI Lab period {} close failed", period, error);
+            throw error;
         }
     }
 
@@ -89,6 +99,10 @@ public class LabScheduleTask {
             if (realTemp.equals(realOutput) || !realTemp.startsWith(realOutput)) {
                 throw new ServiceException("Report temporary directory must be a child of the report output directory");
             }
+            if (tempFileEligibility == null) {
+                LOG.warn("AI Lab report temporary cleanup eligibility is not installed; cleanup skipped fail-closed");
+                return;
+            }
             final Instant cutoff = clock.instant().minus(TEMP_RETENTION_HOURS, ChronoUnit.HOURS);
             int deleted = 0;
             try (Stream<Path> paths = Files.walk(realTemp)) {
@@ -96,7 +110,9 @@ public class LabScheduleTask {
                 for (Path file : files) {
                     Path realFile = file.toRealPath();
                     if (!realFile.startsWith(realTemp)) throw new ServiceException("Refusing to clean a temporary file outside the configured directory");
-                    if (Files.getLastModifiedTime(realFile).toInstant().isBefore(cutoff) && Files.deleteIfExists(realFile)) deleted++;
+                    Path relativeFile = realTemp.relativize(realFile);
+                    if (Files.getLastModifiedTime(realFile).toInstant().isBefore(cutoff)
+                            && tempFileEligibility.isDeletionEligible(relativeFile) && Files.deleteIfExists(realFile)) deleted++;
                 }
             }
             LOG.info("AI Lab report temporary cleanup removed {} files", deleted);
@@ -113,7 +129,7 @@ public class LabScheduleTask {
             return;
         }
         try { LOG.info("AI Lab report recovery resumed {} jobs", reportRecoveryWorker.recoverInterruptedJobs()); }
-        catch (RuntimeException error) { LOG.error("AI Lab report recovery failed", error); }
+        catch (RuntimeException error) { LOG.error("AI Lab report recovery failed", error); throw error; }
     }
 
     private Path configuredPath(String value, String label) {

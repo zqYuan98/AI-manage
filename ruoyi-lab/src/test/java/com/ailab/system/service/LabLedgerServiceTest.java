@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -103,12 +104,34 @@ class LabLedgerServiceTest {
         LabAsset inactiveBackup = asset(2L, 20L, 30L, "ACTIVE", 0); inactiveBackup.setCriticalFlag("1"); inactiveBackup.setBackupOwnerStatus("INACTIVE");
         LabAsset missingBackup = asset(4L, 20L, 40L, "ACTIVE", 0); missingBackup.setCriticalFlag("1"); missingBackup.setBackupOwnerStatus(null);
         LabAsset nonCritical = asset(3L, 20L, null, "INACTIVE", 0); nonCritical.setCriticalFlag("0");
-        when(ledgerMapper.selectAssetList(any(LabAsset.class))).thenReturn(Arrays.asList(noBackup, inactiveBackup, missingBackup, nonCritical));
-        assertEquals(3, service.listAssetRisks(new LabAsset(), 1L).size());
+        LabAsset inactiveCritical = asset(5L, 20L, null, "INACTIVE", 0); inactiveCritical.setCriticalFlag("1");
+        when(ledgerMapper.selectAssetList(any(LabAsset.class), any())).thenReturn(Arrays.asList(noBackup, inactiveBackup, missingBackup, nonCritical, inactiveCritical));
+        assertEquals(4, service.listAssetRisks(new LabAsset(), 1L).size());
         assertTrue(noBackup.isSinglePointRisk());
         assertTrue(inactiveBackup.isSinglePointRisk());
         assertTrue(missingBackup.isSinglePointRisk());
         assertFalse(nonCritical.isSinglePointRisk());
+        assertTrue(inactiveCritical.isSinglePointRisk(), "critical inventory stays in the shared risk population regardless of deployment state");
+    }
+
+    @Test
+    void dashboardSinglePointRiskDrillIsExactlyFilteredToTrustedActorScope() {
+        lead(2L, 21L, "algorithm");
+        LabAsset sameLine = asset(1L, 20L, null, "ACTIVE", 0);
+        sameLine.setCriticalFlag("1"); sameLine.setPrimaryOwnerBizLine("algorithm");
+        LabAsset crossLine = asset(2L, 30L, null, "ACTIVE", 0);
+        crossLine.setCriticalFlag("1"); crossLine.setPrimaryOwnerBizLine("platform");
+        LabAsset irrelevant = asset(3L, 20L, null, "ACTIVE", 0);
+        irrelevant.setAssetStage("VERIFYING"); irrelevant.setCriticalFlag("0");
+        irrelevant.setPrimaryOwnerBizLine("algorithm");
+        when(ledgerMapper.selectAssetList(any(LabAsset.class), any()))
+                .thenReturn(Arrays.asList(sameLine, crossLine, irrelevant));
+        LabAsset query = new LabAsset(); query.setSinglePointRisk(true);
+
+        List<LabAsset> result = service.listAssets(query, 2L);
+
+        assertEquals(Collections.singletonList(sameLine), result,
+                "risk drill must match the scoped KPI and the shared risk policy exactly");
     }
 
     @Test
@@ -186,7 +209,7 @@ class LabLedgerServiceTest {
     @Test
     void ordinaryLedgerListsNeverContainOneToOneSensitiveContent() {
         memberActor(3L, 20L, "algorithm");
-        when(ledgerMapper.selectAssetList(any(LabAsset.class))).thenReturn(Collections.<LabAsset>emptyList());
+        when(ledgerMapper.selectAssetList(any(LabAsset.class), any())).thenReturn(Collections.<LabAsset>emptyList());
         when(ledgerMapper.selectIprList(any(LabIpr.class))).thenReturn(Collections.<LabIpr>emptyList());
         service.listAssets(new LabAsset(), 3L);
         service.listIprs(new LabIpr(), 3L);

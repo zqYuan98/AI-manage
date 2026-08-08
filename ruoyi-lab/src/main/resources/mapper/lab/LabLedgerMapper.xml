@@ -38,13 +38,22 @@
     <sql id="one2oneColumns">o.id,o.member_id,o.leader_id,o.meeting_date,o.topic,o.facts_evidence,o.difficulties,o.next_action,o.manager_comment,o.status,o.version,o.del_flag,o.create_by,o.create_time,o.update_by,o.update_time,o.remark,mu.nick_name member_name,lu.nick_name leader_name</sql>
     <sql id="iprColumns">i.id,i.ipr_no,i.ipr_name,i.ipr_type,i.ipr_stage,i.owner_id,i.planned_submit_date,i.actual_submit_date,i.acceptance_no,i.certificate_no,i.authorized_date,i.evidence_url,i.status,i.stage_change_reason,i.version,i.del_flag,i.create_by,i.create_time,i.update_by,i.update_time,i.remark,u.nick_name owner_name,m.biz_line owner_biz_line</sql>
 
-    <select id="selectAssetList" parameterType="com.ailab.system.domain.LabAsset" resultMap="AssetResult">
+    <select id="selectAssetList" resultMap="AssetResult">
         select <include refid="assetColumns"/> from lab_asset a
         join lab_member pm on pm.id=a.primary_owner_id and pm.del_flag='0' join sys_user pu on pu.user_id=pm.user_id and pu.del_flag='0'
         left join lab_member bm on bm.id=a.backup_owner_id and bm.del_flag='0' left join sys_user bu on bu.user_id=bm.user_id and bu.del_flag='0'
-        where a.del_flag='0' <if test="id != null">and a.id=#{id}</if><if test="assetType != null and assetType != ''">and a.asset_type=#{assetType}</if>
-        <if test="assetStage != null and assetStage != ''">and a.asset_stage=#{assetStage}</if><if test="status != null and status != ''">and a.status=#{status}</if>
-        <if test="primaryOwnerId != null">and a.primary_owner_id=#{primaryOwnerId}</if><if test="assetName != null and assetName != ''">and a.asset_name like concat('%',#{assetName},'%')</if>
+        where a.del_flag='0' <if test="query.id != null">and a.id=#{query.id}</if><if test="query.assetType != null and query.assetType != ''">and a.asset_type=#{query.assetType}</if>
+        <if test="query.assetStage != null and query.assetStage != ''">and a.asset_stage=#{query.assetStage}</if><if test="query.status != null and query.status != ''">and a.status=#{query.status}</if>
+        <if test="query.primaryOwnerId != null">and a.primary_owner_id=#{query.primaryOwnerId}</if><if test="query.assetName != null and query.assetName != ''">and a.asset_name like concat('%',#{query.assetName},'%')</if>
+        <if test="query.singlePointRisk">
+            and (a.critical_flag='1' or (a.status='ACTIVE' and a.asset_stage in ('DEPLOYED','ACCEPTED')))
+            and (a.backup_owner_id is null or not exists(select 1 from lab_member backup
+                where backup.id=a.backup_owner_id and backup.member_status='ACTIVE' and backup.del_flag='0'))
+            <choose>
+                <when test="scope.roleKey == 'lab_lead'">and pm.biz_line=#{scope.bizLine}</when>
+                <when test="scope.roleKey == 'lab_member'">and a.primary_owner_id=#{scope.memberId}</when>
+            </choose>
+        </if>
         order by a.status,a.asset_type,a.asset_name,a.id
     </select>
     <select id="selectAssetById" parameterType="long" resultMap="AssetResult">

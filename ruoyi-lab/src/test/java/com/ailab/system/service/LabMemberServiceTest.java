@@ -209,7 +209,7 @@ class LabMemberServiceTest {
         when(ledgerMapper.selectOne2OneByMember(20L)).thenReturn(Collections.emptyList());
         LabAsset ledgerAsset = riskyAsset(70L);
         LabAsset aggregateAsset = riskyAsset(70L);
-        when(ledgerMapper.selectAssetList(any(LabAsset.class))).thenReturn(Collections.singletonList(ledgerAsset));
+        when(ledgerMapper.selectAssetList(any(LabAsset.class), any())).thenReturn(Collections.singletonList(ledgerAsset));
         when(ledgerMapper.selectAssetsByMember(20L)).thenReturn(Collections.singletonList(aggregateAsset));
 
         LabLedgerService ledgerService = new LabLedgerServiceImpl(ledgerMapper, memberMapper, accessService);

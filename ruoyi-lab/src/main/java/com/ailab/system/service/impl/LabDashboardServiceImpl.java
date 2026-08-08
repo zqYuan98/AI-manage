@@ -71,7 +71,10 @@ public class LabDashboardServiceImpl implements LabDashboardService {
         for (GoalTrendPoint point : trend) {
             point.setDefinition("每个年度目标独立累计计划进度，以及已确认月任务或执行中月任务已确认周任务比例形成的实际进度"); point.setLastUpdated(now);
             point.getDrillDownFilters().put("goalId", point.getGoalId());
-            point.getDrillDownFilters().put("period", point.getPeriod());
+            point.getDrillDownFilters().put("periodTo", point.getPeriod());
+            point.getDrillDownFilters().put("taskLevel", "month");
+            point.getDrillDownFilters().put("taskType", "key");
+            point.getDrillDownFilters().put("asOf", asOf);
         }
         result.setGoalTrend(trend);
         result.setKpis(kpis(period, health, kpi, now, asOf, asOfDate));
@@ -139,7 +142,8 @@ public class LabDashboardServiceImpl implements LabDashboardService {
                 "当前OPEN阻塞事件自开始日期已满7天的任务数", now,
                 filters("period", period, "currentBlockFlag", "1", "blockStartBefore", blockStartBefore, "asOf", asOf)));
         values.add(metric("assetsWithoutBackup", "无备份资产", integer(fact.getAssetsWithoutBackupCount()), "项", period,
-                "当前有效且未配置有效备份负责人的资产数", now, filters("status", "ACTIVE", "singlePointRisk", Boolean.TRUE)));
+                "关键资产，或当前有效且已部署/验收的资产中，未配置有效备份负责人的数量", now,
+                filters("singlePointRisk", Boolean.TRUE)));
         return values;
     }
 

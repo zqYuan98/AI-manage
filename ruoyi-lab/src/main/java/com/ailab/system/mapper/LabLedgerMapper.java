@@ -3,11 +3,12 @@ package com.ailab.system.mapper;
 import com.ailab.system.domain.LabAsset;
 import com.ailab.system.domain.LabIpr;
 import com.ailab.system.domain.LabOne2One;
+import com.ailab.system.dto.LabAccessContext;
 import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 public interface LabLedgerMapper {
-    List<LabAsset> selectAssetList(LabAsset query);
+    List<LabAsset> selectAssetList(@Param("query") LabAsset query, @Param("scope") LabAccessContext scope);
     LabAsset selectAssetById(Long id);
     LabAsset selectAssetForUpdate(Long id);
     List<LabAsset> selectAssetsByMember(Long memberId);

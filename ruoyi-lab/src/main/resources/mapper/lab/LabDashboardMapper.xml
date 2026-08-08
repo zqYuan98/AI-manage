@@ -59,6 +59,42 @@
             <when test="scope.roleKey == 'lab_member'">and t.owner_id=#{scope.memberId}</when>
         </choose>
     </sql>
+    <sql id="taskMonthPredicate">
+        ((t.task_level='month' and t.period=#{period})
+        or (t.task_level='week' and exists(select 1 from lab_task period_parent
+            where period_parent.id=t.parent_id and period_parent.task_level='month'
+            and period_parent.period=#{period} and period_parent.del_flag='0')))
+    </sql>
+    <sql id="monthTaskScope">
+        <choose>
+            <when test="scope.roleKey == 'lab_lead'">and m.biz_line=#{scope.bizLine}</when>
+            <when test="scope.roleKey == 'lab_member'">and m.owner_id=#{scope.memberId}</when>
+        </choose>
+    </sql>
+    <sql id="weekTaskScope">
+        <choose>
+            <when test="scope.roleKey == 'lab_lead'">and w.biz_line=#{scope.bizLine}</when>
+            <when test="scope.roleKey == 'lab_member'">and w.owner_id=#{scope.memberId}</when>
+        </choose>
+    </sql>
+    <sql id="parentMonthScope">
+        <choose>
+            <when test="scope.roleKey == 'lab_lead'">and parent_month.biz_line=#{scope.bizLine}</when>
+            <when test="scope.roleKey == 'lab_member'">and parent_month.owner_id=#{scope.memberId}</when>
+        </choose>
+    </sql>
+    <sql id="riskTaskScope">
+        <choose>
+            <when test="scope.roleKey == 'lab_lead'">and rt.biz_line=#{scope.bizLine}</when>
+            <when test="scope.roleKey == 'lab_member'">and rt.owner_id=#{scope.memberId}</when>
+        </choose>
+    </sql>
+    <sql id="blockTaskScope">
+        <choose>
+            <when test="scope.roleKey == 'lab_lead'">and block_task.biz_line=#{scope.bizLine}</when>
+            <when test="scope.roleKey == 'lab_member'">and block_task.owner_id=#{scope.memberId}</when>
+        </choose>
+    </sql>
 
     <select id="selectOpenBlockReminderCandidates" resultMap="ReminderCandidateResult">
         select e.task_id,t.title task_title,e.episode_no,e.block_start_time,t.owner_id recipient_id,'OWNER' audience,null missing_fields,t.period
@@ -102,8 +138,8 @@
             or t.coordination_support is null or trim(t.coordination_support)='')))
     </sql>
     <sql id="pendingTaskPredicate">
-        t.period=#{period} and t.workflow_status in ('DRAFT','ACTIVE') and t.period_lock_flag='0' and t.del_flag='0'
-        and not exists(select 1 from lab_period_close pc where pc.period=t.period and pc.close_status='CLOSED' and pc.del_flag='0')
+        <include refid="taskMonthPredicate"/> and t.workflow_status in ('DRAFT','ACTIVE') and t.period_lock_flag='0' and t.del_flag='0'
+        and not exists(select 1 from lab_period_close pc where pc.period=#{period} and pc.close_status='CLOSED' and pc.del_flag='0')
         and <include refid="pendingFieldPredicate"/>
     </sql>
     <select id="selectPendingTaskReminderCandidates" resultMap="ReminderCandidateResult">
@@ -161,7 +197,8 @@
                 and parent_month.task_type='key' and parent_month.period&lt;=date_format(#{asOf},'%Y-%m') and parent_month.del_flag='0'
             join lab_goal weekly_annual on weekly_annual.id=parent_month.goal_id and weekly_annual.goal_level='YEAR'
                 and weekly_annual.year=#{year} and weekly_annual.status='ACTIVE' and weekly_annual.del_flag='0'
-            where w.task_level='week' and w.del_flag='0' group by w.parent_id
+            where w.task_level='week' and w.del_flag='0'
+            <include refid="weekTaskScope"/><include refid="parentMonthScope"/> group by w.parent_id
         ), month_progress as (
             select m.id,m.goal_id,m.milestone_id,m.period,m.plan_date,m.workflow_status,m.result_status,
             m.goal_weight,q.weight quarter_weight,
@@ -172,9 +209,12 @@
             join lab_goal q on q.id=m.milestone_id and q.parent_id=a.id and q.goal_level='QUARTER' and q.del_flag='0'
             left join weekly_progress wp on wp.month_task_id=m.id
             where m.task_level='month' and m.task_type='key' and m.period&lt;=date_format(#{asOf},'%Y-%m') and m.del_flag='0'
+            <include refid="monthTaskScope"/>
         ), open_blocks as (
-            select task_id,min(block_start_time) block_start_time from lab_task_block_event
-            where block_status='OPEN' and block_start_time&lt;=#{asOf} and del_flag='0' group by task_id
+            select be.task_id,min(be.block_start_time) block_start_time from lab_task_block_event be
+            join lab_task block_task on block_task.id=be.task_id and block_task.del_flag='0'
+            where be.block_status='OPEN' and be.block_start_time&lt;=#{asOf} and be.del_flag='0'
+            <include refid="blockTaskScope"/> group by be.task_id
         ), goal_expected as (
             select mp.goal_id,
             sum(case when mp.plan_date&lt;=date(#{asOf}) then mp.goal_weight*mp.quarter_weight/100 else 0 end) expected_progress
@@ -200,7 +240,11 @@
             join lab_goal risk_goal on risk_goal.id=rt.goal_id and risk_goal.goal_level='YEAR'
                 and risk_goal.year=#{year} and risk_goal.status='ACTIVE' and risk_goal.del_flag='0'
             left join open_blocks blocks on blocks.task_id=rt.id
-            where rt.period&lt;=date_format(#{asOf},'%Y-%m') and rt.del_flag='0' group by rt.goal_id
+            where ((rt.task_level='month' and rt.period&lt;=date_format(#{asOf},'%Y-%m'))
+                or (rt.task_level='week' and exists(select 1 from lab_task risk_parent
+                    where risk_parent.id=rt.parent_id and risk_parent.task_level='month'
+                    and risk_parent.period&lt;=date_format(#{asOf},'%Y-%m') and risk_parent.del_flag='0')))
+            and rt.del_flag='0' <include refid="riskTaskScope"/> group by rt.goal_id
         )
         select g.id goal_id,g.title goal_title,g.year,
         coalesce(max(gp.expected_progress),0) expected_progress,
@@ -224,7 +268,8 @@
                 and parent_month.task_type='key' and parent_month.period&lt;=date_format(#{asOf},'%Y-%m') and parent_month.del_flag='0'
             join lab_goal weekly_annual on weekly_annual.id=parent_month.goal_id and weekly_annual.goal_level='YEAR'
                 and weekly_annual.year=#{year} and weekly_annual.status='ACTIVE' and weekly_annual.del_flag='0'
-            where w.task_level='week' and w.del_flag='0' group by w.parent_id
+            where w.task_level='week' and w.del_flag='0'
+            <include refid="weekTaskScope"/><include refid="parentMonthScope"/> group by w.parent_id
         ), month_progress as (
             select m.goal_id,m.milestone_id,m.period,m.plan_date,m.goal_weight,q.weight quarter_weight,
             case when m.workflow_status='CONFIRMED' and m.result_status in ('EXCEEDED','ONTIME','DELAYED') then 1
@@ -234,6 +279,7 @@
             join lab_goal q on q.id=m.milestone_id and q.parent_id=a.id and q.goal_level='QUARTER' and q.del_flag='0'
             left join weekly_progress wp on wp.month_task_id=m.id
             where m.task_level='month' and m.task_type='key' and m.period&lt;=date_format(#{asOf},'%Y-%m') and m.del_flag='0'
+            <include refid="monthTaskScope"/>
         ), periods as (
             select distinct goal_id,period from month_progress
         ), milestones as (
@@ -267,38 +313,40 @@
         select
         (select coalesce(round(100*sum(case when t.workflow_status='CONFIRMED' and t.result_status in ('EXCEEDED','ONTIME','DELAYED') then t.perf_weight else 0 end)
             /nullif(sum(t.perf_weight),0),2),0) from lab_task t where t.period=#{period} and t.task_level='month' and t.task_type='key' and t.del_flag='0' <include refid="taskScope"/>) key_task_completion_rate,
-        (select count(1) from lab_task t where t.period=#{period} and t.workflow_status in ('DRAFT','ACTIVE') and t.period_lock_flag='0' and t.del_flag='0'
-            and not exists(select 1 from lab_period_close pc where pc.period=t.period and pc.close_status='CLOSED' and pc.del_flag='0')
+        (select count(1) from lab_task t where <include refid="taskMonthPredicate"/> and t.workflow_status in ('DRAFT','ACTIVE') and t.period_lock_flag='0' and t.del_flag='0'
+            and not exists(select 1 from lab_period_close pc where pc.period=#{period} and pc.close_status='CLOSED' and pc.del_flag='0')
             and (t.plan_date&lt;date(#{asOf}) or <include refid="pendingFieldPredicate"/>)
             <include refid="taskScope"/>) overdue_or_pending_count,
         (select count(distinct t.id) from lab_task t join lab_task_block_event be on be.task_id=t.id and be.block_status='OPEN' and be.del_flag='0'
-            where t.period=#{period} and t.current_block_flag='1' and t.del_flag='0' and datediff(date(#{asOf}),date(be.block_start_time))&gt;=7 <include refid="taskScope"/>) blocked_over_seven_count,
+            where <include refid="taskMonthPredicate"/> and t.current_block_flag='1' and t.del_flag='0' and datediff(date(#{asOf}),date(be.block_start_time))&gt;=7 <include refid="taskScope"/>) blocked_over_seven_count,
         (select count(1) from lab_asset a join lab_member asset_owner on asset_owner.id=a.primary_owner_id and asset_owner.del_flag='0'
-            where a.status='ACTIVE' and a.del_flag='0' and (a.backup_owner_id is null or not exists(select 1 from lab_member backup where backup.id=a.backup_owner_id and backup.member_status='ACTIVE' and backup.del_flag='0'))
+            where (a.critical_flag='1' or (a.status='ACTIVE' and a.asset_stage in ('DEPLOYED','ACCEPTED'))) and a.del_flag='0'
+            and (a.backup_owner_id is null or not exists(select 1 from lab_member backup where backup.id=a.backup_owner_id and backup.member_status='ACTIVE' and backup.del_flag='0'))
             and (#{scope.roleKey}='lab_manager' or (#{scope.roleKey}='lab_lead' and asset_owner.biz_line=#{scope.bizLine}) or (#{scope.roleKey}='lab_member' and a.primary_owner_id=#{scope.memberId}))) assets_without_backup_count
     </select>
     <select id="selectTaskStatusDistribution" resultMap="CountResult">
         select t.workflow_status code,t.workflow_status name,count(1) item_count from lab_task t
-        where t.period=#{period} and t.del_flag='0' <include refid="taskScope"/>
+        where <include refid="taskMonthPredicate"/> and t.del_flag='0' <include refid="taskScope"/>
         group by t.workflow_status order by t.workflow_status
     </select>
     <select id="selectMemberLoads" resultMap="MemberLoadResult">
         select m.id member_id,u.nick_name member_name,m.biz_line,
-        coalesce(sum(case when t.period=#{period} and t.task_level='month' and t.task_type='key' then t.perf_weight else 0 end),0) key_task_weight,
-        sum(case when t.period=#{period} and t.workflow_status='ACTIVE' then 1 else 0 end) active_task_count,
+        coalesce(sum(case when t.task_level='month' and t.period=#{period} and t.task_type='key' then t.perf_weight else 0 end),0) key_task_weight,
+        sum(case when <include refid="taskMonthPredicate"/> and t.workflow_status='ACTIVE' then 1 else 0 end) active_task_count,
         sum(case when t.task_level='week' and t.plan_date between date(#{twoWeekStart}) and date(#{asOf}) then 1 else 0 end) recent_week_task_count,
-        sum(case when t.period=#{period} and t.plan_date&lt;date(#{asOf}) and t.workflow_status in ('DRAFT','ACTIVE') then 1 else 0 end) overdue_count,
-        sum(case when t.period=#{period} and t.current_block_flag='1' then 1 else 0 end) blocked_count,
-        sum(case when t.period=#{period} and t.coordination_required='1' and t.workflow_status in ('DRAFT','ACTIVE') then 1 else 0 end) coordination_count
+        sum(case when <include refid="taskMonthPredicate"/> and t.plan_date&lt;date(#{asOf}) and t.workflow_status in ('DRAFT','ACTIVE') then 1 else 0 end) overdue_count,
+        sum(case when <include refid="taskMonthPredicate"/> and t.current_block_flag='1' then 1 else 0 end) blocked_count,
+        sum(case when <include refid="taskMonthPredicate"/> and t.coordination_required='1' and t.workflow_status in ('DRAFT','ACTIVE') then 1 else 0 end) coordination_count
         from lab_member m join sys_user u on u.user_id=m.user_id and u.status='0' and u.del_flag='0'
-        left join lab_task t on t.owner_id=m.id and t.del_flag='0'
+        left join lab_task t on t.owner_id=m.id and t.del_flag='0' and
+            (<include refid="taskMonthPredicate"/> or (t.task_level='week' and t.plan_date between date(#{twoWeekStart}) and date(#{asOf})))
         where m.member_status='ACTIVE' and m.del_flag='0'
         <if test="scope.roleKey == 'lab_lead'">and m.biz_line=#{scope.bizLine}</if>
         group by m.id,u.nick_name,m.biz_line order by m.biz_line,m.id
     </select>
     <select id="selectCoordinationItems" resultMap="ActionResult">
         select t.id,'TASK' item_type,t.title,t.workflow_status item_status,t.plan_date due_date from lab_task t
-        where t.period=#{period} and t.coordination_required='1' and t.workflow_status in ('DRAFT','ACTIVE') and t.del_flag='0'
+        where <include refid="taskMonthPredicate"/> and t.coordination_required='1' and t.workflow_status in ('DRAFT','ACTIVE') and t.del_flag='0'
         <include refid="taskScope"/> order by t.plan_date,t.id limit 50
     </select>
     <select id="selectRecentIpr" resultMap="ActionResult">

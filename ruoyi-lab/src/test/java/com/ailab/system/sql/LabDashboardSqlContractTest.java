@@ -118,6 +118,61 @@ class LabDashboardSqlContractTest {
     }
 
     @Test
+    void monthlyDashboardFactsIncludeWeeklyChildrenAndScopeEveryTaskFact() throws Exception {
+        String dashboardXml = read("ruoyi-lab/src/main/resources/mapper/lab/LabDashboardMapper.xml");
+        String dashboard = compact(dashboardXml);
+        assertFalse(dashboardXml.contains("${"), "scope and period predicates must stay parameterized");
+        assertTrue(dashboard.contains("t.task_level='week'andexists(select1fromlab_taskperiod_parent")
+                        && dashboard.contains("period_parent.period=#{period}"),
+                "monthly cards, status, coordination and member load must include weekly children by their trusted month parent");
+        assertTrue(dashboard.contains("pc.period=#{period}"),
+                "a closed month must suppress reminders for both month and YYYY-Www child tasks");
+        assertTrue(dashboard.contains("rt.task_level='week'andexists(select1fromlab_taskrisk_parent")
+                        && dashboard.contains("risk_parent.period&lt;=date_format(#{asof},'%y-%m')"),
+                "goal risk must not compare YYYY-Www directly with YYYY-MM");
+        for (String scopedAlias : Arrays.asList("m.biz_line=#{scope.bizline}", "m.owner_id=#{scope.memberid}",
+                "w.biz_line=#{scope.bizline}", "w.owner_id=#{scope.memberid}",
+                "parent_month.biz_line=#{scope.bizline}", "parent_month.owner_id=#{scope.memberid}",
+                "rt.biz_line=#{scope.bizline}", "rt.owner_id=#{scope.memberid}")) {
+            assertTrue(dashboard.contains(scopedAlias), "goal task fact is not scoped: " + scopedAlias);
+        }
+        assertTrue(dashboard.contains("leftjoinlab_tasktont.owner_id=m.idandt.del_flag='0'and("),
+                "member-load task predicates should be pushed into the join before grouping");
+        String bootstrap = compact(read("sql/ailab.sql"));
+        assertTrue(bootstrap.contains("idx_lab_task_owner_plan_level")
+                        && bootstrap.contains("index_name='idx_lab_task_owner_plan_level'"),
+                "fresh and legacy databases need an owner/date/level index for the bounded load aggregation");
+    }
+
+    @Test
+    void assetRiskKpiAndDrillShareTheServerPolicyAndTrustedScope() throws Exception {
+        String dashboard = compact(read("ruoyi-lab/src/main/resources/mapper/lab/LabDashboardMapper.xml"));
+        String ledgerXml = read("ruoyi-lab/src/main/resources/mapper/lab/LabLedgerMapper.xml");
+        String ledger = compact(ledgerXml);
+        for (String sql : Arrays.asList(dashboard, ledger)) {
+            assertTrue(sql.contains("a.critical_flag='1'or(a.status='active'anda.asset_stagein('deployed','accepted'))")
+                            && sql.contains("backup.member_status='active'"),
+                    "dashboard KPI and asset drill must implement LabAssetRiskPolicy equivalently");
+        }
+        assertTrue(ledger.contains("query.singlepointrisk")
+                        && ledger.contains("scope.rolekey=='lab_lead'")
+                        && ledger.contains("scope.rolekey=='lab_member'"),
+                "only typed risk-drill mode should apply trusted dashboard scope in SQL");
+        assertFalse(ledgerXml.contains("${"));
+    }
+
+    @Test
+    void cumulativeTrendDrillUsesASafeMonthUpperBoundInsteadOfPeriodEquality() throws Exception {
+        String taskXml = read("ruoyi-lab/src/main/resources/mapper/lab/LabTaskMapper.xml");
+        String task = compact(taskXml);
+        assertTrue(task.contains("periodto!=null") && task.contains("#{periodto}"));
+        assertTrue(task.contains("t.task_level='month'andt.period&lt;=#{periodto}")
+                        && task.contains("t.task_level='week'andexists(select1fromlab_taskperiod_to_parent"),
+                "periodTo must safely bound month tasks and their YYYY-Www children");
+        assertFalse(taskXml.contains("${"));
+    }
+
+    @Test
     void pendingTaskScanTargetsOnlyActuallyMissingRequiredFieldsForTheCurrentWorkflowPath() throws Exception {
         String compact = compact(read("ruoyi-lab/src/main/resources/mapper/lab/LabDashboardMapper.xml"));
         assertFalse(compact.contains("and(t.workflow_status='draft'or"),

@@ -91,7 +91,12 @@ class LabDashboardServiceTest {
         assertEquals(Boolean.TRUE, result.getKpis().get(0).getDrillDownFilters().get("goalIdsFilter"));
         assertEquals("month", result.getKpis().get(1).getDrillDownFilters().get("taskLevel"));
         assertEquals(Boolean.TRUE, result.getKpis().get(4).getDrillDownFilters().get("singlePointRisk"));
+        assertTrue(result.getKpis().get(4).getDefinition().contains("关键资产")
+                        && result.getKpis().get(4).getDefinition().contains("当前有效且已部署/验收"),
+                "asset KPI metadata must disclose the same risk-relevance predicate as the server policy");
         assertFalse(result.getKpis().get(4).getDrillDownFilters().containsKey("backupMissing"));
+        assertFalse(result.getKpis().get(4).getDrillDownFilters().containsKey("status"),
+                "status=ACTIVE would incorrectly hide inactive critical assets from the exact drill");
         assertEquals(Arrays.asList("DRAFT", "ACTIVE"), result.getKpis().get(2).getDrillDownFilters().get("workflowStatuses"));
         assertEquals(Boolean.TRUE, result.getKpis().get(2).getDrillDownFilters().get("overdueOrPending"));
         assertEquals("1", result.getKpis().get(3).getDrillDownFilters().get("currentBlockFlag"));
@@ -182,7 +187,12 @@ class LabDashboardServiceTest {
         assertTrue(result.getGoalTrend().get(0).getDefinition().contains("累计"));
         assertEquals(Instant.parse("2026-08-15T01:00:00Z"), result.getGoalTrend().get(0).getLastUpdated().toInstant());
         assertEquals(Long.valueOf(11L), result.getGoalTrend().get(0).getDrillDownFilters().get("goalId"));
-        assertEquals("2026-08", result.getGoalTrend().get(0).getDrillDownFilters().get("period"));
+        assertEquals("2026-08", result.getGoalTrend().get(0).getDrillDownFilters().get("periodTo"));
+        assertEquals("month", result.getGoalTrend().get(0).getDrillDownFilters().get("taskLevel"));
+        assertEquals("key", result.getGoalTrend().get(0).getDrillDownFilters().get("taskType"));
+        assertTrue(result.getGoalTrend().get(0).getDrillDownFilters().get("asOf") instanceof Date);
+        assertFalse(result.getGoalTrend().get(0).getDrillDownFilters().containsKey("period"),
+                "a cumulative point must not drill with period equality");
     }
 
     @Test

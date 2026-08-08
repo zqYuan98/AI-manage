@@ -56,17 +56,20 @@ public class LabLedgerServiceImpl implements LabLedgerService {
 
     @Override
     public List<LabAsset> listAssets(LabAsset query, Long actorId) {
-        accessService.context(actorId);
-        List<LabAsset> rows=ledgerMapper.selectAssetList(query==null?new LabAsset():query);
+        LabAccessContext scope=accessService.context(actorId);
+        LabAsset safe=query==null?new LabAsset():query;
+        List<LabAsset> rows=ledgerMapper.selectAssetList(safe,safe.isSinglePointRisk()?scope:null);
         assetRiskPolicy.applyAll(rows);
-        return rows;
+        if(!safe.isSinglePointRisk())return rows;
+        List<LabAsset> scopedRisks=new ArrayList<LabAsset>();
+        for(LabAsset row:rows)if(row.isSinglePointRisk()&&canReadDashboardRisk(scope,row))scopedRisks.add(row);
+        return scopedRisks;
     }
 
     @Override
     public List<LabAsset> listAssetRisks(LabAsset query, Long actorId) {
-        List<LabAsset> risks=new ArrayList<LabAsset>();
-        for(LabAsset row:listAssets(query,actorId)) if(row.isSinglePointRisk()) risks.add(row);
-        return risks;
+        LabAsset safe=query==null?new LabAsset():query;safe.setSinglePointRisk(true);
+        return listAssets(safe,actorId);
     }
 
     @Override
@@ -228,6 +231,11 @@ public class LabLedgerServiceImpl implements LabLedgerService {
     private void requireManager(LabAccessContext actor){if(!isManager(actor))throw new ServiceException("Manager role is required");}
     private boolean isManager(LabAccessContext c){return LabAccessServiceImpl.MANAGER.equals(c.getRoleKey());}
     private boolean isLead(LabAccessContext c){return LabAccessServiceImpl.LEAD.equals(c.getRoleKey());}
+    private boolean canReadDashboardRisk(LabAccessContext c,LabAsset a){
+        if(isManager(c))return true;
+        if(isLead(c))return same(c.getBizLine(),a.getPrimaryOwnerBizLine());
+        return same(c.getMemberId(),a.getPrimaryOwnerId());
+    }
     private void requireAssetInput(LabAsset a){if(a==null||blank(a.getAssetNo())||blank(a.getAssetName())||blank(a.getAssetType())||a.getPrimaryOwnerId()==null)throw new ServiceException("Asset number, name, type and primary owner are required");}
     private void requireOne2OneInput(LabOne2One r){if(r==null||r.getMemberId()==null||r.getLeaderId()==null||r.getMeetingDate()==null)throw new ServiceException("Member, manager and meeting date are required");if(same(r.getMemberId(),r.getLeaderId()))throw new ServiceException("Talk subject and manager must differ");}
     private void requireIprInput(LabIpr i){if(i==null||blank(i.getIprNo())||blank(i.getIprName())||blank(i.getIprType())||blank(i.getIprStage())||i.getOwnerId()==null)throw new ServiceException("IPR number, name, type, stage and owner are required");stage(i.getIprStage());}

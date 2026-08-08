@@ -237,12 +237,72 @@ class LabMapperMySqlIT {
                 + "(39863,0,39001,39002,'month',?,'algorithm','daily','IT incomplete draft',39203,101,null,null,null,0,0,'DRAFT','DOING',null,null,null,'0','0','0',0,'0','it',now()),"
                 + "(39864,0,39001,39002,'month',?,'algorithm','daily','IT complete draft',39203,101,'2097-11-20',null,'draft artifact',0,0,'DRAFT','DOING',null,null,null,'0','0','0',0,'0','it',now()),"
                 + "(39865,0,39001,39002,'month',?,'algorithm','daily','IT pending review ignored',39203,101,null,null,null,0,0,'PENDING_REVIEW','DOING',null,null,null,'0','0','0',0,'0','it',now()),"
-                + "(39866,0,39001,39002,'month',?,'algorithm','daily','IT incomplete active undone',39203,101,'2097-11-20',null,'artifact',0,0,'ACTIVE','UNDONE',null,null,null,'0','0','0',0,'0','it',now())",
-                period, period, period, period);
+                + "(39866,0,39001,39002,'month',?,'algorithm','daily','IT incomplete active undone',39203,101,'2097-11-20',null,'artifact',0,0,'ACTIVE','UNDONE',null,null,null,'0','0','0',0,'0','it',now()),"
+                + "(39867,0,39001,39002,'month',?,'algorithm','daily','IT complete weekly parent',39203,101,'2097-11-25',null,'parent artifact',0,0,'DRAFT','DOING',null,null,null,'0','0','0',0,'0','it',now()),"
+                + "(39868,39867,39001,39002,'week','2097-W47','algorithm','daily','IT incomplete week child',39203,101,null,null,null,0,0,'DRAFT','DOING',null,null,null,'0','0','0',0,'0','it',now())",
+                period, period, period, period, period);
         List<ReminderCandidate> candidates = dashboardMapper.selectPendingTaskReminderCandidates(period, false);
         Set<Long> taskIds = candidates.stream().map(ReminderCandidate::getTaskId).collect(Collectors.toSet());
-        assertEquals(new java.util.HashSet<Long>(Arrays.asList(39863L, 39866L)), taskIds);
+        assertEquals(new java.util.HashSet<Long>(Arrays.asList(39863L, 39866L, 39868L)), taskIds,
+                "a YYYY-Www child belongs to the reminder month through its trusted parent");
         assertTrue(candidates.stream().allMatch(candidate -> "OWNER".equals(candidate.getAudience())));
+
+        jdbcTemplate.update("insert into lab_period_close(period,close_status,version,del_flag,create_by,create_time) values(?,'CLOSED',0,'0','it',now())", period);
+        assertTrue(dashboardMapper.selectPendingTaskReminderCandidates(period, false).isEmpty(),
+                "closing the parent month suppresses both month and weekly-child reminders");
+    }
+
+    @Test
+    void weeklyDashboardFactsCteScopeAssetRiskAndCumulativeDrillUseRealMySql() {
+        jdbcTemplate.update("insert into lab_goal(id,parent_id,goal_level,year,period,goal_no,title,owner_id,weight,progress_mode,progress_rate,status,version,del_flag,create_by,create_time) values"
+                + "(39680,0,'YEAR',2096,null,'IT-YEAR-2096-SCOPE','IT scoped dashboard goal',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now()),"
+                + "(39681,39680,'QUARTER',2096,'2096Q3','IT-2096-Q3-SCOPE','IT scoped dashboard quarter',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now())");
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,actual_finish_time,deliverable,perf_weight,goal_weight,workflow_status,result_status,result_desc,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values"
+                + "(39682,0,39680,39681,'month','2096-08','algorithm','key','IT scoped algorithm month',39203,101,'2096-08-25',null,'algorithm month',50,50,'ACTIVE','DOING','working','0','0','0',0,'0','it',now()),"
+                + "(39683,39682,39680,39681,'week','2096-W32','algorithm','daily','IT scoped algorithm week',39203,101,'2096-08-10','2096-08-09 10:00:00','algorithm week',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now()),"
+                + "(39684,39682,39680,39681,'week','2096-08','algorithm','daily','IT legacy weekly period',39203,101,'2096-08-17',null,'legacy week',0,0,'CONFIRMED','UNDONE','missed','0','0','0',0,'0','it',now()),"
+                + "(39685,0,39680,39681,'month','2096-08','platform','key','IT scoped platform month',30003,102,'2096-08-25',null,'platform month',50,50,'ACTIVE','DOING','working','0','0','0',0,'0','it',now()),"
+                + "(39686,39685,39680,39681,'week','2096-W32','platform','daily','IT scoped platform week',30003,102,'2096-08-10','2096-08-09 10:00:00','platform week',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now())");
+        Date asOf = java.sql.Timestamp.valueOf("2096-08-31 23:59:59");
+        GoalHealthFact managerFact = dashboardMapper.selectGoalHealthFacts(2096, asOf, accessService.context(39101L)).get(0);
+        GoalHealthFact leadFact = dashboardMapper.selectGoalHealthFacts(2096, asOf, accessService.context(39102L)).get(0);
+        GoalHealthFact memberFact = dashboardMapper.selectGoalHealthFacts(2096, asOf, accessService.context(39103L)).get(0);
+        assertEquals(new BigDecimal("75.00"), managerFact.getActualProgress().setScale(2));
+        assertEquals(new BigDecimal("25.00"), leadFact.getActualProgress().setScale(2),
+                "lead goal facts must exclude a platform decoy while the goal remains readable");
+        assertEquals(new BigDecimal("25.00"), memberFact.getActualProgress().setScale(2),
+                "member goal facts must use only personal parent and weekly facts");
+
+        long managerConfirmed = dashboardMapper.selectTaskStatusDistribution("2096-08", accessService.context(39101L)).stream()
+                .filter(item -> "CONFIRMED".equals(item.getCode())).mapToLong(item -> item.getCount()).sum();
+        long leadConfirmed = dashboardMapper.selectTaskStatusDistribution("2096-08", accessService.context(39102L)).stream()
+                .filter(item -> "CONFIRMED".equals(item.getCode())).mapToLong(item -> item.getCount()).sum();
+        assertEquals(3L, managerConfirmed, "month status distribution must include YYYY-Www and legacy weekly children");
+        assertEquals(2L, leadConfirmed, "lead distribution must exclude the platform child");
+
+        LabTask cumulative = new LabTask(); cumulative.setGoalId(39680L); cumulative.setTaskLevel("month");
+        cumulative.setTaskType("key"); cumulative.setPeriodTo("2096-08");
+        assertEquals(new java.util.HashSet<Long>(Arrays.asList(39682L, 39685L)), taskService.listTasks(cumulative, 39101L).stream()
+                .map(LabTask::getId).collect(Collectors.toSet()), "goalId+periodTo drill must reproduce the cumulative parent-month set");
+
+        Date dashboardAsOf = java.sql.Timestamp.valueOf("2096-08-15 12:00:00");
+        int managerBefore = dashboardMapper.selectKpiFact("2096-08", dashboardAsOf, accessService.context(39101L)).getAssetsWithoutBackupCount();
+        int leadBefore = dashboardMapper.selectKpiFact("2096-08", dashboardAsOf, accessService.context(39102L)).getAssetsWithoutBackupCount();
+        int memberBefore = dashboardMapper.selectKpiFact("2096-08", dashboardAsOf, accessService.context(39103L)).getAssetsWithoutBackupCount();
+        jdbcTemplate.update("insert into lab_asset(id,asset_no,asset_name,asset_version,asset_type,asset_stage,primary_owner_id,backup_owner_id,critical_flag,status,version,del_flag,create_by,create_time) values"
+                + "(39690,'IT-ASSET-SCOPE-RISK','IT platform scoped risk','v1','platform','DEPLOYED',30003,null,'0','ACTIVE',0,'0','it',now()),"
+                + "(39691,'IT-ASSET-NON-RISK','IT verifying non risk','v1','platform','VERIFYING',30003,null,'0','ACTIVE',0,'0','it',now()),"
+                + "(39692,'IT-ASSET-INACTIVE-CRITICAL','IT inactive critical risk','v1','platform','VERIFYING',30003,null,'1','INACTIVE',0,'0','it',now())");
+        assertEquals(managerBefore + 2, dashboardMapper.selectKpiFact("2096-08", dashboardAsOf, accessService.context(39101L)).getAssetsWithoutBackupCount(),
+                "the shared policy includes both active in-use and inactive critical assets");
+        assertEquals(leadBefore, dashboardMapper.selectKpiFact("2096-08", dashboardAsOf, accessService.context(39102L)).getAssetsWithoutBackupCount());
+        assertEquals(memberBefore, dashboardMapper.selectKpiFact("2096-08", dashboardAsOf, accessService.context(39103L)).getAssetsWithoutBackupCount());
+        LabAsset riskDrill = new LabAsset(); riskDrill.setSinglePointRisk(true);
+        assertTrue(ledgerService.listAssets(riskDrill, 39101L).stream().anyMatch(asset -> Long.valueOf(39690L).equals(asset.getId())));
+        assertTrue(ledgerService.listAssets(riskDrill, 39101L).stream().anyMatch(asset -> Long.valueOf(39692L).equals(asset.getId())));
+        assertFalse(ledgerService.listAssets(riskDrill, 39102L).stream().anyMatch(asset -> Long.valueOf(39690L).equals(asset.getId())));
+        assertTrue(ledgerService.listAssets(new LabAsset(), 39102L).stream().anyMatch(asset -> Long.valueOf(39691L).equals(asset.getId())),
+                "ordinary asset inventory stays globally readable; only dashboard risk drill is scoped");
     }
 
     @Test

@@ -72,6 +72,14 @@ public class LabTaskServiceImpl implements LabTaskService {
     }
 
     private void validateTaskListQuery(LabTask query) {
+        if (query.getPeriod() != null && !query.getPeriod().isEmpty()) {
+            try { LabPeriodUtils.parse(query.getPeriod()); }
+            catch (IllegalArgumentException error) { throw new ServiceException("Task period filter must be a valid YYYY-MM or YYYY-Www value"); }
+        }
+        if (query.getPeriodTo() != null && !query.getPeriodTo().isEmpty()) {
+            try { LabPeriodUtils.parseMonth(query.getPeriodTo()); }
+            catch (IllegalArgumentException error) { throw new ServiceException("Task periodTo filter must be a valid YYYY-MM value"); }
+        }
         if (query.getTaskLevel() != null && !query.getTaskLevel().isEmpty()
                 && !LabConstants.TASK_LEVEL_MONTH.equals(query.getTaskLevel())
                 && !LabConstants.TASK_LEVEL_WEEK.equals(query.getTaskLevel())) {

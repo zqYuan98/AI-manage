@@ -48,7 +48,23 @@
         <if test="id != null">and t.id=#{id}</if><if test="parentId != null">and t.parent_id=#{parentId}</if>
         <if test="goalId != null">and t.goal_id=#{goalId}</if><if test="milestoneId != null">and t.milestone_id=#{milestoneId}</if>
         <if test="taskLevel != null and taskLevel != ''">and t.task_level=#{taskLevel}</if>
-        <if test="period != null and period != ''">and t.period=#{period}</if>
+        <if test="period != null and period != ''">
+            <choose>
+                <when test="period.length() == 7">
+                    and ((t.task_level='month' and t.period=#{period})
+                    or (t.task_level='week' and exists(select 1 from lab_task period_parent
+                        where period_parent.id=t.parent_id and period_parent.task_level='month'
+                        and period_parent.period=#{period} and period_parent.del_flag='0')))
+                </when>
+                <otherwise>and t.period=#{period}</otherwise>
+            </choose>
+        </if>
+        <if test="periodTo != null and periodTo != ''">
+            and ((t.task_level='month' and t.period&lt;=#{periodTo})
+            or (t.task_level='week' and exists(select 1 from lab_task period_to_parent
+                where period_to_parent.id=t.parent_id and period_to_parent.task_level='month'
+                and period_to_parent.period&lt;=#{periodTo} and period_to_parent.del_flag='0')))
+        </if>
         <if test="bizLine != null and bizLine != ''">and t.biz_line=#{bizLine}</if>
         <if test="taskType != null and taskType != ''">and t.task_type=#{taskType}</if>
         <if test="ownerId != null">and t.owner_id=#{ownerId}</if><if test="deptId != null">and t.dept_id=#{deptId}</if>
@@ -67,7 +83,10 @@
         </if>
         <if test="overdueOrPending != null and overdueOrPending">
             and t.period_lock_flag='0'
-            and not exists(select 1 from lab_period_close pc where pc.period=t.period and pc.close_status='CLOSED' and pc.del_flag='0')
+            and not exists(select 1 from lab_period_close pc
+                where pc.period=case when t.task_level='week' then
+                    (select close_parent.period from lab_task close_parent where close_parent.id=t.parent_id and close_parent.del_flag='0')
+                    else t.period end and pc.close_status='CLOSED' and pc.del_flag='0')
             and (t.plan_date&lt;date(#{asOf})
                 or t.plan_date is null or t.deliverable is null or trim(t.deliverable)=''
                 or (t.workflow_status='ACTIVE' and coalesce(t.result_status,'DOING')&lt;&gt;'UNDONE'

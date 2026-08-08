@@ -11,6 +11,8 @@ import com.ailab.system.config.LabProperties;
 import com.ailab.system.mapper.LabDashboardMapper;
 import com.ailab.system.service.LabPerformanceService;
 import com.ailab.system.service.LabReminderService;
+import com.ailab.system.service.LabReportRecoveryWorker;
+import com.ailab.system.service.LabReportTempFileEligibility;
 import com.ruoyi.common.exception.ServiceException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,6 +32,7 @@ class LabScheduleTaskTest {
     @Mock private LabReminderService reminders;
     @Mock private LabPerformanceService performance;
     @Mock private LabDashboardMapper mapper;
+    @Mock private LabReportRecoveryWorker recoveryWorker;
     @TempDir Path directory;
 
     @Test
@@ -53,16 +56,26 @@ class LabScheduleTaskTest {
     }
 
     @Test
-    void closeIsolatesFailureWhileResolvingTheTrustedManager() {
+    void criticalSchedulerFailuresPropagateSoQuartzCanAlertAndRetry() {
         Clock clock = Clock.fixed(Instant.parse("2026-09-01T02:00:00Z"), ZoneId.of("Asia/Shanghai"));
         when(mapper.selectActiveManagerUserIds()).thenThrow(new IllegalStateException("database unavailable"));
         LabScheduleTask task = task(clock, properties(directory.resolve("reports"), directory.resolve("reports/tmp")));
 
-        assertDoesNotThrow(task::closeDuePeriods);
+        assertThrows(IllegalStateException.class, task::closeDuePeriods);
+
+        when(reminders.scanBlocks()).thenThrow(new IllegalStateException("block scan unavailable"));
+        assertThrows(IllegalStateException.class, task::scanBlocks);
+        when(reminders.scanPendingTasks()).thenThrow(new IllegalStateException("pending scan unavailable"));
+        assertThrows(IllegalStateException.class, task::scanPendingTasks);
+
+        LabScheduleTask recovery = new LabScheduleTask(reminders, performance, mapper,
+                properties(directory.resolve("reports"), directory.resolve("reports/tmp")), clock, recoveryWorker);
+        when(recoveryWorker.recoverInterruptedJobs()).thenThrow(new IllegalStateException("recovery unavailable"));
+        assertThrows(IllegalStateException.class, recovery::recoverReportJobs);
     }
 
     @Test
-    void cleanupRemovesOnlyOldFilesInsideConfiguredReportTempDirectory() throws Exception {
+    void cleanupFailsClosedWithoutReportJobLifecycleEligibility() throws Exception {
         Path output = Files.createDirectories(directory.resolve("reports"));
         Path temp = Files.createDirectories(output.resolve("tmp"));
         Path oldTemp = Files.write(temp.resolve("old.tmp"), new byte[] { 1 });
@@ -74,7 +87,26 @@ class LabScheduleTaskTest {
 
         task.cleanReportTempFiles();
 
-        assertFalse(Files.exists(oldTemp)); assertTrue(Files.exists(freshTemp)); assertTrue(Files.exists(archive));
+        assertTrue(Files.exists(oldTemp), "an unknown or running job temporary file must never be deleted by age alone");
+        assertTrue(Files.exists(freshTemp)); assertTrue(Files.exists(archive));
+    }
+
+    @Test
+    void cleanupDeletesOnlyOldFilesExplicitlyEligibleByTerminalReportJobLifecycle() throws Exception {
+        Path output = Files.createDirectories(directory.resolve("reports"));
+        Path temp = Files.createDirectories(output.resolve("tmp"));
+        Path terminal = Files.write(temp.resolve("terminal-job.tmp"), new byte[] { 1 });
+        Path running = Files.write(temp.resolve("running-job.tmp"), new byte[] { 2 });
+        Files.setLastModifiedTime(terminal, FileTime.from(Instant.parse("2026-08-30T00:00:00Z")));
+        Files.setLastModifiedTime(running, FileTime.from(Instant.parse("2026-08-30T00:00:00Z")));
+        LabReportTempFileEligibility eligibility = relative -> relative.toString().startsWith("terminal-job");
+        LabScheduleTask task = new LabScheduleTask(reminders, performance, mapper, properties(output, temp),
+                Clock.fixed(Instant.parse("2026-09-01T02:00:00Z"), ZoneId.of("Asia/Shanghai")), null, eligibility);
+
+        task.cleanReportTempFiles();
+
+        assertFalse(Files.exists(terminal));
+        assertTrue(Files.exists(running), "non-terminal jobs are never age-only cleanup candidates");
     }
 
     @Test
