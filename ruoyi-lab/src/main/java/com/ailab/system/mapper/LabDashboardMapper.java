@@ -14,6 +14,7 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 public interface LabDashboardMapper {
+    int MAX_GOAL_HEALTH_ROWS = 5000;
     List<ReminderCandidate> selectOpenBlockReminderCandidates();
     List<ReminderCandidate> selectPendingTaskReminderCandidates(@Param("period") String period,
             @Param("managerEscalation") boolean managerEscalation);
@@ -25,8 +26,8 @@ public interface LabDashboardMapper {
     int markAllRemindersRead(@Param("recipientId") Long recipientId, @Param("readTime") Date readTime,
             @Param("actor") String actor);
 
-    List<GoalHealthFact> selectGoalHealthFacts(@Param("year") Integer year, @Param("asOf") Date asOf,
-            @Param("scope") LabAccessContext scope);
+    List<GoalHealthFact> selectGoalHealthFacts(@Param("year") Integer year, @Param("asOf") java.sql.Date asOf,
+            @Param("scope") LabAccessContext scope, @Param("sourceFetchLimit") int sourceFetchLimit);
     List<GoalTrendPoint> selectGoalProgressTrend(@Param("year") Integer year, @Param("asOf") Date asOf,
             @Param("scope") LabAccessContext scope);
     DashboardKpiFact selectKpiFact(@Param("period") String period, @Param("asOf") Date asOf,

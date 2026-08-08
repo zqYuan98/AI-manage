@@ -188,7 +188,7 @@
                 /nullif(sum(case when w.workflow_status='CONFIRMED' then 1 else 0 end),0),2)/100,0) completion_ratio
             from lab_task w
             join lab_task parent_month on parent_month.id=w.parent_id and parent_month.task_level='month'
-                and parent_month.task_type='key' and parent_month.period&lt;=date_format(#{asOf},'%Y-%m') and parent_month.del_flag='0'
+                and parent_month.task_type='key' and parent_month.period&lt;=date_format(#{asOf,jdbcType=DATE},'%Y-%m') and parent_month.del_flag='0'
             join lab_goal weekly_annual on weekly_annual.id=parent_month.goal_id and weekly_annual.goal_level='YEAR'
                 and weekly_annual.year=#{year} and weekly_annual.status='ACTIVE' and weekly_annual.del_flag='0'
             where w.task_level='week' and w.del_flag='0'
@@ -202,15 +202,15 @@
             join lab_goal a on a.id=m.goal_id and a.goal_level='YEAR' and a.year=#{year} and a.status='ACTIVE' and a.del_flag='0'
             join lab_goal q on q.id=m.milestone_id and q.parent_id=a.id and q.goal_level='QUARTER' and q.del_flag='0'
             left join weekly_progress wp on wp.month_task_id=m.id
-            where m.task_level='month' and m.task_type='key' and m.period&lt;=date_format(#{asOf},'%Y-%m') and m.del_flag='0'
+            where m.task_level='month' and m.task_type='key' and m.period&lt;=date_format(#{asOf,jdbcType=DATE},'%Y-%m') and m.del_flag='0'
             <include refid="monthTaskScope"/>
         ), open_blocks as (
             select be.task_id,min(be.block_start_time) block_start_time from lab_task_block_event be
-            where be.block_status='OPEN' and be.block_start_time&lt;=#{asOf} and be.del_flag='0'
+            where be.block_status='OPEN' and be.block_start_time&lt;date_add(#{asOf,jdbcType=DATE},interval 1 day) and be.del_flag='0'
             group by be.task_id
         ), goal_expected as (
             select mp.goal_id,
-            sum(case when mp.plan_date&lt;=date(#{asOf}) then mp.goal_weight*mp.quarter_weight/100 else 0 end) expected_progress
+            sum(case when mp.plan_date&lt;=date(#{asOf,jdbcType=DATE}) then mp.goal_weight*mp.quarter_weight/100 else 0 end) expected_progress
             from month_progress mp group by mp.goal_id
         ), milestone_progress as (
             select mp.goal_id,mp.milestone_id,mp.quarter_weight,
@@ -225,19 +225,19 @@
             from goal_expected ge left join goal_actual ga on ga.goal_id=ge.goal_id
         ), goal_risk as (
             select rt.goal_id,
-            max(case when blocks.block_start_time is not null then datediff(date(#{asOf}),date(blocks.block_start_time)) else 0 end) max_open_block_days,
+            max(case when blocks.block_start_time is not null then datediff(date(#{asOf,jdbcType=DATE}),date(blocks.block_start_time)) else 0 end) max_open_block_days,
             max(case when rt.task_level='month' and rt.task_type='key' and rt.result_status='DELAYED' then 1 else 0 end) delayed_focus_task,
-            max(case when rt.task_level='month' and rt.task_type='key' and rt.plan_date&lt;date(#{asOf})
+            max(case when rt.task_level='month' and rt.task_type='key' and rt.plan_date&lt;date(#{asOf,jdbcType=DATE})
                 and rt.workflow_status in ('DRAFT','ACTIVE') then 1 else 0 end) overdue_unsubmitted_focus_task
             from lab_task rt
             join lab_goal risk_goal on risk_goal.id=rt.goal_id and risk_goal.goal_level='YEAR'
                 and risk_goal.year=#{year} and risk_goal.status='ACTIVE' and risk_goal.del_flag='0'
             left join open_blocks blocks on blocks.task_id=rt.id
-            where ((rt.task_level='month' and rt.period&lt;=date_format(#{asOf},'%Y-%m')
+            where ((rt.task_level='month' and rt.period&lt;=date_format(#{asOf,jdbcType=DATE},'%Y-%m')
                     <include refid="riskMonthScope"/>)
                 or (rt.task_level='week' and exists(select 1 from lab_task risk_parent
                     where risk_parent.id=rt.parent_id and risk_parent.task_level='month'
-                    and risk_parent.period&lt;=date_format(#{asOf},'%Y-%m') and risk_parent.del_flag='0'
+                    and risk_parent.period&lt;=date_format(#{asOf,jdbcType=DATE},'%Y-%m') and risk_parent.del_flag='0'
                     <include refid="riskParentScope"/>)))
             and rt.del_flag='0' group by rt.goal_id
         )
@@ -251,7 +251,7 @@
         left join goal_progress gp on gp.goal_id=g.id
         left join goal_risk gr on gr.goal_id=g.id
         where g.goal_level='YEAR' and g.year=#{year} and g.status='ACTIVE' and g.del_flag='0'
-        group by g.id,g.title,g.year order by g.id
+        group by g.id,g.title,g.year order by g.id limit #{sourceFetchLimit}
     </select>
     <select id="selectGoalProgressTrend" resultMap="GoalTrendResult">
         with weekly_progress as (

@@ -58,10 +58,14 @@ public class LabDashboardServiceImpl implements LabDashboardService {
         LocalDate localToday = LocalDate.now(clock);
         boolean historical = requestedMonth.isBefore(YearMonth.from(localToday));
         LocalDate asOfDate = historical ? requestedMonth.atEndOfMonth() : localToday;
-        Date asOf = historical
-                ? Date.from(asOfDate.plusDays(1).atStartOfDay(clock.getZone()).minusNanos(1).toInstant()) : now;
+        java.sql.Date asOf = java.sql.Date.valueOf(asOfDate);
         List<GoalHealth> health = new ArrayList<GoalHealth>();
-        for (GoalHealthFact fact : safe(mapper.selectGoalHealthFacts(requestedMonth.getYear(), asOf, scope))) health.add(calculateHealth(fact));
+        List<GoalHealthFact> healthFacts = safe(mapper.selectGoalHealthFacts(requestedMonth.getYear(), asOf, scope,
+                LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1));
+        if (healthFacts.size() > LabDashboardMapper.MAX_GOAL_HEALTH_ROWS) {
+            throw new ServiceException("Dashboard goal projection exceeds the server row limit");
+        }
+        for (GoalHealthFact fact : healthFacts) health.add(calculateHealth(fact));
         DashboardKpiFact kpi = mapper.selectKpiFact(period, asOf, scope);
         if (kpi == null) kpi = new DashboardKpiFact();
 
@@ -93,7 +97,7 @@ public class LabDashboardServiceImpl implements LabDashboardService {
         if (!LabAccessServiceImpl.MEMBER.equals(scope.getRoleKey())) {
             result.setCoordinationItems(decorateActions(safeActions(mapper.selectCoordinationItems(period, scope)), period,
                     "当前周期仍需协调的任务", now, "coordinationRequired", "1"));
-            Date twoWeekStart = Date.from(asOfDate.minusDays(13).atStartOfDay(clock.getZone()).toInstant());
+            java.sql.Date twoWeekStart = java.sql.Date.valueOf(asOfDate.minusDays(13));
             List<MemberLoad> loads = safeLoads(mapper.selectMemberLoads(period, twoWeekStart, asOf, scope));
             decorateLoads(loads, period, now);
             result.setMemberLoads(loads);
@@ -137,7 +141,7 @@ public class LabDashboardServiceImpl implements LabDashboardService {
                 "计划日期已过仍未提交，或草稿/执行中存在必填字段缺失的当前任务数", now,
                 filters("period", period, "workflowStatuses", Arrays.asList("DRAFT", "ACTIVE"),
                         "overdueOrPending", Boolean.TRUE, "asOf", asOf)));
-        Date blockStartBefore = Date.from(asOfDate.minusDays(7).atStartOfDay(clock.getZone()).toInstant());
+        java.sql.Date blockStartBefore = java.sql.Date.valueOf(asOfDate.minusDays(7));
         values.add(metric("blockedOverSeven", "阻塞超过7天", integer(fact.getBlockedOverSevenCount()), "项", period,
                 "当前OPEN阻塞事件自开始日期已满7天的任务数", now,
                 filters("period", period, "currentBlockFlag", "1", "blockStartBefore", blockStartBefore, "asOf", asOf)));

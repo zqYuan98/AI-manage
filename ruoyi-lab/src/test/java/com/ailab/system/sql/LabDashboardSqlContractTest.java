@@ -208,7 +208,8 @@ class LabDashboardSqlContractTest {
     }
 
     private String read(String relative) throws Exception { return new String(Files.readAllBytes(root().resolve(relative)), StandardCharsets.UTF_8); }
-    private String compact(String value) { return value.toLowerCase().replaceAll("\\s+", ""); }
+    /** Predicate contracts are independent of the explicit JDBC type, which has its own BoundSql contract. */
+    private String compact(String value) { return value.toLowerCase().replaceAll("\\s+", "").replace(",jdbctype=date", ""); }
     private int occurrences(String value, String needle) {
         int count = 0;
         for (int offset = 0; (offset = value.indexOf(needle, offset)) >= 0; offset += needle.length()) count++;

@@ -10,7 +10,6 @@ import com.ailab.system.report.model.ReportPeriod;
 import com.ailab.system.report.model.ReportSectionData;
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -23,7 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
  * before a provider reaches MyBatis. */
 public abstract class AbstractLabDataSourceProvider implements DataSourceProvider {
     @Autowired(required = false) private LabReportDataMapper mapper;
-    private final String id; private final List<String> schema; private final Set<String> fields;
+    private final String id; private final List<ReportFieldSpec> fieldSpecs; private final List<String> schema; private final Map<String,ReportFieldSpec> specsByName; private final Set<String> fields;
     /**
      * The schema is both the sole query-field allow-list and the published row contract.  Keeping a
      * copied insertion-order list prevents a JDBC driver's sparse Map (it may omit NULL columns)
@@ -31,21 +30,32 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
      */
     protected AbstractLabDataSourceProvider(String id, Set<String> fields) {
         this.id = id;
-        this.schema = Collections.unmodifiableList(new ArrayList<String>(fields));
+        this.fieldSpecs = ReportFieldSpec.fromNames(fields);
+        List<String> names=new ArrayList<String>(); Map<String,ReportFieldSpec> specs=new LinkedHashMap<String,ReportFieldSpec>();
+        for(ReportFieldSpec spec:fieldSpecs){names.add(spec.getName());specs.put(spec.getName(),spec);}
+        this.schema = Collections.unmodifiableList(names); this.specsByName=Collections.unmodifiableMap(specs);
         this.fields = Collections.unmodifiableSet(new java.util.LinkedHashSet<String>(this.schema));
     }
     @Override public final String getId() { return id; }
     @Override public final boolean supports(String providerId) { return id.equals(providerId); }
     @Override public final ReportSectionData load(ReportContext context, ReportSectionConfig section) {
         if (context == null || section == null) throw new IllegalArgumentException("context and section are required");
+        String requiredPermission = section.getSensitivePermission();
+        if (requiredPermission != null && !requiredPermission.trim().isEmpty()
+                && !context.getAccessScope().hasPermission(requiredPermission)) {
+            throw new SecurityException("Missing report section permission: " + requiredPermission);
+        }
         if ("MANUAL".equals(section.getSectionType())) { if (!ReportConfigCatalog.MANUAL_SUMMARY.equals(id)) throw new IllegalArgumentException("Only manual provider may load a manual section"); }
         else if (!id.equals(section.getDataSource()) || !ReportConfigCatalog.compatibleProviders(section.getSectionType()).contains(id)) throw new IllegalArgumentException("Provider is not compatible with section");
-        validateConfig(section); ReportQueryCriteria criteria=ReportQueryCriteria.from(context, section); if (!supports(criteria.getReportPeriod().getKind())) throw new IllegalArgumentException("Provider does not support this period kind"); return loadValidated(criteria, section);
+        validateConfig(section); ReportQueryCriteria criteria=ReportQueryCriteria.from(context, section); validateCriteria(criteria); if (!supports(criteria.getReportPeriod().getKind())) throw new IllegalArgumentException("Provider does not support this period kind"); return loadValidated(criteria, section);
     }
     protected abstract ReportSectionData loadValidated(ReportQueryCriteria criteria, ReportSectionConfig section);
     protected boolean supports(ReportPeriod.Kind kind) { return kind == ReportPeriod.Kind.MONTH; }
     protected final LabReportDataMapper mapper() { if (mapper == null) throw new IllegalStateException("Report data mapper is unavailable"); return mapper; }
     protected final ReportSectionData section(ReportQueryCriteria criteria, ReportSectionConfig cfg, List<Map<String, Object>> rows, Map<String, Object> summary) {
+        if (enforcesSourceRowLimit() && rows != null && rows.size() > ReportQueryCriteria.MAX_SOURCE_ROWS) {
+            throw sourceOverflow();
+        }
         List<Map<String, Object>> filtered = applyQueryConfig(criteria, normalizeRows(rows)); List<Map<String, Object>> preLimit = filtered; int matched = filtered.size();
         Object rawLimit = cfg.getQueryConfig().get("limit"); if (rawLimit instanceof Number && ((Number) rawLimit).intValue() < filtered.size()) filtered = new ArrayList<Map<String, Object>>(filtered.subList(0, ((Number) rawLimit).intValue()));
         Map<String, Object> summaryCopy = new LinkedHashMap<String, Object>(summary == null ? Collections.<String, Object>emptyMap() : summary);
@@ -57,13 +67,19 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
     protected final Map<String, Object> summaryCount(List<Map<String, Object>> rows) { Map<String,Object> value = new LinkedHashMap<String,Object>(); value.put("count", rows.size()); return value; }
     /** Providers with aggregate metrics override this so summaries match the filtered, pre-limit rows. */
     protected void recomputeFilteredSummary(List<Map<String, Object>> rows, Map<String, Object> summary) { }
-    protected final List<Map<String, Object>> copyRows(List<Map<String, Object>> rows) { return rows == null ? Collections.<Map<String,Object>>emptyList() : new ArrayList<Map<String,Object>>(rows); }
+    /** Authoritative aggregate projections may opt out because they do not materialize detail rows. */
+    protected boolean enforcesSourceRowLimit() { return true; }
+    protected final List<Map<String, Object>> copyRows(List<Map<String, Object>> rows) {
+        if (enforcesSourceRowLimit()) requireSourceWithinLimit(rows == null ? 0 : rows.size());
+        return rows == null ? Collections.<Map<String,Object>>emptyList() : new ArrayList<Map<String,Object>>(rows);
+    }
+    protected final void requireSourceWithinLimit(int sourceSize) { if (sourceSize > ReportQueryCriteria.MAX_SOURCE_ROWS) throw sourceOverflow(); }
     /** Normalizes every row before filtering so NULL output columns remain filterable and visible. */
     private List<Map<String, Object>> normalizeRows(List<Map<String, Object>> rows) {
         List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
         for (Map<String, Object> raw : copyRows(rows)) {
             Map<String, Object> row = new LinkedHashMap<String, Object>();
-            for (String field : schema) row.put(field, normalizeValue(field, raw == null ? null : raw.get(field)));
+            for (ReportFieldSpec spec : fieldSpecs) row.put(spec.getName(), spec.normalize(normalizeValue(spec.getName(), raw == null ? null : raw.get(spec.getName()))));
             result.add(row);
         }
         return result;
@@ -77,6 +93,7 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
     }
     /** Exposed for contract tests and renderer integration; list order is the stable output order. */
     public final List<String> getOutputSchema() { return schema; }
+    public final List<ReportFieldSpec> getFieldSpecs() { return fieldSpecs; }
     protected final BigDecimal number(Object value) { return value instanceof BigDecimal ? (BigDecimal) value : value == null ? BigDecimal.ZERO : new BigDecimal(String.valueOf(value)); }
     private void validateConfig(ReportSectionConfig section) {
         checkField(section.getQueryConfig().get("sort")); checkField(section.getQueryConfig().get("groupBy"));
@@ -86,27 +103,20 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
             Object field = ((Map<?, ?>) item).get("field"); checkField(field);
         }
     }
+    private void validateCriteria(ReportQueryCriteria criteria){for(ReportQueryCriteria.Filter filter:criteria.getFilters())specsByName.get(filter.getField()).validate(filter.getOperator(),filter.getValue());}
     private List<Map<String, Object>> applyQueryConfig(ReportQueryCriteria criteria, List<Map<String, Object>> source) {
         List<Map<String, Object>> rows = copyRows(source);
         for (ReportQueryCriteria.Filter filter : criteria.getFilters()) {
             String field = filter.getField(); String operator = filter.getOperator(); Object expected = filter.getValue();
             List<Map<String, Object>> next = new ArrayList<Map<String, Object>>();
-            for (Map<String, Object> row : rows) if (matches(row.get(field), operator, expected)) next.add(row); rows = next;
+            ReportFieldSpec spec=specsByName.get(field); for (Map<String, Object> row : rows) if (spec.matches(row.get(field), operator, expected)) next.add(row); rows = next;
         }
         if (criteria.getSort() != null) sort(rows, criteria.getSort());
         if (criteria.getGroupBy() != null) sort(rows, criteria.getGroupBy());
         return rows;
     }
-    private boolean matches(Object actual, String operator, Object expected) {
-        if ("IN".equals(operator)) { if (!(expected instanceof Collection)) return false; for (Object value : (Collection<?>) expected) if (same(actual, value)) return true; return false; }
-        if ("BETWEEN".equals(operator)) { if (!(expected instanceof List) || ((List<?>) expected).size() != 2) return false; return compare(actual, ((List<?>) expected).get(0)) >= 0 && compare(actual, ((List<?>) expected).get(1)) <= 0; }
-        if ("EQ".equals(operator)) return same(actual, expected); if ("NE".equals(operator)) return !same(actual, expected);
-        if ("GTE".equals(operator)) return compare(actual, expected) >= 0; if ("LTE".equals(operator)) return compare(actual, expected) <= 0;
-        throw new IllegalArgumentException("Unsupported report operator");
-    }
-    private void sort(List<Map<String, Object>> rows, final String field) { Collections.sort(rows, new Comparator<Map<String, Object>>() { @Override public int compare(Map<String, Object> left, Map<String, Object> right) { return AbstractLabDataSourceProvider.this.compare(left.get(field), right.get(field)); } }); }
+    private void sort(List<Map<String, Object>> rows, final String field) { final ReportFieldSpec spec=specsByName.get(field); Collections.sort(rows, new Comparator<Map<String, Object>>() { @Override public int compare(Map<String, Object> left, Map<String, Object> right) { return spec.compare(left.get(field), right.get(field)); } }); }
     private List<Map<String, Object>> groups(List<Map<String, Object>> rows, String field) { Map<String, Integer> counts = new LinkedHashMap<String, Integer>(); for (Map<String, Object> row : rows) { String key = String.valueOf(row.get(field)); counts.put(key, counts.containsKey(key) ? counts.get(key) + 1 : 1); } List<Map<String, Object>> result = new ArrayList<Map<String, Object>>(); for (Map.Entry<String, Integer> item : counts.entrySet()) { Map<String, Object> group = new LinkedHashMap<String, Object>(); group.put("field", field); group.put("key", item.getKey()); group.put("count", item.getValue()); result.add(group); } return result; }
-    private boolean same(Object actual, Object expected) { return compare(actual, expected) == 0; }
-    private int compare(Object actual, Object expected) { if (actual == expected) return 0; if (actual == null) return -1; if (expected == null) return 1; try { return number(actual).compareTo(number(expected)); } catch (RuntimeException ignored) { return String.valueOf(actual).compareTo(String.valueOf(expected)); } }
     private void checkField(Object value) { if (value != null && (!(value instanceof String) || !fields.contains(value))) throw new IllegalArgumentException("Unsupported report field"); }
+    private static IllegalStateException sourceOverflow(){return new IllegalStateException("Report source exceeds "+ReportQueryCriteria.MAX_SOURCE_ROWS+" rows; narrow the report period or access scope");}
 }

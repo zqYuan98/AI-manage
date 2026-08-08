@@ -70,7 +70,7 @@ class LabDashboardServiceTest {
     @Test
     void dashboardReturnsFiveActionableKpisWithDefinitionsPeriodsTimestampsAndFilters() {
         LabAccessContext manager = manager();
-        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(manager)))
+        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(manager), eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1)))
                 .thenReturn(Collections.singletonList(fact("50", "40", 8, false, false)));
         DashboardKpiFact kpi = new DashboardKpiFact(); kpi.setKeyTaskCompletionRate(new BigDecimal("72.50"));
         kpi.setOverdueOrPendingCount(3); kpi.setBlockedOverSevenCount(2); kpi.setAssetsWithoutBackupCount(1);
@@ -107,17 +107,27 @@ class LabDashboardServiceTest {
     @Test
     void historicalPeriodDrivesGoalYearTrendAndEndOfRequestedMonthAsOf() {
         LabAccessContext manager = manager();
-        when(mapper.selectGoalHealthFacts(eq(2025), any(), eq(manager))).thenReturn(Collections.<GoalHealthFact>emptyList());
+        when(mapper.selectGoalHealthFacts(eq(2025), any(), eq(manager), eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1))).thenReturn(Collections.<GoalHealthFact>emptyList());
         when(mapper.selectKpiFact(eq("2025-04"), any(), eq(manager))).thenReturn(new DashboardKpiFact());
         when(mapper.selectGoalProgressTrend(eq(2025), any(), eq(manager))).thenReturn(Collections.<GoalTrendPoint>emptyList());
         emptyDashboardQueriesFor("2025-04", manager);
 
         service.getOverview("2025-04", 1L);
 
-        ArgumentCaptor<Date> asOf = ArgumentCaptor.forClass(Date.class);
-        verify(mapper).selectGoalHealthFacts(eq(2025), asOf.capture(), eq(manager));
-        assertEquals(LocalDate.of(2025, 4, 30), asOf.getValue().toInstant().atZone(CLOCK.getZone()).toLocalDate());
+        ArgumentCaptor<java.sql.Date> asOf = ArgumentCaptor.forClass(java.sql.Date.class);
+        verify(mapper).selectGoalHealthFacts(eq(2025), asOf.capture(), eq(manager), eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1));
+        assertEquals(LocalDate.of(2025, 4, 30), asOf.getValue().toLocalDate());
         verify(mapper).selectGoalProgressTrend(eq(2025), any(), eq(manager));
+    }
+
+    @Test
+    void dashboardRejectsAnOversizedGoalProjectionBeforeRendering() {
+        LabAccessContext manager = manager();
+        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(manager),
+                eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1)))
+                .thenReturn(Collections.nCopies(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1, new GoalHealthFact()));
+        ServiceException error = assertThrows(ServiceException.class, () -> service.getOverview("2026-08", 1L));
+        assertTrue(error.getMessage().contains("row limit"));
     }
 
     @Test
@@ -130,21 +140,21 @@ class LabDashboardServiceTest {
     void leadScopeIsTrustedBusinessLineAndGoalsRemainGloballyReadable() {
         LabAccessContext lead = context(2L, 102L, LabAccessServiceImpl.LEAD, "algorithm");
         when(access.context(2L)).thenReturn(lead);
-        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(lead))).thenReturn(Collections.<GoalHealthFact>emptyList());
+        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(lead), eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1))).thenReturn(Collections.<GoalHealthFact>emptyList());
         when(mapper.selectKpiFact(eq("2026-08"), any(), eq(lead))).thenReturn(new DashboardKpiFact());
         emptyDashboardQueriesFor(lead);
 
         service.getOverview("2026-08", 2L);
 
         verify(mapper).selectMemberLoads(eq("2026-08"), any(), any(), eq(lead));
-        verify(mapper).selectGoalHealthFacts(eq(2026), any(), eq(lead));
+        verify(mapper).selectGoalHealthFacts(eq(2026), any(), eq(lead), eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1));
     }
 
     @Test
     void memberDashboardLoadsOnlyPublicIprAndFinalReportsWithoutHeatmapCoordinationOrPerformance() {
         LabAccessContext member = context(3L, 103L, LabAccessServiceImpl.MEMBER, "algorithm");
         when(access.context(3L)).thenReturn(member);
-        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(member))).thenReturn(Collections.<GoalHealthFact>emptyList());
+        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(member), eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1))).thenReturn(Collections.<GoalHealthFact>emptyList());
         when(mapper.selectKpiFact(eq("2026-08"), any(), eq(member))).thenReturn(new DashboardKpiFact());
         when(mapper.selectTaskStatusDistribution("2026-08", member)).thenReturn(Collections.emptyList());
         when(mapper.selectRecentIpr(any(), eq(member))).thenReturn(Collections.emptyList());
@@ -175,7 +185,7 @@ class LabDashboardServiceTest {
     @Test
     void goalTrendIsReturnedWithPeriodDefinitionTimestampAndDrillDown() {
         LabAccessContext manager = manager();
-        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(manager))).thenReturn(Collections.<GoalHealthFact>emptyList());
+        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(manager), eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1))).thenReturn(Collections.<GoalHealthFact>emptyList());
         when(mapper.selectKpiFact(eq("2026-08"), any(), eq(manager))).thenReturn(new DashboardKpiFact());
         GoalTrendPoint point = new GoalTrendPoint(); point.setGoalId(11L); point.setGoalName("Annual goal"); point.setPeriod("2026-08"); point.setExpectedProgress(new BigDecimal("55")); point.setActualProgress(new BigDecimal("40"));
         when(mapper.selectGoalProgressTrend(eq(2026), any(), eq(manager))).thenReturn(Collections.singletonList(point));
@@ -217,7 +227,7 @@ class LabDashboardServiceTest {
     @Test
     void latestReportCarriesTheSameExplainableActionMetadataAsTheReportList() {
         LabAccessContext manager = manager();
-        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(manager))).thenReturn(Collections.<GoalHealthFact>emptyList());
+        when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(manager), eq(LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1))).thenReturn(Collections.<GoalHealthFact>emptyList());
         when(mapper.selectKpiFact(eq("2026-08"), any(), eq(manager))).thenReturn(new DashboardKpiFact());
         emptyDashboardQueriesFor(manager);
         DashboardActionItem latest = new DashboardActionItem(); latest.setId(77L); latest.setTitle("R-2026-08");

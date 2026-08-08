@@ -185,7 +185,13 @@ class LabMapperMySqlIT {
         Map<String,Object> next = reportDataMapper.selectNextTasks(criteria).stream().filter(item -> Long.valueOf(nextTask).equals(((Number)item.get("id")).longValue())).findFirst().orElseThrow(() -> new AssertionError("next report task missing"));
         assertEquals("2026-08", current.get("period")); assertEquals("2026-08", current.get("taskPeriod"));
         assertEquals("2026-09", next.get("period")); assertEquals("2026-09", next.get("taskPeriod"));
+        assertNotNull(reportDataMapper.selectUndoneTasks(criteria));
+        assertNotNull(reportDataMapper.selectCoordinationTasks(criteria));
+        assertNotNull(reportDataMapper.selectBlockedTasks(criteria));
         assertTrue(reportDataMapper.selectTaskStats(criteria).stream().allMatch(item -> "2026-08".equals(item.get("period"))));
+        assertNotNull(reportDataMapper.selectAssets(criteria));
+        assertNotNull(reportDataMapper.selectIprs(criteria));
+        assertNotNull(reportDataMapper.selectCurrentPerfScores(criteria));
     }
 
     @Test
@@ -193,7 +199,8 @@ class LabMapperMySqlIT {
         jdbcTemplate.update("update lab_task set goal_weight=50 where id in (39003,39004)");
         BigDecimal taskFourAnnual = goalService.calculateAnnualProgress(39001L, 39101L);
         GoalHealthFact current = dashboardMapper.selectGoalHealthFacts(2026,
-                java.sql.Timestamp.valueOf("2026-08-31 23:59:59"), accessService.context(39101L)).stream()
+                java.sql.Date.valueOf("2026-08-31"), accessService.context(39101L),
+                LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1).stream()
                 .filter(fact -> Long.valueOf(39001L).equals(fact.getGoalId())).findFirst()
                 .orElseThrow(() -> new AssertionError("2026 goal health missing"));
         assertEquals(taskFourAnnual, current.getActualProgress().setScale(2),
@@ -223,7 +230,8 @@ class LabMapperMySqlIT {
                 + "(39713,39712,39710,39711,'week','2022-01','algorithm','daily','IT old decoy week',39203,101,'2022-01-07','old week',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now())");
         BigDecimal roundedByTaskFour = goalService.calculateAnnualProgress(39871L, 39101L);
         List<GoalHealthFact> roundedYearFacts = dashboardMapper.selectGoalHealthFacts(2024,
-                java.sql.Timestamp.valueOf("2024-04-30 23:59:59"), accessService.context(39101L));
+                java.sql.Date.valueOf("2024-04-30"), accessService.context(39101L),
+                LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1);
         GoalHealthFact roundedDashboard = roundedYearFacts.stream()
                 .filter(fact -> Long.valueOf(39871L).equals(fact.getGoalId())).findFirst()
                 .orElseThrow(() -> new AssertionError("2024 rounding goal health missing"));
@@ -282,10 +290,10 @@ class LabMapperMySqlIT {
                 + "(39684,39682,39680,39681,'week','2096-08','algorithm','daily','IT legacy weekly period',39203,101,'2096-08-17',null,'legacy week',0,0,'CONFIRMED','UNDONE','missed','0','0','0',0,'0','it',now()),"
                 + "(39685,0,39680,39681,'month','2096-08','platform','key','IT scoped platform month',30003,102,'2096-08-25',null,'platform month',50,50,'ACTIVE','DOING','working','0','0','0',0,'0','it',now()),"
                 + "(39686,39685,39680,39681,'week','2096-W32','platform','daily','IT scoped platform week',30003,102,'2096-08-10','2096-08-09 10:00:00','platform week',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now())");
-        Date asOf = java.sql.Timestamp.valueOf("2096-08-31 23:59:59");
-        GoalHealthFact managerFact = dashboardMapper.selectGoalHealthFacts(2096, asOf, accessService.context(39101L)).get(0);
-        GoalHealthFact leadFact = dashboardMapper.selectGoalHealthFacts(2096, asOf, accessService.context(39102L)).get(0);
-        GoalHealthFact memberFact = dashboardMapper.selectGoalHealthFacts(2096, asOf, accessService.context(39103L)).get(0);
+        java.sql.Date asOf = java.sql.Date.valueOf("2096-08-31");
+        GoalHealthFact managerFact = dashboardMapper.selectGoalHealthFacts(2096, asOf, accessService.context(39101L), LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1).get(0);
+        GoalHealthFact leadFact = dashboardMapper.selectGoalHealthFacts(2096, asOf, accessService.context(39102L), LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1).get(0);
+        GoalHealthFact memberFact = dashboardMapper.selectGoalHealthFacts(2096, asOf, accessService.context(39103L), LabDashboardMapper.MAX_GOAL_HEALTH_ROWS + 1).get(0);
         assertEquals(new BigDecimal("75.00"), managerFact.getActualProgress().setScale(2));
         assertEquals(new BigDecimal("25.00"), leadFact.getActualProgress().setScale(2),
                 "lead goal facts must exclude a platform decoy while the goal remains readable");

@@ -77,6 +77,87 @@ class ReportProviderContractTest {
     }
 
     @Test
+    void sensitiveSectionRequiresItsExactSnapshottedPermissionBeforeMapperAccess() throws Exception {
+        final int[] mapperCalls = new int[1];
+        LabReportDataMapper mapper = (LabReportDataMapper) Proxy.newProxyInstance(getClass().getClassLoader(),
+                new Class<?>[] {LabReportDataMapper.class}, (proxy, method, args) -> { mapperCalls[0]++; return Collections.singletonList(row()); });
+        PerfSummaryProvider provider = new PerfSummaryProvider(); inject(provider, mapper);
+        ReportSectionConfig restricted = sensitivePerf("lab:report:restricted");
+        ReportContext defaultOnly = new ReportContext("2026-08", "platform", 30005L, Instant.EPOCH,
+                trustedManagerScope("lab:report:sensitive"), Collections.<String,Object>emptyMap());
+        assertThrows(SecurityException.class, () -> provider.load(defaultOnly, restricted));
+        assertEquals(0, mapperCalls[0], "authorization must fail before mapper access");
+        ReportContext custom = new ReportContext("2026-08", "platform", 30005L, Instant.EPOCH,
+                trustedManagerScope("lab:report:restricted"), Collections.<String,Object>emptyMap());
+        assertEquals(1, provider.load(custom, restricted).getRows().size());
+        assertEquals(1, mapperCalls[0]);
+    }
+
+    @Test
+    void blockedTaskProjectionJoinsEveryOwnerAliasItSelects() throws Exception {
+        String xml = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportDataMapper.xml")), java.nio.charset.StandardCharsets.UTF_8);
+        String statement = xml.substring(xml.indexOf("<select id=\"selectBlockedTasks\""), xml.indexOf("</select>", xml.indexOf("<select id=\"selectBlockedTasks\"")));
+        assertTrue(statement.contains("left join lab_member owner_member"));
+        assertTrue(statement.contains("left join sys_user owner_user"));
+    }
+
+    @Test
+    void detailSourcesUseServerSideFetchLimitAndRejectOverflowBeforeTemplateFiltering() throws Exception {
+        TaskDetailProvider provider = new TaskDetailProvider();
+        List<Map<String,Object>> overflow = new java.util.ArrayList<Map<String,Object>>();
+        for (int i=0;i<5001;i++) { Map<String,Object> item=row(); item.put("id",Long.valueOf(i)); overflow.add(item); }
+        inject(provider, (LabReportDataMapper) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {LabReportDataMapper.class},
+                (proxy, method, args) -> overflow));
+        assertThrows(IllegalStateException.class, () -> provider.load(context("2026-08"), sectionFor("TASK_DETAIL")));
+        String xml = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportDataMapper.xml")), java.nio.charset.StandardCharsets.UTF_8);
+        for (String statementId : Arrays.asList("selectTasks","selectUndoneTasks","selectNextTasks","selectCoordinationTasks","selectBlockedTasks","selectAssets","selectIprs","selectCurrentPerfScores")) {
+            String statement = xml.substring(xml.indexOf("<select id=\""+statementId+"\""), xml.indexOf("</select>",xml.indexOf("<select id=\""+statementId+"\"")));
+            assertTrue(statement.contains("limit #{sourceFetchLimit}"), statementId);
+        }
+    }
+
+    @Test
+    void goalAuthorityProjectionUsesTheSameServerHardCap() throws Exception {
+        GoalProgressProvider provider = new GoalProgressProvider();
+        List<GoalHealthFact> overflow = new java.util.AbstractList<GoalHealthFact>() {
+            @Override public GoalHealthFact get(int index) { GoalHealthFact fact = new GoalHealthFact(); fact.setGoalId(Long.valueOf(index)); return fact; }
+            @Override public int size() { return ReportQueryCriteria.MAX_SOURCE_ROWS + 1; }
+        };
+        injectDashboard(provider, (LabDashboardMapper) Proxy.newProxyInstance(getClass().getClassLoader(),
+                new Class<?>[] {LabDashboardMapper.class}, (proxy, method, args) -> overflow));
+        assertThrows(IllegalStateException.class, () -> provider.load(context("2026-08"), sectionFor("GOAL_PROGRESS")));
+        String xml = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabDashboardMapper.xml")), java.nio.charset.StandardCharsets.UTF_8);
+        String statement = xml.substring(xml.indexOf("<select id=\"selectGoalHealthFacts\""), xml.indexOf("</select>", xml.indexOf("<select id=\"selectGoalHealthFacts\"")));
+        assertTrue(statement.contains("limit #{sourceFetchLimit}"));
+    }
+
+    @Test
+    void localDateBoundariesAreDeclaredAsSqlDateMapperContracts() throws Exception {
+        assertEquals(java.sql.Date.class, ReportQueryCriteria.class.getMethod("getDateStart").getReturnType());
+        assertEquals(java.sql.Date.class, ReportQueryCriteria.class.getMethod("getDateEnd").getReturnType());
+        java.lang.reflect.Method goalMethod = Arrays.stream(LabDashboardMapper.class.getMethods())
+                .filter(method -> method.getName().equals("selectGoalHealthFacts")).findFirst().get();
+        assertEquals(4, goalMethod.getParameterTypes().length);
+        assertEquals(java.sql.Date.class, goalMethod.getParameterTypes()[1]);
+        assertEquals(int.class, goalMethod.getParameterTypes()[3]);
+
+        Configuration configuration = new Configuration();
+        configuration.addMapper(LabDashboardMapper.class);
+        try (InputStream input = getClass().getResourceAsStream("/mapper/lab/LabDashboardMapper.xml")) {
+            assertTrue(input != null);
+            new XMLMapperBuilder(input, configuration, "mapper/lab/LabDashboardMapper.xml", configuration.getSqlFragments()).parse();
+        }
+        Map<String,Object> parameters = new LinkedHashMap<String,Object>();
+        parameters.put("year", 2026); parameters.put("asOf", java.sql.Date.valueOf("2026-08-31"));
+        parameters.put("scope", new LabAccessContext()); parameters.put("sourceFetchLimit", ReportQueryCriteria.MAX_SOURCE_ROWS + 1);
+        org.apache.ibatis.mapping.BoundSql bound = configuration
+                .getMappedStatement("com.ailab.system.mapper.LabDashboardMapper.selectGoalHealthFacts").getBoundSql(parameters);
+        assertTrue(bound.getParameterMappings().stream().anyMatch(mapping -> "asOf".equals(mapping.getProperty())
+                && mapping.getJdbcType() == org.apache.ibatis.type.JdbcType.DATE));
+        assertTrue(bound.getParameterMappings().stream().anyMatch(mapping -> "sourceFetchLimit".equals(mapping.getProperty())));
+    }
+
+    @Test
     void dataProviderCannotLoadManualSectionAndAttributesCannotEscalateScope() {
         assertThrows(IllegalArgumentException.class, () -> new TaskDetailProvider().load(context("2026-08"), manual()));
         ReportContext untrustedAttributes = new ReportContext("2026-08", "platform", 30005L, Instant.EPOCH,
@@ -141,6 +222,7 @@ class ReportProviderContractTest {
         ReportSectionData section = provider.load(context("2026Q3"), sectionFor("GOAL_PROGRESS"));
         assertEquals("2026Q3", section.getRows().get(0).get("period"));
         assertEquals(new java.math.BigDecimal("61.20"), section.getRows().get(0).get("progressRate"));
+        assertTrue(asOf[0] instanceof java.sql.Date, "goal asOf must preserve a local calendar date without timezone conversion");
         assertEquals("2026-09-30", new java.text.SimpleDateFormat("yyyy-MM-dd").format(asOf[0]));
     }
 
@@ -190,6 +272,7 @@ class ReportProviderContractTest {
         ReportQueryCriteria quarter = new ReportQueryCriteria("2026Q3", context("2026Q3").getAccessScope());
         assertEquals("2026-08-03", new java.text.SimpleDateFormat("yyyy-MM-dd").format(week.getDateStart()));
         assertEquals("2026-08-09", new java.text.SimpleDateFormat("yyyy-MM-dd").format(week.getDateEnd()));
+        assertTrue(week.getDateStart() instanceof java.sql.Date && week.getDateEnd() instanceof java.sql.Date);
         assertEquals("2026-07", quarter.getMonthStart());
         assertEquals("2026-09", quarter.getMonthEnd());
         assertThrows(IllegalArgumentException.class, () -> new ReportQueryCriteria("2025-W53", context("2025").getAccessScope()));
@@ -282,6 +365,23 @@ class ReportProviderContractTest {
     }
 
     @Test
+    void typedFieldSpecsRejectWrongValuesOperatorsAndNullOrdering() throws Exception {
+        TaskDetailProvider provider = new TaskDetailProvider(); Map<String,Object> value=row(); value.put("id",null); value.put("block",Boolean.TRUE); inject(provider,mapperWith(value));
+        assertThrows(IllegalArgumentException.class, () -> provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"id\",\"operator\":\"EQ\",\"value\":\"2\"}]}")));
+        assertThrows(IllegalArgumentException.class, () -> provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"status\",\"operator\":\"GTE\",\"value\":\"ACTIVE\"}]}")));
+        assertThrows(IllegalArgumentException.class, () -> provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"id\",\"operator\":\"EQ\",\"value\":null}]}")));
+        assertThrows(IllegalArgumentException.class, () -> provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"block\",\"operator\":\"EQ\",\"value\":\"true\"}]}")));
+        assertEquals(0, provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"id\",\"operator\":\"LTE\",\"value\":2}]}" )).getRows().size());
+    }
+
+    @Test
+    void dateFieldSpecsSupportTypedRangesAfterJdbcNormalization() throws Exception {
+        TaskDetailProvider provider = new TaskDetailProvider(); Map<String,Object> value=row(); value.put("planDate",java.sql.Date.valueOf("2026-08-15")); inject(provider,mapperWith(value));
+        assertEquals(1, provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"planDate\",\"operator\":\"BETWEEN\",\"value\":[\"2026-08-01\",\"2026-08-31\"]}]}" )).getRows().size());
+        assertThrows(IllegalArgumentException.class, () -> provider.load(context("2026-08"), sectionWithJson("TASK_DETAIL", "{\"filters\":[{\"field\":\"planDate\",\"operator\":\"GTE\",\"value\":\"August\"}]}")));
+    }
+
+    @Test
     void filteredAggregateSummariesUseThePreLimitRows() throws Exception {
         GoalProgressProvider goal = new GoalProgressProvider(); GoalHealthFact first = new GoalHealthFact(); first.setGoalId(1L); first.setActualProgress(new java.math.BigDecimal("40")); GoalHealthFact second = new GoalHealthFact(); second.setGoalId(2L); second.setActualProgress(new java.math.BigDecimal("80"));
         injectDashboard(goal, (LabDashboardMapper) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {LabDashboardMapper.class}, (proxy, method, args) -> Arrays.asList(first, second)));
@@ -331,6 +431,13 @@ class ReportProviderContractTest {
                 .getBoundSql(next).getParameterMappings().get(0).getProperty(), "next rows must be projected and filtered as the next month");
     }
 
+    @Test
+    void mysqlIntegrationFixtureExecutesAllNineReportMapperStatements() throws Exception {
+        String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("..","ruoyi-admin","src","test","java","com","ailab","system","mapper","LabMapperMySqlIT.java")), java.nio.charset.StandardCharsets.UTF_8);
+        for(String method:Arrays.asList("selectTasks","selectUndoneTasks","selectNextTasks","selectCoordinationTasks","selectBlockedTasks","selectTaskStats","selectAssets","selectIprs","selectCurrentPerfScores"))
+            assertTrue(source.contains("reportDataMapper."+method+"("),method);
+    }
+
     private ReportContext context(String period) {
         return new ReportContext(period, "platform", 30005L, Instant.parse("2026-08-08T00:00:00Z"), Collections.<String, Object>emptyMap());
     }
@@ -344,10 +451,13 @@ class ReportProviderContractTest {
     }
 
     private ReportSectionConfig perf() {
+        return sensitivePerf("lab:report:sensitive");
+    }
+    private ReportSectionConfig sensitivePerf(String permission) {
         LabReportSection section = new LabReportSection();
         section.setSectionCode("PERF"); section.setSectionName("Performance"); section.setSectionType("STAT");
         section.setDataSource(ReportConfigCatalog.PERF_SUMMARY); section.setManualFlag("0"); section.setVisibleFlag("1");
-        section.setSensitiveFlag("1"); section.setSensitivePermission("lab:report:sensitive");
+        section.setSensitiveFlag("1"); section.setSensitivePermission(permission);
         section.setQueryConfigJson("{}"); section.setRenderConfigJson("{}"); section.setStyleConfigJson("{}");
         return new ReportSectionConfig(section);
     }
@@ -367,10 +477,11 @@ class ReportProviderContractTest {
     private void injectDashboard(GoalProgressProvider provider, LabDashboardMapper mapper) throws Exception {
         Field field = GoalProgressProvider.class.getDeclaredField("dashboardMapper"); field.setAccessible(true); field.set(provider, mapper);
     }
-    private ReportAccessScope trustedManagerScope() throws Exception {
+    private ReportAccessScope trustedManagerScope(String... permissions) throws Exception {
         java.lang.reflect.Method method = ReportAccessScope.class.getDeclaredMethod("manager", java.util.Collection.class);
         method.setAccessible(true);
-        return (ReportAccessScope) method.invoke(null, Collections.singleton("lab:report:sensitive"));
+        return (ReportAccessScope) method.invoke(null, permissions.length == 0
+                ? Collections.singleton("lab:report:sensitive") : Arrays.asList(permissions));
     }
     private LabReportDataMapper mapperWith(Map<String, Object> value) {
         return (LabReportDataMapper) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {LabReportDataMapper.class},
@@ -396,7 +507,8 @@ class ReportProviderContractTest {
     }
     private ReportSectionConfig sectionWithFilter(String providerId, String field, String operator, Object value) {
         LabReportSection section = new LabReportSection(); section.setSectionCode(providerId); section.setSectionName(providerId); section.setSectionType(providerId.equals("ASSET_SUMMARY") || providerId.equals("TASK_STAT") || providerId.equals("GOAL_PROGRESS") || providerId.equals("PERF_SUMMARY") ? "STAT" : "TABLE"); section.setDataSource(providerId);
-        section.setManualFlag("0"); section.setVisibleFlag("1"); section.setQueryConfigJson("{\"filters\":[{\"field\":\"" + field + "\",\"operator\":\"" + operator + "\",\"value\":\"" + value + "\"}]}"); section.setRenderConfigJson("{}"); section.setStyleConfigJson("{}"); return new ReportSectionConfig(section);
+        String jsonValue=value==null?"null":value instanceof Number||value instanceof Boolean?String.valueOf(value):"\""+value+"\"";
+        section.setManualFlag("0"); section.setVisibleFlag("1"); section.setQueryConfigJson("{\"filters\":[{\"field\":\"" + field + "\",\"operator\":\"" + operator + "\",\"value\":" + jsonValue + "}]}"); section.setRenderConfigJson("{}"); section.setStyleConfigJson("{}"); return new ReportSectionConfig(section);
     }
     private ReportSectionConfig sectionWithJson(String providerId, String queryConfig) {
         LabReportSection section = new LabReportSection(); section.setSectionCode(providerId); section.setSectionName(providerId); section.setDataSource(providerId); section.setManualFlag("0"); section.setVisibleFlag("1");

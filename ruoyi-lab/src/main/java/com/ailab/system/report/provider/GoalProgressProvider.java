@@ -14,7 +14,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Date;
+import java.sql.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -36,11 +36,12 @@ public final class GoalProgressProvider extends AbstractLabDataSourceProvider {
     @Override protected boolean supports(ReportPeriod.Kind kind) {
         return kind == ReportPeriod.Kind.MONTH || kind == ReportPeriod.Kind.QUARTER || kind == ReportPeriod.Kind.YEAR;
     }
-
     @Override protected ReportSectionData loadValidated(ReportQueryCriteria criteria, ReportSectionConfig section) {
         if (dashboardMapper == null) throw new IllegalStateException("Dashboard goal projection is unavailable");
         Date asOf = endOfPeriod(criteria.getReportPeriod());
-        List<GoalHealthFact> facts = dashboardMapper.selectGoalHealthFacts(year(criteria.getReportPeriod()), asOf, allGoalsScope());
+        List<GoalHealthFact> facts = dashboardMapper.selectGoalHealthFacts(year(criteria.getReportPeriod()), asOf,
+                allGoalsScope(), criteria.getSourceFetchLimit());
+        requireSourceWithinLimit(facts == null ? 0 : facts.size());
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
         if (facts != null) for (GoalHealthFact fact : facts) {
             Map<String, Object> row = new LinkedHashMap<String, Object>();
@@ -68,8 +69,6 @@ public final class GoalProgressProvider extends AbstractLabDataSourceProvider {
         if (period.getKind() == ReportPeriod.Kind.MONTH) date = LocalDate.parse(value + "-01").withDayOfMonth(LocalDate.parse(value + "-01").lengthOfMonth());
         else if (period.getKind() == ReportPeriod.Kind.QUARTER) date = LocalDate.of(year(period), (Character.digit(value.charAt(5), 10) * 3), 1).withDayOfMonth(LocalDate.of(year(period), (Character.digit(value.charAt(5), 10) * 3), 1).lengthOfMonth());
         else date = LocalDate.of(year(period), 12, 31);
-        // Dashboard SQL compares DATE(asOf); a midday instant keeps the selected calendar day
-        // stable when the server/session time zone differs from UTC.
-        return Date.from(date.atTime(12, 0).toInstant(java.time.ZoneOffset.UTC));
+        return java.sql.Date.valueOf(date);
     }
 }
