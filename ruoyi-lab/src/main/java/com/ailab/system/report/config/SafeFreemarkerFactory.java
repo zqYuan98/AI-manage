@@ -51,6 +51,7 @@ public final class SafeFreemarkerFactory {
         configuration = new Configuration(Configuration.VERSION_2_3_31);
         configuration.setDefaultEncoding("UTF-8");
         configuration.setTagSyntax(Configuration.ANGLE_BRACKET_TAG_SYNTAX);
+        configuration.setInterpolationSyntax(Configuration.DOLLAR_INTERPOLATION_SYNTAX);
         configuration.setLocalizedLookup(false);
         configuration.setAPIBuiltinEnabled(false);
         configuration.setNewBuiltinClassResolver(TemplateClassResolver.ALLOWS_NOTHING_RESOLVER);
@@ -106,7 +107,7 @@ public final class SafeFreemarkerFactory {
                 int end = tagEnd(source, index + 2);
                 validateDirective(source.substring(index + 2, end));
                 index = end + 1;
-            } else if (source.startsWith("<@", index) || source.startsWith("[#", index) || source.startsWith("[@", index)) {
+            } else if (source.startsWith("#{", index) || source.startsWith("<@", index) || source.startsWith("[#", index) || source.startsWith("[@", index)) {
                 throw validationFailure();
             } else {
                 index++;

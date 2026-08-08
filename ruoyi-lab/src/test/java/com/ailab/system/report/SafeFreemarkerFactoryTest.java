@@ -63,6 +63,17 @@ class SafeFreemarkerFactoryTest {
     }
 
     @Test
+    void rejectsLegacyNumericInterpolationWithoutMisclassifyingStringLiterals() {
+        Map<String, Object> model = new LinkedHashMap<String, Object>();
+        model.put("map", Collections.<String, Object>singletonMap("key", "value"));
+        for (String unsafe : Arrays.asList("#{\"1+1\"?eval}", "#{map?keys?size}", "#{\"1\"?eval_json}")) {
+            assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
+                    () -> factory.render(unsafe, model)).getMessage());
+        }
+        assertEquals("#{literal}", factory.render("${'#{literal}'}", model));
+    }
+
+    @Test
     void rejectsObjectsAndBoundsInputOutputAndNestedData() {
         Map<String, Object> unsafe = new LinkedHashMap<String, Object>();
         unsafe.put("object", new Object());

@@ -173,6 +173,9 @@ class ReportConfigValidatorTest {
         String legacy = new String(Files.readAllBytes(root.resolve("sql/test/ailab-legacy-fixture.sql")), StandardCharsets.UTF_8).toLowerCase();
         assertTrue(legacy.contains("legacy-report-template-39990") && legacy.contains("create table `lab_report_instance`"));
         assertFalse(legacy.substring(legacy.indexOf("create table `lab_report_instance`")).contains("`template_code` varchar(64)"), "legacy fixture must predate pin columns");
+        String mysqlIt = new String(Files.readAllBytes(root.resolve("ruoyi-admin/src/test/java/com/ailab/system/mapper/LabMapperMySqlIT.java")), StandardCharsets.UTF_8);
+        assertTrue(mysqlIt.contains("insert into lab_report_instance(id,report_no,template_id,template_code,template_revision,period"),
+                "MySQL report fixtures must insert mandatory immutable template pins");
     }
 
     @Test

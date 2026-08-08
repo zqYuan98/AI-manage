@@ -137,7 +137,7 @@ class LabMapperMySqlIT {
         reminderService.scanBlocks();
         assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=? and episode_no=2 and recipient_id=39203 and reminder_level='WARNING' and del_flag='0'", Integer.class, taskId));
 
-        jdbcTemplate.update("insert into lab_report_instance(id,report_no,template_id,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,json_status,markdown_status,word_status,pdf_status,version,del_flag,create_by,create_time) values(39870,'IT-RPT-2026-08',30001,'2026-08','ALL',1,'FINAL','1','1','0','READY','READY','READY','READY',0,'0','it',now())");
+        jdbcTemplate.update("insert into lab_report_instance(id,report_no,template_id,template_code,template_revision,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,json_status,markdown_status,word_status,pdf_status,version,del_flag,create_by,create_time) values(39870,'IT-RPT-2026-08',30001,'standard_month',1,'2026-08','ALL',1,'FINAL','1','1','0','READY','READY','READY','READY',0,'0','it',now())");
         DashboardOverview manager = dashboardService.getOverview("2026-08", 39101L);
         DashboardOverview lead = dashboardService.getOverview("2026-08", 39102L);
         DashboardOverview member = dashboardService.getOverview("2026-08", 39103L);
