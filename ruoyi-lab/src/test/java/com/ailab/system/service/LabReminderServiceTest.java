@@ -66,8 +66,9 @@ class LabReminderServiceTest {
     @Test
     void fourteenDayBlockKeepsDailyOwnerWarningAndAddsManagerCriticalWithoutDuplicates() {
         ReminderCandidate owner = block(21L, 4, "2026-07-20T01:00:00Z", 102L, "OWNER");
+        ReminderCandidate coordinator = block(21L, 4, "2026-07-20T01:00:00Z", 103L, "COORDINATOR");
         ReminderCandidate manager = block(21L, 4, "2026-07-20T01:00:00Z", 901L, "MANAGER");
-        when(mapper.selectOpenBlockReminderCandidates()).thenReturn(Arrays.asList(owner, manager));
+        when(mapper.selectOpenBlockReminderCandidates()).thenReturn(Arrays.asList(owner, coordinator, manager));
         when(mapper.insertReminderIfAbsent(any(LabReminder.class))).thenReturn(1, 0);
 
         assertEquals(1, service.scanBlocks());
@@ -76,6 +77,7 @@ class LabReminderServiceTest {
         verify(mapper, org.mockito.Mockito.times(2)).insertReminderIfAbsent(captor.capture());
         assertTrue(captor.getAllValues().stream().anyMatch(r -> r.getIdempotencyKey().contains(":WARNING:102:")));
         assertTrue(captor.getAllValues().stream().anyMatch(r -> r.getIdempotencyKey().contains(":CRITICAL:901:")));
+        assertTrue(captor.getAllValues().stream().noneMatch(r -> Long.valueOf(103L).equals(r.getRecipientId())));
     }
 
     @Test

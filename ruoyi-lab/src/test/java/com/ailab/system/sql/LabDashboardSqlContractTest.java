@@ -39,13 +39,16 @@ class LabDashboardSqlContractTest {
         assertTrue(compact.contains("groupbyg.id,g.title,g.year") && compact.contains("groupbym.id,u.nick_name,m.biz_line"));
         assertTrue(compact.contains("p.current_flag='1'") && compact.contains("ri.sensitive_flag='0'"));
         assertTrue(compact.contains("ri.lifecycle_statusin('finalized','superseded')")
+                && compact.contains("ri.lifecycle_status='final'")
+                && compact.contains("ri.json_status='ready'")
+                && compact.contains("ri.markdown_status='ready'")
+                && compact.contains("ri.word_status='ready'")
+                && compact.contains("ri.pdf_status='ready'")
                 && compact.contains("coalesce(ri.update_time,ri.create_time)due_date"),
-                "line leads may see all non-sensitive immutable report revisions with a usable timestamp");
+                "non-managers may see current FINAL/READY and future immutable report revisions with a usable timestamp");
         assertTrue(compact.contains("r.recipient_id=#{scope.memberid}") && compact.contains("recipient.biz_line=#{scope.bizline}"));
-        assertTrue(compact.contains("coordinator_user.user_id=coordinator.user_id")
-                && compact.contains("coordinator_role.role_key='lab_manager'")
-                && compact.contains("coordinator_role.role_key='lab_lead'andcoordinator.biz_line=t.biz_line"),
-                "coordinator reminders must be limited to trusted users who can read the task");
+        assertFalse(compact.contains("'coordinator'audience"),
+                "seven-day block reminders go only to the owner; coordinators are not escalation recipients");
         assertTrue(compact.contains("owner_user.user_id=owner.user_id")
                 && compact.contains("owner_user.status='0'andowner_user.del_flag='0'"),
                 "owner reminders must also use an enabled trusted sys_user mapping");
@@ -54,6 +57,43 @@ class LabDashboardSqlContractTest {
         assertTrue(compact.contains("datediff(date(#{asof}),date(blocks.block_start_time))")
                 && compact.contains("datediff(date(#{asof}),date(be.block_start_time))"),
                 "block-day dashboard boundaries must use business calendar dates");
+    }
+
+    @Test
+    void goalProgressSqlMatchesTaskFourActiveMonthAndConfirmedWeekContractWithoutNPlusOne() throws Exception {
+        String compact = compact(read("ruoyi-lab/src/main/resources/mapper/lab/LabDashboardMapper.xml"));
+        assertTrue(compact.contains("withweekly_progressas(") || compact.contains("withrecursiveweekly_progressas("));
+        assertTrue(compact.contains("w.workflow_status='confirmed'")
+                && compact.contains("w.result_statusin('exceeded','ontime','delayed')"));
+        assertTrue(compact.contains("count(casewhenw.workflow_status='confirmed'then1end)")
+                || compact.contains("sum(casewhenw.workflow_status='confirmed'then1else0end)"),
+                "pending weekly tasks must not enter the active-month denominator");
+        assertTrue(compact.contains("m.workflow_status='active'") && compact.contains("weekly_progress"));
+        assertTrue(compact.contains("round(100*sum(casewhenw.workflow_status='confirmed'andw.result_statusin('exceeded','ontime','delayed')then1else0end)"),
+                "active month weekly percentage must use the same two-decimal rounding as LabGoalService");
+        assertTrue(compact.contains("least(100,greatest(0,round(sum(mp.goal_weight*mp.completion_ratio),2)))"),
+                "milestone progress must round and clamp before annual weighting");
+        assertTrue(compact.contains("least(100,greatest(0,round(sum(mt.quarter_weight*mt.milestone_progress/100),2)))"),
+                "annual progress must round and clamp after weighting rounded milestones");
+        assertTrue(compact.contains("goal_riskas(") && compact.contains("fromlab_taskrt")
+                && compact.contains("blocks.task_id=rt.id"),
+                "goal risk must consider every current task under the goal without multiplying progress aggregates");
+        assertFalse(compact.contains("selectkeymonthtasksbymilestoneid"), "dashboard aggregation must remain set based");
+    }
+
+    @Test
+    void taskDrillFiltersAreParameterizedAndMatchDashboardKpiCutoffs() throws Exception {
+        String xml = read("ruoyi-lab/src/main/resources/mapper/lab/LabTaskMapper.xml");
+        String compact = compact(xml);
+        assertTrue(compact.contains("workflowstatuses!=null") && compact.contains("<foreach")
+                && compact.contains("#{workflowstatus}"));
+        assertTrue(compact.contains("t.current_block_flag=#{currentblockflag}")
+                && compact.contains("exists(select1fromlab_task_block_eventbe")
+                && compact.contains("date(be.block_start_time)&lt;=date(#{blockstartbefore})"));
+        assertTrue(compact(read("ruoyi-lab/src/main/resources/mapper/lab/LabDashboardMapper.xml"))
+                .contains("count(distinctt.id)") , "block KPI must count the same distinct OPEN-event task set as drill-down");
+        assertTrue(compact.contains("overdueorpending") && compact.contains("t.period_lock_flag='0'"));
+        assertFalse(xml.contains("${workflow") || xml.contains("${currentBlock") || xml.contains("${blockStart"));
     }
 
     @Test

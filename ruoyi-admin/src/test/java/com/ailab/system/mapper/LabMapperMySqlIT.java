@@ -20,6 +20,8 @@ import com.ailab.system.domain.LabCollaborationRecord;
 import com.ailab.system.domain.LabReminder;
 import com.ailab.system.dto.CollaborationReviewCommand;
 import com.ailab.system.dto.DashboardOverview;
+import com.ailab.system.dto.GoalHealthFact;
+import com.ailab.system.dto.ReminderCandidate;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.PerformanceAssetFact;
 import com.ailab.system.dto.PerformanceCalculationInput;
@@ -51,6 +53,8 @@ import java.util.Collections;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.function.Supplier;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -108,10 +112,11 @@ class LabMapperMySqlIT {
 
         int first = reminderService.scanBlocks();
         int second = reminderService.scanBlocks();
-        assertTrue(first >= 2, "14-day episode must create owner/coordination warnings and manager critical reminders");
+        assertEquals(2, first, "14-day episode must create only owner warning and manager critical reminders");
         assertEquals(0, second, "same date/episode/recipient/level must be idempotent");
         assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=? and episode_no=1 and recipient_id=39203 and reminder_level='WARNING' and del_flag='0'", Integer.class, taskId));
         assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=? and episode_no=1 and recipient_id=39201 and reminder_level='CRITICAL' and del_flag='0'", Integer.class, taskId));
+        assertEquals(0, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=? and episode_no=1 and recipient_id=39202 and del_flag='0'", Integer.class, taskId));
 
         LabReminder ownerReminder = dashboardMapper.selectReminderList(accessService.context(39103L), true).stream()
                 .filter(reminder -> Long.valueOf(taskId).equals(reminder.getTaskId())).findFirst().orElseThrow(() -> new AssertionError("owner reminder missing"));
@@ -131,13 +136,18 @@ class LabMapperMySqlIT {
         reminderService.scanBlocks();
         assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=? and episode_no=2 and recipient_id=39203 and reminder_level='WARNING' and del_flag='0'", Integer.class, taskId));
 
+        jdbcTemplate.update("insert into lab_report_instance(id,report_no,template_id,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,json_status,markdown_status,word_status,pdf_status,version,del_flag,create_by,create_time) values(39870,'IT-RPT-2026-08',30001,'2026-08','ALL',1,'FINAL','1','1','0','READY','READY','READY','READY',0,'0','it',now())");
         DashboardOverview manager = dashboardService.getOverview("2026-08", 39101L);
         DashboardOverview lead = dashboardService.getOverview("2026-08", 39102L);
         DashboardOverview member = dashboardService.getOverview("2026-08", 39103L);
         assertEquals(5, manager.getKpis().size());
         assertTrue(manager.getMemberLoads().size() >= lead.getMemberLoads().size());
         assertTrue(lead.getMemberLoads().stream().allMatch(load -> "algorithm".equals(load.getBizLine())));
-        assertTrue(member.getMemberLoads().isEmpty() && member.getRecentReports().isEmpty() && member.getPerformanceSummary().isEmpty());
+        assertTrue(member.getMemberLoads().isEmpty() && member.getCoordinationItems().isEmpty() && member.getPerformanceSummary().isEmpty());
+        assertTrue(member.getRecentReports().stream().anyMatch(item -> Long.valueOf(39870L).equals(item.getId())));
+        assertTrue(member.getRecentIpr().stream().anyMatch(item -> Long.valueOf(39301L).equals(item.getId())));
+        assertTrue(dashboardService.getOverview("2026-07", 39101L).getRecentReports().stream()
+                .anyMatch(item -> Long.valueOf(30001L).equals(item.getId())), "current FINAL/READY demo report must remain visible to manager");
         assertTrue(manager.getTaskStatusDistribution().stream().anyMatch(item -> "ACTIVE".equals(item.getCode())));
         assertEquals(taskId, manager.getCoordinationItems().stream().filter(item -> Long.valueOf(taskId).equals(item.getId())).findFirst().orElseThrow(() -> new AssertionError("coordination item missing")).getId().longValue());
     }
@@ -146,7 +156,7 @@ class LabMapperMySqlIT {
     void clearSecurityContext() { SecurityContextHolder.clearContext(); }
 
     @Test
-    void filtersByOwnerBusinessLinePeriodAndFrameworkDataScopeFragment() {
+    void filtersByTrustedTypedOwnerBusinessLineAndPeriodAndIgnoresSqlFragments() {
         LabTask query = new LabTask();
         query.setOwnerId(39202L); query.setBizLine("algorithm"); query.setPeriod("2026-01");
         query.getParams().put("dataScope", " AND t.dept_id = 101 ");
@@ -156,7 +166,59 @@ class LabMapperMySqlIT {
         assertEquals(1, rows.size());
         assertEquals(Long.valueOf(39001L), rows.get(0).getId());
         query.getParams().put("dataScope", " AND t.dept_id = 999 ");
-        assertEquals(0, taskMapper.selectTaskList(query).size());
+        assertEquals(1, taskMapper.selectTaskList(query).size(), "client SQL fragments must never change mapper scope");
+    }
+
+    @Test
+    void dashboardHistoricalYearAndActiveMonthProgressMatchGoalService() {
+        jdbcTemplate.update("update lab_task set goal_weight=50 where id in (39003,39004)");
+        BigDecimal taskFourAnnual = goalService.calculateAnnualProgress(39001L, 39101L);
+        GoalHealthFact current = dashboardMapper.selectGoalHealthFacts(2026,
+                java.sql.Timestamp.valueOf("2026-08-31 23:59:59"), accessService.context(39101L)).stream()
+                .filter(fact -> Long.valueOf(39001L).equals(fact.getGoalId())).findFirst()
+                .orElseThrow(() -> new AssertionError("2026 goal health missing"));
+        assertEquals(taskFourAnnual, current.getActualProgress().setScale(2),
+                "ACTIVE month progress from confirmed weeks must match LabGoalService exactly");
+        assertEquals(new BigDecimal("70.00"), current.getActualProgress().setScale(2));
+
+        jdbcTemplate.update("insert into lab_goal(id,parent_id,goal_level,year,period,goal_no,title,owner_id,weight,progress_mode,progress_rate,status,version,del_flag,create_by,create_time) values(39860,0,'YEAR',2025,null,'IT-YEAR-2025','IT historical goal',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now()),(39861,39860,'QUARTER',2025,'2025Q2','IT-2025-Q2','IT historical quarter',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now())");
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,actual_finish_time,deliverable,perf_weight,goal_weight,workflow_status,result_status,result_desc,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values(39862,0,39860,39861,'month','2025-04','algorithm','key','IT historical delivery',39203,101,'2025-04-20','2025-04-19 10:00:00','history',100,100,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now())");
+        DashboardOverview historical = dashboardService.getOverview("2025-04", 39101L);
+        assertEquals(Collections.singletonList(Long.valueOf(39860L)), historical.getGoalHealth().stream()
+                .map(item -> item.getGoalId()).collect(Collectors.toList()));
+        assertTrue(historical.getGoalTrend().stream().allMatch(point -> point.getPeriod().startsWith("2025-")));
+
+        jdbcTemplate.update("insert into lab_goal(id,parent_id,goal_level,year,period,goal_no,title,owner_id,weight,progress_mode,progress_rate,status,version,del_flag,create_by,create_time) values"
+                + "(39871,0,'YEAR',2024,null,'IT-YEAR-2024','IT rounding goal',39201,100,'AUTO',0,'ACTIVE',0,'0','it',now()),"
+                + "(39872,39871,'QUARTER',2024,'2024Q2','IT-2024-Q2','IT rounding quarter',39201,53,'AUTO',0,'ACTIVE',0,'0','it',now())");
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,result_desc,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values"
+                + "(39873,0,39871,39872,'month','2024-04','algorithm','key','IT one-third active month',39203,101,'2024-04-20','rounding',1,1,'ACTIVE','DOING','working','0','0','0',0,'0','it',now()),"
+                + "(39874,39873,39871,39872,'week','2024-04','algorithm','daily','IT completed week',39203,101,'2024-04-05','week one',0,0,'CONFIRMED','ONTIME','done','0','0','0',0,'0','it',now()),"
+                + "(39875,39873,39871,39872,'week','2024-04','algorithm','daily','IT undone week two',39203,101,'2024-04-12','week two',0,0,'CONFIRMED','UNDONE','missed','0','0','0',0,'0','it',now()),"
+                + "(39876,39873,39871,39872,'week','2024-04','algorithm','daily','IT undone week three',39203,101,'2024-04-19','week three',0,0,'CONFIRMED','UNDONE','missed','0','0','0',0,'0','it',now())");
+        BigDecimal roundedByTaskFour = goalService.calculateAnnualProgress(39871L, 39101L);
+        GoalHealthFact roundedDashboard = dashboardMapper.selectGoalHealthFacts(2024,
+                java.sql.Timestamp.valueOf("2024-04-30 23:59:59"), accessService.context(39101L)).stream()
+                .filter(fact -> Long.valueOf(39871L).equals(fact.getGoalId())).findFirst()
+                .orElseThrow(() -> new AssertionError("2024 rounding goal health missing"));
+        assertEquals(new BigDecimal("0.17"), roundedByTaskFour);
+        assertEquals(roundedByTaskFour, roundedDashboard.getActualProgress().setScale(2),
+                "dashboard must preserve Task4 weekly, milestone, then annual rounding stages");
+    }
+
+    @Test
+    void pendingReminderSqlTargetsOnlyOpenDraftOrActiveMissingRows() {
+        String period = "2097-11";
+        jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,actual_finish_time,deliverable,perf_weight,goal_weight,workflow_status,result_status,result_desc,fail_reason,next_action,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values"
+                + "(39863,0,39001,39002,'month',?,'algorithm','daily','IT incomplete draft',39203,101,null,null,null,0,0,'DRAFT','DOING',null,null,null,'0','0','0',0,'0','it',now()),"
+                + "(39864,0,39001,39002,'month',?,'algorithm','daily','IT complete draft',39203,101,'2097-11-20',null,'draft artifact',0,0,'DRAFT','DOING',null,null,null,'0','0','0',0,'0','it',now()),"
+                + "(39865,0,39001,39002,'month',?,'algorithm','daily','IT pending review ignored',39203,101,null,null,null,0,0,'PENDING_REVIEW','DOING',null,null,null,'0','0','0',0,'0','it',now()),"
+                + "(39866,0,39001,39002,'month',?,'algorithm','daily','IT incomplete active undone',39203,101,'2097-11-20',null,'artifact',0,0,'ACTIVE','UNDONE',null,null,null,'0','0','0',0,'0','it',now())",
+                period, period, period, period);
+        List<ReminderCandidate> candidates = dashboardMapper.selectPendingTaskReminderCandidates(period, false);
+        Set<Long> taskIds = candidates.stream().map(ReminderCandidate::getTaskId).collect(Collectors.toSet());
+        assertEquals(new java.util.HashSet<Long>(Arrays.asList(39863L, 39866L)), taskIds);
+        assertTrue(candidates.stream().allMatch(candidate -> "OWNER".equals(candidate.getAudience())));
     }
 
     @Test

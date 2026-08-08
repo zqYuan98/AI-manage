@@ -41,6 +41,8 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.BeanWrapper;
+import org.springframework.beans.BeanWrapperImpl;
 import org.springframework.security.access.prepost.PreAuthorize;
 
 class LabTaskServiceTest {
@@ -178,6 +180,42 @@ class LabTaskServiceTest {
         LabTask attempted = task(null, 0L, "month", "2026-08", 15L, "100", "100");
         attempted.setGoalId(10L); attempted.setMilestoneId(11L); attempted.setBizLine("platform");
         assertThrows(ServiceException.class, () -> service.createTask(attempted, 2L));
+    }
+
+    @Test
+    void dashboardDrillFiltersFeedTheExistingTaskListThroughTypedParameters() {
+        LabTask query = new LabTask();
+        query.setPeriod("2026-08");
+        query.setWorkflowStatuses(Arrays.asList("DRAFT", "ACTIVE"));
+        query.setOverdueOrPending(Boolean.TRUE);
+        query.setAsOf(Date.from(Instant.parse("2026-08-15T00:00:00Z")));
+        query.setCurrentBlockFlag("1");
+        query.setBlockStartBefore(Date.from(Instant.parse("2026-08-08T00:00:00Z")));
+
+        service.listTasks(query, 9L);
+
+        assertEquals(Arrays.asList("DRAFT", "ACTIVE"), query.getWorkflowStatuses());
+        assertEquals(Boolean.TRUE, query.getOverdueOrPending());
+        assertEquals("1", query.getCurrentBlockFlag());
+        assertNotNull(query.getBlockStartBefore());
+    }
+
+    @Test
+    void indexedGetBindingRetainsDashboardWorkflowStatusArray() {
+        LabTask query = new LabTask();
+        BeanWrapper requestBinder = new BeanWrapperImpl(query);
+        requestBinder.setAutoGrowNestedPaths(true);
+        requestBinder.setPropertyValue("workflowStatuses[0]", "DRAFT");
+        requestBinder.setPropertyValue("workflowStatuses[1]", "ACTIVE");
+
+        assertEquals(Arrays.asList("DRAFT", "ACTIVE"), query.getWorkflowStatuses());
+    }
+
+    @Test
+    void taskListRejectsUnknownWorkflowStatusCollectionsBeforeMapperUse() {
+        LabTask query = new LabTask();
+        query.setWorkflowStatuses(Arrays.asList("ACTIVE", "ACTIVE') OR 1=1 --"));
+        assertThrows(ServiceException.class, () -> service.listTasks(query, 9L));
     }
 
     @Test

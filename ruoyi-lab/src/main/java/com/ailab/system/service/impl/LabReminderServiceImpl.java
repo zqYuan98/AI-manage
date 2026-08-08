@@ -50,10 +50,10 @@ public class LabReminderServiceImpl implements LabReminderService {
             if ("MANAGER".equals(candidate.getAudience())) {
                 if (days < 14) continue;
                 level = "CRITICAL";
-            } else {
+            } else if ("OWNER".equals(candidate.getAudience())) {
                 if (days < 7) continue;
                 level = "WARNING";
-            }
+            } else continue;
             LabReminder reminder = reminder(candidate, "BLOCK", level, today);
             reminder.setTitle("任务阻塞" + days + "天：" + text(candidate.getTaskTitle(), "未命名任务"));
             reminder.setReminderContent("任务持续阻塞" + days + "天，请检查阻塞原因、协调责任人与下一步行动。");

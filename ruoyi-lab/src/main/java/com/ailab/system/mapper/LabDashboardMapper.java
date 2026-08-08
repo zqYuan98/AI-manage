@@ -27,7 +27,8 @@ public interface LabDashboardMapper {
 
     List<GoalHealthFact> selectGoalHealthFacts(@Param("year") Integer year, @Param("asOf") Date asOf,
             @Param("scope") LabAccessContext scope);
-    List<GoalTrendPoint> selectGoalProgressTrend(@Param("year") Integer year, @Param("scope") LabAccessContext scope);
+    List<GoalTrendPoint> selectGoalProgressTrend(@Param("year") Integer year, @Param("asOf") Date asOf,
+            @Param("scope") LabAccessContext scope);
     DashboardKpiFact selectKpiFact(@Param("period") String period, @Param("asOf") Date asOf,
             @Param("scope") LabAccessContext scope);
     List<DashboardCountItem> selectTaskStatusDistribution(@Param("period") String period,

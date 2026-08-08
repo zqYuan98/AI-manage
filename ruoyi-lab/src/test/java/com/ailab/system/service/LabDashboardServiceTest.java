@@ -3,6 +3,7 @@ package com.ailab.system.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -19,16 +20,20 @@ import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.mapper.LabDashboardMapper;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ailab.system.service.impl.LabDashboardServiceImpl;
+import com.ruoyi.common.exception.ServiceException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -81,6 +86,33 @@ class LabDashboardServiceTest {
         assertEquals("YELLOW", result.getGoalHealth().get(0).getStatus());
         assertEquals(Boolean.TRUE, result.getKpis().get(4).getDrillDownFilters().get("singlePointRisk"));
         assertFalse(result.getKpis().get(4).getDrillDownFilters().containsKey("backupMissing"));
+        assertEquals(Arrays.asList("DRAFT", "ACTIVE"), result.getKpis().get(2).getDrillDownFilters().get("workflowStatuses"));
+        assertEquals(Boolean.TRUE, result.getKpis().get(2).getDrillDownFilters().get("overdueOrPending"));
+        assertEquals("1", result.getKpis().get(3).getDrillDownFilters().get("currentBlockFlag"));
+        assertTrue(result.getKpis().get(3).getDrillDownFilters().get("blockStartBefore") instanceof Date);
+        assertFalse(result.getKpis().get(3).getDrillDownFilters().containsKey("blockFlag"));
+    }
+
+    @Test
+    void historicalPeriodDrivesGoalYearTrendAndEndOfRequestedMonthAsOf() {
+        LabAccessContext manager = manager();
+        when(mapper.selectGoalHealthFacts(eq(2025), any(), eq(manager))).thenReturn(Collections.<GoalHealthFact>emptyList());
+        when(mapper.selectKpiFact(eq("2025-04"), any(), eq(manager))).thenReturn(new DashboardKpiFact());
+        when(mapper.selectGoalProgressTrend(eq(2025), any(), eq(manager))).thenReturn(Collections.<GoalTrendPoint>emptyList());
+        emptyDashboardQueriesFor("2025-04", manager);
+
+        service.getOverview("2025-04", 1L);
+
+        ArgumentCaptor<Date> asOf = ArgumentCaptor.forClass(Date.class);
+        verify(mapper).selectGoalHealthFacts(eq(2025), asOf.capture(), eq(manager));
+        assertEquals(LocalDate.of(2025, 4, 30), asOf.getValue().toInstant().atZone(CLOCK.getZone()).toLocalDate());
+        verify(mapper).selectGoalProgressTrend(eq(2025), any(), eq(manager));
+    }
+
+    @Test
+    void malformedPeriodReportsThePeriodField() {
+        ServiceException error = assertThrows(ServiceException.class, () -> service.getOverview("2026-8", 1L));
+        assertTrue(error.getMessage().toLowerCase().contains("period"));
     }
 
     @Test
@@ -98,23 +130,26 @@ class LabDashboardServiceTest {
     }
 
     @Test
-    void memberDashboardNeverLoadsOtherMemberHeatmapReportsOrPerformance() {
+    void memberDashboardLoadsOnlyPublicIprAndFinalReportsWithoutHeatmapCoordinationOrPerformance() {
         LabAccessContext member = context(3L, 103L, LabAccessServiceImpl.MEMBER, "algorithm");
         when(access.context(3L)).thenReturn(member);
         when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(member))).thenReturn(Collections.<GoalHealthFact>emptyList());
         when(mapper.selectKpiFact(eq("2026-08"), any(), eq(member))).thenReturn(new DashboardKpiFact());
         when(mapper.selectTaskStatusDistribution("2026-08", member)).thenReturn(Collections.emptyList());
-        when(mapper.selectCoordinationItems("2026-08", member)).thenReturn(Collections.emptyList());
+        when(mapper.selectRecentIpr(any(), eq(member))).thenReturn(Collections.emptyList());
+        when(mapper.selectRecentReports("2026-08", member)).thenReturn(Collections.emptyList());
+        when(mapper.selectLatestReport("2026-08", member)).thenReturn(null);
 
         DashboardOverview result = service.getOverview("2026-08", 3L);
 
         assertTrue(result.getMemberLoads().isEmpty());
         assertTrue(result.getRecentReports().isEmpty());
         verify(mapper, never()).selectMemberLoads(any(), any(), any(), any());
-        verify(mapper, never()).selectRecentReports(any(), any());
-        verify(mapper, never()).selectLatestReport(any(), any());
+        verify(mapper).selectRecentReports("2026-08", member);
+        verify(mapper).selectLatestReport("2026-08", member);
         verify(mapper, never()).selectPerformanceSummary(any(), any());
-        verify(mapper, never()).selectRecentIpr(any(), any());
+        verify(mapper).selectRecentIpr(any(), eq(member));
+        verify(mapper, never()).selectCoordinationItems(any(), any());
     }
 
     @Test
@@ -132,7 +167,7 @@ class LabDashboardServiceTest {
         when(mapper.selectGoalHealthFacts(eq(2026), any(), eq(manager))).thenReturn(Collections.<GoalHealthFact>emptyList());
         when(mapper.selectKpiFact(eq("2026-08"), any(), eq(manager))).thenReturn(new DashboardKpiFact());
         GoalTrendPoint point = new GoalTrendPoint(); point.setPeriod("2026-08"); point.setExpectedProgress(new BigDecimal("55")); point.setActualProgress(new BigDecimal("40"));
-        when(mapper.selectGoalProgressTrend(2026, manager)).thenReturn(Collections.singletonList(point));
+        when(mapper.selectGoalProgressTrend(eq(2026), any(), eq(manager))).thenReturn(Collections.singletonList(point));
         emptyDashboardQueriesFor(manager);
 
         DashboardOverview result = service.getOverview("2026-08", 1L);
@@ -174,15 +209,16 @@ class LabDashboardServiceTest {
         return manager;
     }
 
-    private void emptyDashboardQueriesFor(LabAccessContext context) {
-        when(mapper.selectTaskStatusDistribution(eq("2026-08"), eq(context))).thenReturn(Collections.emptyList());
-        when(mapper.selectMemberLoads(eq("2026-08"), any(), any(), eq(context))).thenReturn(Collections.emptyList());
-        when(mapper.selectCoordinationItems(eq("2026-08"), eq(context))).thenReturn(Collections.emptyList());
+    private void emptyDashboardQueriesFor(LabAccessContext context) { emptyDashboardQueriesFor("2026-08", context); }
+    private void emptyDashboardQueriesFor(String period, LabAccessContext context) {
+        when(mapper.selectTaskStatusDistribution(eq(period), eq(context))).thenReturn(Collections.emptyList());
+        when(mapper.selectMemberLoads(eq(period), any(), any(), eq(context))).thenReturn(Collections.emptyList());
+        when(mapper.selectCoordinationItems(eq(period), eq(context))).thenReturn(Collections.emptyList());
         when(mapper.selectRecentIpr(any(), eq(context))).thenReturn(Collections.emptyList());
-        when(mapper.selectRecentReports(eq("2026-08"), eq(context))).thenReturn(Collections.emptyList());
-        when(mapper.selectLatestReport(eq("2026-08"), eq(context))).thenReturn(null);
+        when(mapper.selectRecentReports(eq(period), eq(context))).thenReturn(Collections.emptyList());
+        when(mapper.selectLatestReport(eq(period), eq(context))).thenReturn(null);
         if (LabAccessServiceImpl.MANAGER.equals(context.getRoleKey())) {
-            when(mapper.selectPerformanceSummary(eq("2026-08"), eq(context))).thenReturn(Collections.emptyList());
+            when(mapper.selectPerformanceSummary(eq(period), eq(context))).thenReturn(Collections.emptyList());
         }
     }
 

@@ -164,6 +164,15 @@ class LabPerformanceContractTest {
         assertTrue(managerMenus.contains("31095"), "managers need performance history permission");
         assertFalse(leadMenus.contains("31095"), "line leads must not receive performance history");
         assertFalse(memberMenus.contains("31095"), "members must not receive performance history");
+        for (String managerOnly : new String[] {"31010", "31092", "31100", "31101", "31102", "31110", "31111", "31113", "31114"}) {
+            assertFalse(leadMenus.contains(managerOnly), "line leads must not receive manager-only menu " + managerOnly);
+            assertFalse(memberMenus.contains(managerOnly), "members must not receive manager-only menu " + managerOnly);
+            assertTrue(managerMenus.contains(managerOnly), "managers must retain menu " + managerOnly);
+        }
+        for (String personalRead : new String[] {"31009", "31011", "31112"}) {
+            assertTrue(leadMenus.contains(personalRead), "line leads need personal/read menu " + personalRead);
+            assertTrue(memberMenus.contains(personalRead), "members need personal/read menu " + personalRead);
+        }
     }
 
     @Test

@@ -16,7 +16,6 @@ import com.ailab.system.service.LabTaskService;
 import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.TaskWorkflowService;
 import com.ailab.system.util.LabPeriodUtils;
-import com.ruoyi.common.annotation.DataScope;
 import com.ruoyi.common.exception.ServiceException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -28,6 +27,9 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +37,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class LabTaskServiceImpl implements LabTaskService {
     private static final BigDecimal ONE_HUNDRED = new BigDecimal("100");
+    private static final Set<String> QUERY_WORKFLOW_STATUSES = new HashSet<String>(Arrays.asList(
+            LabConstants.WORKFLOW_DRAFT, LabConstants.WORKFLOW_ACTIVE,
+            LabConstants.WORKFLOW_PENDING_REVIEW, LabConstants.WORKFLOW_CONFIRMED));
     private final LabTaskMapper taskMapper;
     private final LabTaskEvidenceMapper evidenceMapper;
     private final LabGoalMapper goalMapper;
@@ -59,11 +64,24 @@ public class LabTaskServiceImpl implements LabTaskService {
     }
 
     @Override
-    @DataScope(deptAlias = "t", userAlias = "u", permission = "lab:task:list")
     public List<LabTask> listTasks(LabTask query, Long actorId) {
         LabTask scoped = query == null ? new LabTask() : query;
+        validateTaskListQuery(scoped);
         accessService.scopeTaskQuery(scoped, actorId);
         return taskMapper.selectTaskList(scoped);
+    }
+
+    private void validateTaskListQuery(LabTask query) {
+        for (String status : query.getWorkflowStatuses()) {
+            if (!QUERY_WORKFLOW_STATUSES.contains(status)) throw new ServiceException("Unsupported task workflow status filter");
+        }
+        if (query.getCurrentBlockFlag() != null && !LabConstants.YES.equals(query.getCurrentBlockFlag())
+                && !LabConstants.NO.equals(query.getCurrentBlockFlag())) {
+            throw new ServiceException("Current block flag filter must be 0 or 1");
+        }
+        if (Boolean.TRUE.equals(query.getOverdueOrPending()) && query.getAsOf() == null) {
+            throw new ServiceException("As-of time is required for overdue task filtering");
+        }
     }
 
     @Override

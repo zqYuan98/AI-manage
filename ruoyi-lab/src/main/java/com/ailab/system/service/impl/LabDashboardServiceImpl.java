@@ -18,8 +18,11 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -33,7 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class LabDashboardServiceImpl implements LabDashboardService {
     private static final BigDecimal FIVE = new BigDecimal("5");
     private static final BigDecimal FIFTEEN = new BigDecimal("15");
-    private static final String HEALTH_DEFINITION = "期望进度为当前日期前计划到期子项权重累计，实际进度只聚合已确认结果；风险颜色取最严重值";
+    private static final String HEALTH_DEFINITION = "期望进度为截至口径日期计划到期子项权重累计；实际进度按已确认月任务结果或执行中月任务的已确认周任务完成比例计算，再按目标与季度权重聚合；风险颜色取最严重值";
     private final LabDashboardMapper mapper;
     private final LabAccessService access;
     private final Clock clock;
@@ -49,43 +52,47 @@ public class LabDashboardServiceImpl implements LabDashboardService {
     @Override
     @Transactional(readOnly = true)
     public DashboardOverview getOverview(String period, Long actorUserId) {
-        requireMonth(period);
+        YearMonth requestedMonth = requireMonth(period);
         LabAccessContext scope = access.context(actorUserId);
         Date now = Date.from(clock.instant());
         LocalDate localToday = LocalDate.now(clock);
+        boolean historical = requestedMonth.isBefore(YearMonth.from(localToday));
+        LocalDate asOfDate = historical ? requestedMonth.atEndOfMonth() : localToday;
+        Date asOf = historical
+                ? Date.from(asOfDate.plusDays(1).atStartOfDay(clock.getZone()).minusNanos(1).toInstant()) : now;
         List<GoalHealth> health = new ArrayList<GoalHealth>();
-        for (GoalHealthFact fact : safe(mapper.selectGoalHealthFacts(localToday.getYear(), now, scope))) health.add(calculateHealth(fact));
-        DashboardKpiFact kpi = mapper.selectKpiFact(period, now, scope);
+        for (GoalHealthFact fact : safe(mapper.selectGoalHealthFacts(requestedMonth.getYear(), asOf, scope))) health.add(calculateHealth(fact));
+        DashboardKpiFact kpi = mapper.selectKpiFact(period, asOf, scope);
         if (kpi == null) kpi = new DashboardKpiFact();
 
         DashboardOverview result = new DashboardOverview();
         result.setGoalHealth(health);
-        List<GoalTrendPoint> trend = safeTrend(mapper.selectGoalProgressTrend(localToday.getYear(), scope));
+        List<GoalTrendPoint> trend = safeTrend(mapper.selectGoalProgressTrend(requestedMonth.getYear(), asOf, scope));
         for (GoalTrendPoint point : trend) {
-            point.setDefinition("按年度目标贡献权重累计计划进度与已确认实际进度"); point.setLastUpdated(now);
+            point.setDefinition("按年度目标贡献权重累计计划进度，以及已确认月任务或执行中月任务已确认周任务比例形成的实际进度"); point.setLastUpdated(now);
             point.getDrillDownFilters().put("period", point.getPeriod());
         }
         result.setGoalTrend(trend);
-        result.setKpis(kpis(period, health, kpi, now));
+        result.setKpis(kpis(period, health, kpi, now, asOf, asOfDate));
         result.setTaskStatusDistribution(decorateCounts(safeCounts(mapper.selectTaskStatusDistribution(period, scope)), period,
                 "按当前任务工作流状态计数", now, "workflowStatus"));
-        result.setCoordinationItems(decorateActions(safeActions(mapper.selectCoordinationItems(period, scope)), period,
-                "当前周期仍需协调的任务", now, "coordinationRequired", "1"));
+        result.setRecentIpr(decorateActions(safeActions(mapper.selectRecentIpr(asOf, scope)), period,
+                "按计划提交日期展示公开的知识产权基础信息", now, "status", "ACTIVE"));
+        result.setRecentReports(decorateActions(safeActions(mapper.selectRecentReports(period, scope)), period,
+                "当前周期有权读取的非敏感已定稿报告及制品状态", now, "period", period));
+        DashboardActionItem latestReport = mapper.selectLatestReport(period, scope);
+        if (latestReport != null) {
+            decorateActions(Collections.singletonList(latestReport), period,
+                    "当前周期最近更新且有权读取的报告", now, "period", period);
+        }
+        result.setLatestReport(latestReport);
         if (!LabAccessServiceImpl.MEMBER.equals(scope.getRoleKey())) {
-            result.setRecentIpr(decorateActions(safeActions(mapper.selectRecentIpr(now, scope)), period,
-                    "按计划提交日期展示近期知识产权", now, "status", "ACTIVE"));
-            Date twoWeekStart = Date.from(localToday.minusDays(13).atStartOfDay(clock.getZone()).toInstant());
-            List<MemberLoad> loads = safeLoads(mapper.selectMemberLoads(period, twoWeekStart, now, scope));
+            result.setCoordinationItems(decorateActions(safeActions(mapper.selectCoordinationItems(period, scope)), period,
+                    "当前周期仍需协调的任务", now, "coordinationRequired", "1"));
+            Date twoWeekStart = Date.from(asOfDate.minusDays(13).atStartOfDay(clock.getZone()).toInstant());
+            List<MemberLoad> loads = safeLoads(mapper.selectMemberLoads(period, twoWeekStart, asOf, scope));
             decorateLoads(loads, period, now);
             result.setMemberLoads(loads);
-            result.setRecentReports(decorateActions(safeActions(mapper.selectRecentReports(period, scope)), period,
-                    "当前周期报告实例及制品状态", now, "period", period));
-            DashboardActionItem latestReport = mapper.selectLatestReport(period, scope);
-            if (latestReport != null) {
-                decorateActions(Collections.singletonList(latestReport), period,
-                        "当前周期最近更新且有权读取的报告", now, "period", period);
-            }
-            result.setLatestReport(latestReport);
             if (LabAccessServiceImpl.MANAGER.equals(scope.getRoleKey())) {
                 result.setPerformanceSummary(decorateCounts(safeCounts(mapper.selectPerformanceSummary(period, scope)), period,
                         "仅部门负责人可见的当前绩效结果状态分布", now, "period", "period"));
@@ -111,7 +118,8 @@ public class LabDashboardServiceImpl implements LabDashboardService {
         return value;
     }
 
-    private List<DashboardMetric> kpis(String period, List<GoalHealth> health, DashboardKpiFact fact, Date now) {
+    private List<DashboardMetric> kpis(String period, List<GoalHealth> health, DashboardKpiFact fact, Date now,
+            Date asOf, LocalDate asOfDate) {
         int riskGoals = 0; for (GoalHealth item : health) if (!"GREEN".equals(item.getStatus())) riskGoals++;
         List<DashboardMetric> values = new ArrayList<DashboardMetric>();
         values.add(metric("annualGoalHealth", "年度目标健康风险", riskGoals, "个", period,
@@ -119,9 +127,13 @@ public class LabDashboardServiceImpl implements LabDashboardService {
         values.add(metric("keyTaskCompletion", "当月重点任务完成率", zero(fact.getKeyTaskCompletionRate()), "%", period,
                 "已确认且结果完成的当月重点任务绩效权重/全部当月重点任务绩效权重", now, filters("period", period, "taskType", "key")));
         values.add(metric("overdueOrPending", "逾期/未填", integer(fact.getOverdueOrPendingCount()), "项", period,
-                "计划日期已过仍未提交，或草稿/执行中存在必填字段缺失的当前任务数", now, filters("period", period, "workflowStatus", "ACTIVE")));
+                "计划日期已过仍未提交，或草稿/执行中存在必填字段缺失的当前任务数", now,
+                filters("period", period, "workflowStatuses", Arrays.asList("DRAFT", "ACTIVE"),
+                        "overdueOrPending", Boolean.TRUE, "asOf", asOf)));
+        Date blockStartBefore = Date.from(asOfDate.minusDays(7).atStartOfDay(clock.getZone()).toInstant());
         values.add(metric("blockedOverSeven", "阻塞超过7天", integer(fact.getBlockedOverSevenCount()), "项", period,
-                "当前OPEN阻塞事件自开始日期已满7天的任务数", now, filters("period", period, "blockFlag", "1")));
+                "当前OPEN阻塞事件自开始日期已满7天的任务数", now,
+                filters("period", period, "currentBlockFlag", "1", "blockStartBefore", blockStartBefore, "asOf", asOf)));
         values.add(metric("assetsWithoutBackup", "无备份资产", integer(fact.getAssetsWithoutBackupCount()), "项", period,
                 "当前有效且未配置有效备份负责人的资产数", now, filters("status", "ACTIVE", "singlePointRisk", Boolean.TRUE)));
         return values;
@@ -169,7 +181,16 @@ public class LabDashboardServiceImpl implements LabDashboardService {
         for (int i = 0; i < pairs.length; i += 2) value.put(String.valueOf(pairs[i]), pairs[i + 1]);
         return value;
     }
-    private void requireMonth(String period) { if (period == null || !period.matches("\\d{4}-(0[1-9]|1[0-2])")) throw new ServiceException("Period must use YYYY-MM"); }
+    private YearMonth requireMonth(String period) {
+        try {
+            if (period == null || !period.matches("\\d{4}-\\d{2}")) {
+                throw new DateTimeParseException("invalid", String.valueOf(period), 0);
+            }
+            return YearMonth.parse(period);
+        } catch (DateTimeParseException e) {
+            throw new ServiceException("period: must use a valid YYYY-MM value");
+        }
+    }
     private BigDecimal zero(BigDecimal value) { return value == null ? BigDecimal.ZERO.setScale(2) : value.setScale(2, RoundingMode.HALF_UP); }
     private int integer(Integer value) { return value == null ? 0 : value; }
     private <T> List<T> safe(List<T> value) { return value == null ? Collections.<T>emptyList() : value; }

@@ -30,6 +30,8 @@ public class LabTask extends BaseEntity {
     private BigDecimal perfWeight;
     private BigDecimal goalWeight;
     private String workflowStatus;
+    /** Query-only workflow collection used by dashboard drill-downs. */
+    private List<String> workflowStatuses = new ArrayList<String>();
     private String resultStatus;
     private String resultDesc;
     private String failReason;
@@ -42,6 +44,15 @@ public class LabTask extends BaseEntity {
     private String coordinationSupport;
     private String coordinationDesc;
     private String blockFlag;
+    /** Query-only current block flag; kept distinct from the persisted mutation field. */
+    private String currentBlockFlag;
+    /** Query-only inclusive block start cutoff. */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date blockStartBefore;
+    /** Query-only KPI predicate and trusted calculation timestamp. */
+    private Boolean overdueOrPending;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date asOf;
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date blockStartTime;
     private String periodLockFlag;
@@ -83,6 +94,11 @@ public class LabTask extends BaseEntity {
     public void setGoalWeight(BigDecimal goalWeight) { this.goalWeight = goalWeight; }
     public String getWorkflowStatus() { return workflowStatus; }
     public void setWorkflowStatus(String workflowStatus) { this.workflowStatus = workflowStatus; }
+    /** Mutable only so Spring's indexed GET parameter binder can populate this query collection. */
+    public List<String> getWorkflowStatuses() { return workflowStatuses; }
+    public void setWorkflowStatuses(List<String> workflowStatuses) {
+        this.workflowStatuses = workflowStatuses == null ? new ArrayList<String>() : new ArrayList<String>(workflowStatuses);
+    }
     public String getResultStatus() { return resultStatus; }
     public void setResultStatus(String resultStatus) { this.resultStatus = resultStatus; }
     public String getResultDesc() { return resultDesc; }
@@ -107,6 +123,14 @@ public class LabTask extends BaseEntity {
     public void setCoordinationDesc(String coordinationDesc) { this.coordinationDesc = coordinationDesc; }
     public String getBlockFlag() { return blockFlag; }
     public void setBlockFlag(String blockFlag) { this.blockFlag = blockFlag; }
+    public String getCurrentBlockFlag() { return currentBlockFlag; }
+    public void setCurrentBlockFlag(String currentBlockFlag) { this.currentBlockFlag = currentBlockFlag; }
+    public Date getBlockStartBefore() { return copyDate(blockStartBefore); }
+    public void setBlockStartBefore(Date blockStartBefore) { this.blockStartBefore = copyDate(blockStartBefore); }
+    public Boolean getOverdueOrPending() { return overdueOrPending; }
+    public void setOverdueOrPending(Boolean overdueOrPending) { this.overdueOrPending = overdueOrPending; }
+    public Date getAsOf() { return copyDate(asOf); }
+    public void setAsOf(Date asOf) { this.asOf = copyDate(asOf); }
     public Date getBlockStartTime() { return copyDate(blockStartTime); }
     public void setBlockStartTime(Date blockStartTime) { this.blockStartTime = copyDate(blockStartTime); }
     public String getPeriodLockFlag() { return periodLockFlag; }
