@@ -511,17 +511,34 @@ class LabMapperMySqlIT {
         jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?,'2098-07',39202,39203,'BACKUP',4,'https://example.invalid/it/july-backup',39201,'APPROVED',now(),'July training',0,'0','it',now())", taskId);
         jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?,'2098-08',39203,39202,'BACKUP',4,'https://example.invalid/it/unrelated-backup',39201,'APPROVED',now(),'Other owner',0,'0','it',now())", taskId);
         jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?,'2098-09',39202,39203,'BACKUP',4,'https://example.invalid/it/future-backup',39201,'APPROVED',now(),'Future training',0,'0','it',now())", taskId);
+        jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(999999,'2098-07',39202,39203,'BACKUP',4,'https://example.invalid/it/orphaned-task',39201,'APPROVED',now(),'Orphaned task',0,'0','it',now())");
 
         List<LabCollaborationRecord> bounded = performanceMapper.selectQuarterCollaborationFacts("2098-07", "2098-08");
 
-        assertEquals(Arrays.asList("2098-07", "2098-08"), Arrays.asList(bounded.get(0).getPeriod(), bounded.get(1).getPeriod()));
-        assertTrue(bounded.stream().allMatch(fact -> Long.valueOf(39301L).equals(fact.getRelatedAssetId())));
+        assertEquals(Arrays.asList("2098-07", "2098-07", "2098-08"), Arrays.asList(bounded.get(0).getPeriod(), bounded.get(1).getPeriod(), bounded.get(2).getPeriod()));
+        assertEquals(Long.valueOf(39301L), bounded.get(0).getRelatedAssetId());
+        assertNull(bounded.get(1).getRelatedAssetId());
+        assertEquals(Long.valueOf(39301L), bounded.get(2).getRelatedAssetId());
+        List<LabCollaborationRecord> currentMonth = performanceMapper.selectCollaborationForPeriod("2098-08");
+        assertEquals(1, currentMonth.size());
+        assertEquals(Long.valueOf(39301L), currentMonth.get(0).getRelatedAssetId());
         PerformanceAssetFact criticalAsset = new PerformanceAssetFact();
         criticalAsset.setAssetId(39301L); criticalAsset.setAssetName("IT critical model"); criticalAsset.setPrimaryOwnerId(39203L);
         PerformanceCalculationInput accepted = backupCutoffInput(bounded, criticalAsset);
-        assertFalse(new LabPerformanceCalculator().calculate(accepted).getDetailJson().contains("CRITICAL_ASSET_WITHOUT_BACKUP"));
+        String acceptedDetail = new LabPerformanceCalculator().calculate(accepted).getDetailJson();
+        assertFalse(acceptedDetail.contains("CRITICAL_ASSET_WITHOUT_BACKUP"));
+        com.alibaba.fastjson2.JSONObject acceptedSnapshot = com.alibaba.fastjson2.JSON.parseObject(acceptedDetail);
+        com.alibaba.fastjson2.JSONArray snapshotFacts = acceptedSnapshot.getJSONArray("quarterBackupFacts");
+        assertEquals(2, snapshotFacts.size());
+        assertEquals(bounded.get(0).getId(), snapshotFacts.getJSONObject(0).getLong("recordId"));
+        assertTrue(snapshotFacts.getJSONObject(0).getBooleanValue("qualified"));
+        assertEquals(bounded.get(1).getId(), snapshotFacts.getJSONObject(1).getLong("recordId"));
+        assertEquals("NO_MATCHING_MEMBER_ASSET", snapshotFacts.getJSONObject(1).getString("exclusionReason"));
+        assertEquals(Collections.singletonList(bounded.get(0).getId()), acceptedSnapshot.getJSONArray("assetFacts").getJSONObject(0).getList("qualifyingCollaborationIds", Long.class));
+        assertFalse(acceptedDetail.contains("https://example.invalid/it/unrelated-backup"));
+        assertFalse(acceptedDetail.contains("https://example.invalid/it/future-backup"));
 
-        PerformanceCalculationInput unrelatedOnly = backupCutoffInput(Collections.singletonList(bounded.get(1)), criticalAsset);
+        PerformanceCalculationInput unrelatedOnly = backupCutoffInput(Collections.singletonList(bounded.get(2)), criticalAsset);
         PerformanceCalculationResult unrelated = new LabPerformanceCalculator().calculate(unrelatedOnly);
         assertTrue(unrelated.getDetailJson().contains("CRITICAL_ASSET_WITHOUT_BACKUP"));
         assertTrue(unrelated.getDetailJson().contains("\"quarterBackupTraining\":false"));

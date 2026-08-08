@@ -299,28 +299,70 @@ class LabPerformanceServiceTest {
     }
 
     @Test
-    void quarterBackupTrainingUsesOnlyEligibleFactsThroughTheCloseMonthForTheSameAssetOwner() {
-        for (String eligiblePeriod : Arrays.asList("2026-07", "2026-08")) {
-            PerformanceCalculationInput eligible = backupInput();
-            eligible.setQuarterCollaborationFacts(Collections.singletonList(backupFact(71L, eligiblePeriod, 21L, 7L, "BACKUP", "APPROVED", "https://e/training")));
-            PerformanceCalculationResult accepted = calculator.calculate(eligible);
-            assertFalse(accepted.getDetailJson().contains("CRITICAL_ASSET_WITHOUT_BACKUP"), eligiblePeriod);
-            assertTrue(accepted.getDetailJson().contains("\"quarterBackupTraining\":true"), eligiblePeriod);
-        }
+    void quarterBackupSnapshotTracesQualifiedFactsAndScopedDecoysWithoutLeakingOtherMembers() {
+        PerformanceCalculationInput input = backupInput();
+        LabCollaborationRecord qualified = backupFact(71L, "2026-07", 21L, 7L, "BACKUP", "APPROVED", "https://e/july-training");
+        qualified.setTaskId(701L); qualified.setFromMemberId(8L); qualified.setSignedScore(new BigDecimal("4.50"));
+        qualified.setReviewerId(9L); qualified.setReviewTime(Date.from(Instant.parse("2026-07-20T01:02:03Z"))); qualified.setReviewComment("qualified backup training");
+        qualified.setIdempotencyKey("BACKUP:2026-07:71"); qualified.setVersion(2); qualified.setCreateBy("200"); qualified.setCreateTime(Date.from(Instant.parse("2026-07-18T01:02:03Z")));
+        qualified.setUpdateBy("100"); qualified.setUpdateTime(Date.from(Instant.parse("2026-07-20T01:02:04Z"))); qualified.setRemark("quarterly backup evidence");
+        LabCollaborationRecord pending = backupFact(82L, "2026-07", 21L, 7L, "BACKUP", "PENDING", "https://e/pending");
+        LabCollaborationRecord rejected = backupFact(83L, "2026-07", 21L, 7L, "BACKUP", "REJECTED", "https://e/rejected");
+        LabCollaborationRecord missingEvidence = backupFact(84L, "2026-07", 21L, 7L, "BACKUP", "APPROVED", " ");
+        LabCollaborationRecord wrongCategory = backupFact(85L, "2026-07", 21L, 7L, "KNOWLEDGE", "APPROVED", "https://e/wrong-category");
+        LabCollaborationRecord wrongAsset = backupFact(86L, "2026-07", 22L, 7L, "BACKUP", "APPROVED", "https://e/wrong-asset");
+        LabCollaborationRecord secretOtherMember = backupFact(87L, "2026-07", 21L, 99L, "BACKUP", "APPROVED", "https://secret/other-member");
+        LabCollaborationRecord future = backupFact(88L, "2026-09", 21L, 7L, "BACKUP", "APPROVED", "https://e/future");
+        LabCollaborationRecord orphanedTask = backupFact(89L, "2026-07", null, 7L, "BACKUP", "APPROVED", "https://e/orphaned-task");
+        input.setQuarterCollaborationFacts(Arrays.asList(future, orphanedTask, secretOtherMember, wrongAsset, wrongCategory, missingEvidence, rejected, pending, qualified));
 
-        PerformanceCalculationInput rejected = backupInput();
-        rejected.setQuarterCollaborationFacts(Arrays.asList(
-                backupFact(81L, "2026-09", 21L, 7L, "BACKUP", "APPROVED", "https://e/future"),
-                backupFact(82L, "2026-07", 21L, 7L, "BACKUP", "PENDING", "https://e/pending"),
-                backupFact(83L, "2026-07", 21L, 7L, "BACKUP", "REJECTED", "https://e/rejected"),
-                backupFact(84L, "2026-07", 21L, 7L, "BACKUP", "APPROVED", " "),
-                backupFact(85L, "2026-07", 21L, 7L, "KNOWLEDGE", "APPROVED", "https://e/wrong-category"),
-                backupFact(86L, "2026-07", 22L, 7L, "BACKUP", "APPROVED", "https://e/wrong-asset"),
-                backupFact(87L, "2026-07", 21L, 99L, "BACKUP", "APPROVED", "https://e/wrong-member")));
+        PerformanceCalculationResult result = calculator.calculate(input);
+        String detail = result.getDetailJson();
+        com.alibaba.fastjson2.JSONObject snapshot = com.alibaba.fastjson2.JSON.parseObject(detail);
+        com.alibaba.fastjson2.JSONArray facts = snapshot.getJSONArray("quarterBackupFacts");
 
-        PerformanceCalculationResult excluded = calculator.calculate(rejected);
-        assertTrue(excluded.getDetailJson().contains("CRITICAL_ASSET_WITHOUT_BACKUP"));
-        assertTrue(excluded.getDetailJson().contains("\"quarterBackupTraining\":false"));
+        assertFalse(detail.contains("CRITICAL_ASSET_WITHOUT_BACKUP"));
+        assertFalse(detail.contains("https://secret/other-member"));
+        assertTrue(facts != null, "quarter backup facts must be snapshotted");
+        assertEquals(8, facts.size());
+        assertEquals(Arrays.asList(71L, 82L, 83L, 84L, 85L, 86L, 89L, 88L), Arrays.asList(
+                facts.getJSONObject(0).getLongValue("recordId"), facts.getJSONObject(1).getLongValue("recordId"), facts.getJSONObject(2).getLongValue("recordId"),
+                facts.getJSONObject(3).getLongValue("recordId"), facts.getJSONObject(4).getLongValue("recordId"), facts.getJSONObject(5).getLongValue("recordId"),
+                facts.getJSONObject(6).getLongValue("recordId"), facts.getJSONObject(7).getLongValue("recordId")));
+        com.alibaba.fastjson2.JSONObject qualifiedSnapshot = facts.getJSONObject(0);
+        assertEquals("2026-07", qualifiedSnapshot.getString("period"));
+        assertEquals("BACKUP", qualifiedSnapshot.getString("category"));
+        assertEquals(Long.valueOf(21L), qualifiedSnapshot.getLong("relatedAssetId"));
+        assertEquals(Long.valueOf(7L), qualifiedSnapshot.getLong("toMemberId"));
+        assertEquals(new BigDecimal("4.50"), qualifiedSnapshot.getBigDecimal("score"));
+        assertEquals("quarterly backup evidence", qualifiedSnapshot.getString("description"));
+        assertEquals("https://e/july-training", qualifiedSnapshot.getString("evidenceUrl"));
+        assertEquals("APPROVED", qualifiedSnapshot.getString("reviewStatus"));
+        assertEquals(Long.valueOf(9L), qualifiedSnapshot.getLong("reviewerId"));
+        assertEquals("2026-07-20T01:02:03Z", qualifiedSnapshot.getString("reviewTime"));
+        assertEquals("qualified backup training", qualifiedSnapshot.getString("reviewComment"));
+        assertEquals("BACKUP:2026-07:71", qualifiedSnapshot.getString("idempotencyKey"));
+        assertEquals(Integer.valueOf(2), qualifiedSnapshot.getInteger("version"));
+        assertEquals("200", qualifiedSnapshot.getString("createBy"));
+        assertEquals("2026-07-18T01:02:03Z", qualifiedSnapshot.getString("createTime"));
+        assertEquals("100", qualifiedSnapshot.getString("updateBy"));
+        assertEquals("2026-07-20T01:02:04Z", qualifiedSnapshot.getString("updateTime"));
+        assertEquals("0", qualifiedSnapshot.getString("delFlag"));
+        assertEquals("quarterly backup evidence", qualifiedSnapshot.getString("remark"));
+        assertTrue(qualifiedSnapshot.getBooleanValue("qualified"));
+        assertTrue(qualifiedSnapshot.getBooleanValue("included"));
+        assertEquals(Collections.singletonList(21L), qualifiedSnapshot.getList("matchedAssetIds", Long.class));
+        assertEquals("REVIEW_NOT_APPROVED", facts.getJSONObject(1).getString("exclusionReason"));
+        assertEquals("REVIEW_NOT_APPROVED", facts.getJSONObject(2).getString("exclusionReason"));
+        assertEquals("MISSING_EVIDENCE", facts.getJSONObject(3).getString("exclusionReason"));
+        assertEquals("CATEGORY_NOT_BACKUP", facts.getJSONObject(4).getString("exclusionReason"));
+        assertEquals("NO_MATCHING_MEMBER_ASSET", facts.getJSONObject(5).getString("exclusionReason"));
+        assertEquals("NO_MATCHING_MEMBER_ASSET", facts.getJSONObject(6).getString("exclusionReason"));
+        assertEquals("OUTSIDE_CUTOFF_QUARTER", facts.getJSONObject(7).getString("exclusionReason"));
+        com.alibaba.fastjson2.JSONObject asset = snapshot.getJSONArray("assetFacts").getJSONObject(0);
+        assertTrue(asset.getBooleanValue("quarterBackupTraining"));
+        assertEquals(Collections.singletonList(71L), asset.getList("qualifyingCollaborationIds", Long.class));
+        assertEquals(detail, calculator.calculate(input).getDetailJson());
     }
 
     @Test

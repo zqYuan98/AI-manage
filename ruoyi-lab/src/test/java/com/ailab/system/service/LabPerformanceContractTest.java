@@ -94,13 +94,13 @@ class LabPerformanceContractTest {
     void mapperUsesBoundParametersStableLocksAndObjectScopes() throws Exception {
         String xml = text(root().resolve("ruoyi-lab/src/main/resources/mapper/lab/LabPerformanceMapper.xml")).toLowerCase().replaceAll("\\s+", " ");
         assertFalse(xml.contains("${"));
-        assertTrue(xml.contains("where period=#{period} and del_flag='0' order by id for update"));
+        assertTrue(xml.contains("where c.period=#{period} and c.del_flag='0' order by c.id for update"));
         assertTrue(xml.contains("member_status='active'") && xml.contains("order by m.id for update"));
         assertTrue(xml.contains("current_flag='1' and del_flag='0' order by member_id,id for update"));
         assertFalse(xml.contains("insert ignore into lab_period_close"));
         assertTrue(xml.contains("on duplicate key update id=last_insert_id(id)") && xml.contains("insert ignore into lab_collaboration_record"));
         assertTrue(xml.contains("id=\"selectcollaborationbyid\"") && xml.contains("id=\"selectcollaborationsforperiodforupdate\""));
-        assertTrue(xml.contains("from lab_collaboration_record where period=#{period} and del_flag='0' order by id for update"));
+        assertTrue(xml.contains("select c.*,t.asset_id related_asset_id from lab_collaboration_record c left join lab_task t on t.id=c.task_id and t.del_flag='0' where c.period=#{period} and c.del_flag='0' order by c.id for update"));
         assertTrue(xml.contains("rolekey == 'lab_lead'") && xml.contains("rolekey == 'lab_member'"));
         assertTrue(xml.contains("json_extract(detail_json,'$.redlinetriggers')"));
         assertTrue(xml.contains("current_flag='1' and confirmation_status='pending'"));
@@ -117,9 +117,17 @@ class LabPerformanceContractTest {
 
         String xml = text(root().resolve("ruoyi-lab/src/main/resources/mapper/lab/LabPerformanceMapper.xml")).toLowerCase().replaceAll("\\s+", " ");
         assertTrue(xml.contains("property=\"relatedassetid\" column=\"related_asset_id\""));
+        for (String property : new String[] {"reviewcomment","idempotencykey","version","delflag","createby","createtime","updateby","updatetime","remark"}) {
+            assertTrue(xml.contains("property=\"" + property + "\""), "missing collaboration audit mapping " + property);
+        }
+        assertTrue(xml.contains("id=\"selectcollaborationforperiod\"") && xml.contains("id=\"selectcollaborationsforperiodforupdate\""));
+        assertTrue(xml.contains("select c.*,t.asset_id related_asset_id from lab_collaboration_record c left join lab_task t on t.id=c.task_id and t.del_flag='0'"));
         assertTrue(xml.contains("id=\"selectquartercollaborationfacts\"") && xml.contains("id=\"selectquartercollaborationfactsforupdate\""));
         assertTrue(xml.contains("join lab_task t on t.id=c.task_id") && xml.contains("t.asset_id related_asset_id"));
         assertTrue(xml.contains("c.period between #{quarterstart} and #{closeperiod}") && xml.contains("order by c.period,c.id for update"));
+        String quarterQueries = xml.substring(xml.indexOf("id=\"selectquartercollaborationfacts\""), xml.indexOf("id=\"selectcriticalassetfacts\""));
+        assertTrue(quarterQueries.contains("left join lab_task t on t.id=c.task_id and t.del_flag='0'"), "orphaned facts must remain auditable with a null related asset");
+        assertFalse(quarterQueries.contains("c.category='backup'"), "all same-member quarter candidates must remain available for exclusion audit");
         assertFalse(xml.contains("exists(select 1 from lab_collaboration_record"), "asset backup state must not use an unlocked collaboration subquery");
     }
 
