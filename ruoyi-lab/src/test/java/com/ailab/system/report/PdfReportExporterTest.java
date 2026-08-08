@@ -29,9 +29,12 @@ class PdfReportExporterTest {
     void runnerUsesArgumentListHandlesFakeSuccessFailureAndCleansIsolatedWork() throws Exception {
         Path temp = Files.createTempDirectory("pdf paths with spaces "); LabProperties properties = new LabProperties(); properties.setTempDirectory(temp.toString()); properties.setConversionTimeoutSeconds(1);
         LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()));
-        byte[] pdf = runner.convert(new byte[] {1}, "safe report"); String captured = new String(pdf, java.nio.charset.StandardCharsets.US_ASCII); assertTrue(captured.startsWith("%PDF-")); assertTrue(captured.contains("-env:UserInstallation=file:")); assertTrue(captured.contains("pdf paths with spaces"));
-        ReportExportException failed = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "nonzero")); assertTrue(failed.isRetryable());
+        byte[] pdf = runner.convert(new byte[] {1}, "safe report"); String captured = new String(pdf, java.nio.charset.StandardCharsets.US_ASCII); assertTrue(captured.startsWith("%PDF-")); assertTrue(captured.contains("-env:UserInstallation=file:")); assertTrue(captured.contains("pdf paths with spaces")); assertTrue(captured.indexOf("--headless") < captured.indexOf("--nologo") && captured.indexOf("--nologo") < captured.indexOf("--nodefault") && captured.indexOf("--nodefault") < captured.indexOf("--nofirststartwizard") && captured.indexOf("--nofirststartwizard") < captured.indexOf("--nolockcheck") && captured.indexOf("--nolockcheck") < captured.indexOf("--convert-to"));
+        ReportExportException failed = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "nonzero")); assertTrue(failed.isRetryable()); assertTrue(failed.getMessage().length() <= 600, failed.getMessage());
         ReportExportException missing = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "missing")); assertTrue(missing.isRetryable());
+        ReportExportException invalid = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "invalid")); assertTrue(invalid.isRetryable());
+        properties.setMaxUploadSizeBytes(1024L); ReportExportException oversize = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "oversize")); assertTrue(oversize.isRetryable()); properties.setMaxUploadSizeBytes(50L * 1024L * 1024L);
+        assertTrue(runner.convert(new byte[] {1}, "../../safe-name").length > 5);
         ReportExportException timeout = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "timeout")); assertTrue(timeout.isRetryable());
         ReportExportException tree = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "tree")); assertTrue(tree.isRetryable());
         long child = Long.parseLong(new String(Files.readAllBytes(temp.resolve("child.pid")), java.nio.charset.StandardCharsets.US_ASCII));
@@ -39,15 +42,38 @@ class PdfReportExporterTest {
         Object handle = optional.getClass().getMethod("orElse", Object.class).invoke(optional, new Object[] {null});
         assertTrue(handle == null || !((Boolean) Class.forName("java.lang.ProcessHandle").getMethod("isAlive").invoke(handle)).booleanValue());
         Files.deleteIfExists(temp.resolve("child.pid"));
+        ReportExportException orphan = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "orphan")); assertTrue(orphan.isRetryable());
+        long orphanPid = Long.parseLong(new String(Files.readAllBytes(temp.resolve("child.pid")), java.nio.charset.StandardCharsets.US_ASCII));
+        Object orphanOptional = Class.forName("java.lang.ProcessHandle").getMethod("of", long.class).invoke(null, Long.valueOf(orphanPid)); Object orphanHandle = orphanOptional.getClass().getMethod("orElse", Object.class).invoke(orphanOptional, new Object[] {null});
+        assertTrue(orphanHandle == null || !((Boolean) Class.forName("java.lang.ProcessHandle").getMethod("isAlive").invoke(orphanHandle)).booleanValue()); Files.deleteIfExists(temp.resolve("child.pid"));
         try (java.util.stream.Stream<Path> entries = Files.list(temp)) { java.util.List<Path> remaining = entries.collect(java.util.stream.Collectors.toList()); assertTrue(remaining.isEmpty(), String.valueOf(remaining)); }
     }
 
     @Test
     void cleanupFailureAfterSuccessfulConversionIsTypedAndDoesNotReturnThePdf() throws Exception {
         Path temp = Files.createTempDirectory("pdf cleanup seam "); LabProperties properties = new LabProperties(); properties.setTempDirectory(temp.toString());
-        LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()), root -> { throw new java.io.IOException("locked"); });
+        LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()), root -> { deleteTree(root); throw new java.io.IOException("locked"); });
         ReportExportException error = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "success"));
         assertTrue(error.getMessage().contains("cleanup"));
+        assertEmpty(temp);
+    }
+
+    @Test
+    void primaryConversionFailureRetainsCleanupFailureAsSuppressedContext() throws Exception {
+        Path temp = Files.createTempDirectory("pdf cleanup suppressed "); LabProperties properties = new LabProperties(); properties.setTempDirectory(temp.toString());
+        LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()), root -> { deleteTree(root); throw new java.io.IOException("cleanup locked"); });
+        ReportExportException error = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "nonzero"));
+        assertTrue(error.getSuppressed().length == 1);
+        assertTrue(error.getSuppressed()[0].getMessage().contains("cleanup locked"));
+        assertEmpty(temp);
+    }
+
+    @Test
+    void forcedJava8FallbackUsesThePlatformTreeTerminatorAndStillKillsTheChild() throws Exception {
+        Path temp = Files.createTempDirectory("pdf fallback tree "); LabProperties properties = new LabProperties(); properties.setTempDirectory(temp.toString()); properties.setConversionTimeoutSeconds(1);
+        System.setProperty("ailab.report.test.forceJava8Fallback", "true");
+        try { LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(javaExecutable(), "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName())); assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "tree")); long child = Long.parseLong(new String(Files.readAllBytes(temp.resolve("child.pid")), java.nio.charset.StandardCharsets.US_ASCII)); Object optional = Class.forName("java.lang.ProcessHandle").getMethod("of", long.class).invoke(null, Long.valueOf(child)); Object handle = optional.getClass().getMethod("orElse", Object.class).invoke(optional, new Object[] {null}); assertTrue(handle == null || !((Boolean) Class.forName("java.lang.ProcessHandle").getMethod("isAlive").invoke(handle)).booleanValue()); Files.deleteIfExists(temp.resolve("child.pid")); assertEmpty(temp); }
+        finally { System.clearProperty("ailab.report.test.forceJava8Fallback"); }
     }
 
     @Test
@@ -60,5 +86,7 @@ class PdfReportExporterTest {
         assertTrue(pdf.length > 5 && pdf[0] == '%');
     }
     private String javaExecutable() { String executable = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win") ? "java.exe" : "java"; return java.nio.file.Paths.get(System.getProperty("java.home"), "bin", executable).toString(); }
+    private void assertEmpty(Path directory) throws Exception { try (java.util.stream.Stream<Path> entries = Files.list(directory)) { assertTrue(!entries.findAny().isPresent()); } }
+    private void deleteTree(Path root) throws java.io.IOException { Files.walkFileTree(root, new java.nio.file.SimpleFileVisitor<Path>() { @Override public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attrs) throws java.io.IOException { Files.delete(file); return java.nio.file.FileVisitResult.CONTINUE; } @Override public java.nio.file.FileVisitResult postVisitDirectory(Path directory, java.io.IOException error) throws java.io.IOException { if (error != null) throw error; Files.delete(directory); return java.nio.file.FileVisitResult.CONTINUE; } }); }
     private java.nio.file.Path locateOffice(String configured) { java.nio.file.Path direct = java.nio.file.Paths.get(configured); if (direct.isAbsolute() && Files.isExecutable(direct)) return direct; String[] candidates = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win") ? new String[] {configured, "soffice.exe", "soffice"} : new String[] {configured, "soffice"}; for (String folder : System.getenv("PATH").split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) for (String name : candidates) { java.nio.file.Path candidate = java.nio.file.Paths.get(folder, name); if (Files.isExecutable(candidate)) return candidate; } return null; }
 }

@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import javax.imageio.ImageIO;
+import javax.xml.parsers.DocumentBuilderFactory;
 import org.junit.jupiter.api.Test;
 
 class WordReportExporterTest {
@@ -54,6 +55,15 @@ class WordReportExporterTest {
         assertTrue(rels.contains("image"));
         assertFalse(rels.contains("TargetMode=\"External\""));
         assertFalse(document.contains("lab:secret"));
+        org.w3c.dom.NodeList runs = xml(document).getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "r");
+        boolean tableSize = false, bodySize = false;
+        for (int i = 0; i < runs.getLength(); i++) {
+            org.w3c.dom.Element properties = first((org.w3c.dom.Element) runs.item(i), "rPr");
+            assertTrue(count(properties, "rFonts") == 1 && count(properties, "sz") == 1 && count(properties, "szCs") == 1);
+            String size = first(properties, "sz").getAttributeNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "val");
+            tableSize |= "17".equals(size); bodySize |= "21".equals(size);
+        }
+        assertTrue(tableSize && bodySize);
     }
 
     @Test
@@ -70,6 +80,15 @@ class WordReportExporterTest {
         assertThrows(java.io.IOException.class, () -> new WordReportExporter().export(value));
     }
 
+    @Test
+    void boundedSerializerRefusesBytesBeyondTheConfiguredCap() throws Exception {
+        Class<?> type = Class.forName("com.ailab.system.report.exporter.WordReportExporter$BoundedOutputStream");
+        java.lang.reflect.Constructor<?> constructor = type.getDeclaredConstructor(java.io.OutputStream.class, int.class); constructor.setAccessible(true);
+        java.io.OutputStream stream = (java.io.OutputStream) constructor.newInstance(new ByteArrayOutputStream(), 1);
+        java.io.IOException error = assertThrows(java.io.IOException.class, () -> stream.write(new byte[] {1, 2}));
+        assertTrue(error.getMessage().contains("byte limit"));
+    }
+
     private Map<String, String> xmlEntries(byte[] bytes) throws Exception {
         Map<String, String> result = new LinkedHashMap<String, String>();
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
@@ -81,6 +100,9 @@ class WordReportExporterTest {
         }
         return result;
     }
+    private org.w3c.dom.Document xml(String xml) throws Exception { DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance(); factory.setNamespaceAware(true); return factory.newDocumentBuilder().parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8))); }
+    private org.w3c.dom.Element first(org.w3c.dom.Element element, String name) { return (org.w3c.dom.Element) element.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", name).item(0); }
+    private int count(org.w3c.dom.Element element, String name) { return element.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", name).getLength(); }
 
     private ReportData report() {
         ReportContext context = new ReportContext("2026-08", "人工智能实验室", 7L,
