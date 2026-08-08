@@ -41,4 +41,22 @@ class PdfReportExporterTest {
         Files.deleteIfExists(temp.resolve("child.pid"));
         try (java.util.stream.Stream<Path> entries = Files.list(temp)) { java.util.List<Path> remaining = entries.collect(java.util.stream.Collectors.toList()); assertTrue(remaining.isEmpty(), String.valueOf(remaining)); }
     }
+
+    @Test
+    void cleanupFailureAfterSuccessfulConversionIsTypedAndDoesNotReturnThePdf() throws Exception {
+        Path temp = Files.createTempDirectory("pdf cleanup seam "); LabProperties properties = new LabProperties(); properties.setTempDirectory(temp.toString());
+        LibreOfficeProcessRunner runner = new LibreOfficeProcessRunner(properties, Arrays.asList(System.getProperty("java.home") + java.io.File.separator + "bin" + java.io.File.separator + "java.exe", "-cp", System.getProperty("java.class.path"), FakeLibreOfficeMain.class.getName()), root -> { throw new java.io.IOException("locked"); });
+        ReportExportException error = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "success"));
+        assertTrue(error.getMessage().contains("cleanup"));
+    }
+
+    @Test
+    void realLibreOfficeSmokeWhenAnAbsoluteExecutableIsAvailable() throws Exception {
+        LabProperties properties = new LabProperties(); java.nio.file.Path executable = java.nio.file.Paths.get(properties.getLibreOfficeExecutable());
+        org.junit.jupiter.api.Assumptions.assumeTrue(executable.isAbsolute() && Files.isExecutable(executable), "LibreOffice executable is not installed as an absolute executable");
+        Path temp = Files.createTempDirectory("real libreoffice smoke "); properties.setTempDirectory(temp.toString());
+        com.ailab.system.report.model.ReportData report = new com.ailab.system.report.model.ReportData(new com.ailab.system.report.model.ReportContext("2026-08", "实验室", 1L, java.time.Instant.EPOCH, java.util.Collections.<String,Object>emptyMap()), "t", 1, java.util.Collections.<com.ailab.system.report.model.ReportSectionData>emptyList(), java.util.Collections.<String,Object>emptyMap());
+        byte[] pdf = new LibreOfficeProcessRunner(properties).convert(new com.ailab.system.report.exporter.WordReportExporter().export(report), "smoke");
+        assertTrue(pdf.length > 5 && pdf[0] == '%');
+    }
 }

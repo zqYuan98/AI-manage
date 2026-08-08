@@ -26,16 +26,18 @@ import java.util.stream.Stream;
 /** Executes LibreOffice without a shell and with one disposable profile per conversion. */
 public final class LibreOfficeProcessRunner {
     private static final int MAX_LOG = 64 * 1024;
-    private final LabProperties properties; private final List<String> executable;
+    private final LabProperties properties; private final List<String> executable; private final Cleanup cleanup;
+    public interface Cleanup { void clean(Path root) throws IOException; }
     public LibreOfficeProcessRunner(LabProperties properties) { this(properties, Arrays.asList(properties.getLibreOfficeExecutable())); }
     /** Test seam for a Java fake executable; production still passes one soffice executable argument. */
-    public LibreOfficeProcessRunner(LabProperties properties, List<String> executable) {
+    public LibreOfficeProcessRunner(LabProperties properties, List<String> executable) { this(properties, executable, null); }
+    public LibreOfficeProcessRunner(LabProperties properties, List<String> executable, Cleanup cleanup) {
         if (properties == null || executable == null || executable.isEmpty()) throw new IllegalArgumentException("LibreOffice configuration is required");
-        this.properties = properties; this.executable = new ArrayList<String>(executable);
+        this.properties = properties; this.executable = new ArrayList<String>(executable); this.cleanup = cleanup == null ? new Cleanup() { @Override public void clean(Path root) throws IOException { delete(root); } } : cleanup;
     }
     public byte[] convert(byte[] word, String name) throws ReportExportException {
         if (word == null || word.length == 0) throw new ReportExportException("Word input is required", false);
-        Path root = null; ExecutorService readers = null;
+        Path root = null; ExecutorService readers = null; ReportExportException primary = null;
         try {
             Path configured = Paths.get(properties.getTempDirectory()).toAbsolutePath().normalize(); Files.createDirectories(configured);
             root = Files.createTempDirectory(configured, "lo-").toAbsolutePath().normalize(); requireInside(configured, root);
@@ -53,9 +55,9 @@ public final class LibreOfficeProcessRunner {
             if (!Files.isRegularFile(pdf)) throw new ReportExportException("LibreOffice produced no PDF output", true);
             byte[] bytes = Files.readAllBytes(pdf); long maximum = Math.max(1024L, properties.getMaxUploadSizeBytes());
             if (bytes.length > maximum || !pdf(bytes)) throw new ReportExportException("LibreOffice produced an invalid PDF", true); return bytes;
-        } catch (ReportExportException ex) { throw ex;
-        } catch (Exception ex) { throw new ReportExportException("LibreOffice conversion failed", true, ex);
-        } finally { if (readers != null) readers.shutdownNow(); if (root != null) delete(root); }
+        } catch (ReportExportException ex) { primary = ex; throw ex;
+        } catch (Exception ex) { primary = new ReportExportException("LibreOffice conversion failed", true, ex); throw primary;
+        } finally { if (readers != null) readers.shutdownNow(); if (root != null) try { cleanup.clean(root); } catch (IOException ex) { if (primary != null) primary.addSuppressed(ex); else throw new ReportExportException("Report conversion cleanup failed; temporary data may remain", true, ex); } }
     }
     private String bounded(InputStream input) throws IOException { try (InputStream stream=input; ByteArrayOutputStream out=new ByteArrayOutputStream()) { byte[] buffer=new byte[4096]; for(int n;(n=stream.read(buffer))>=0;) if(out.size()<MAX_LOG) out.write(buffer,0,Math.min(n,MAX_LOG-out.size())); return new String(out.toByteArray(), StandardCharsets.UTF_8); } }
     private void terminate(Process process) { terminateDescendants(process, false); process.destroy(); try { if (!process.waitFor(2, TimeUnit.SECONDS)) { terminateDescendants(process, true); process.destroyForcibly(); process.waitFor(5, TimeUnit.SECONDS); } } catch (InterruptedException ex) { Thread.currentThread().interrupt(); terminateDescendants(process, true); process.destroyForcibly(); } }
@@ -65,5 +67,5 @@ public final class LibreOfficeProcessRunner {
     private String safeName(String raw) { String value = raw == null ? "report" : raw.replaceAll("[^A-Za-z0-9._-]", "_"); value = value.replaceAll("^\\.+", ""); return value.isEmpty() ? "report" : value.length() > 80 ? value.substring(0,80) : value; }
     private boolean pdf(byte[] value) { return value.length >= 5 && value[0]=='%' && value[1]=='P' && value[2]=='D' && value[3]=='F' && value[4]=='-'; }
     private String compact(String stderr, String stdout) { String value=(stderr==null?"":stderr)+(stdout==null?"":" "+stdout); return value.replaceAll("[\\r\\n]+", " ").substring(0, Math.min(512, value.length())); }
-    private void delete(Path root) { IOException failure = null; for (int attempt = 0; attempt < 5; attempt++) { try { Files.walkFileTree(root, new SimpleFileVisitor<Path>() { @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException { Files.deleteIfExists(file); return FileVisitResult.CONTINUE; } @Override public FileVisitResult postVisitDirectory(Path directory, IOException error) throws IOException { if (error != null) throw error; Files.deleteIfExists(directory); return FileVisitResult.CONTINUE; } }); return; } catch (IOException ex) { failure = ex; try { Thread.sleep(100L); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; } } } if (failure != null) System.err.println("AI Lab report conversion temporary cleanup failed: " + root); }
+    private void delete(Path root) throws IOException { IOException failure = null; for (int attempt = 0; attempt < 5; attempt++) { try { Files.walkFileTree(root, new SimpleFileVisitor<Path>() { @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException { Files.deleteIfExists(file); return FileVisitResult.CONTINUE; } @Override public FileVisitResult postVisitDirectory(Path directory, IOException error) throws IOException { if (error != null) throw error; Files.deleteIfExists(directory); return FileVisitResult.CONTINUE; } }); return; } catch (IOException ex) { failure = ex; try { Thread.sleep(100L); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; } } } throw failure == null ? new IOException("Temporary cleanup failed") : failure; }
 }
