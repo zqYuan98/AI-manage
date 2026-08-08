@@ -4,23 +4,19 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
-/** Fails fast if two renderers claim the same stable section type. */
+/** Startup-time registry for exact renderer capabilities. */
 public final class SectionRendererRegistry {
-    private static final String[] TYPES = { "TABLE", "STAT", "TEXT", "MANUAL", "GROUP_TEXT", "CHART" };
-    private final Map<String, SectionRenderer> renderers;
-    private final Map<String, SectionRenderer> capabilities;
+    private final Map<String, SectionRenderer> renderers; private final Map<String, SectionRenderer> capabilities;
     public SectionRendererRegistry(Collection<? extends SectionRenderer> values) {
-        Map<String, SectionRenderer> result = new LinkedHashMap<String, SectionRenderer>();
-        for (SectionRenderer value : values) {
-            if (value == null || value.getId() == null || value.getId().trim().isEmpty()) throw new IllegalStateException("Section renderer id is required");
-            if (result.put(value.getId(), value) != null) throw new IllegalStateException("Duplicate section renderer id: " + value.getId());
-        }
-        Map<String, SectionRenderer> capabilityMap = new LinkedHashMap<String, SectionRenderer>();
-        for (String type : TYPES) { SectionRenderer owner = null; for (SectionRenderer renderer : result.values()) if (renderer.supports(type)) { if (owner != null) throw new IllegalStateException("Conflicting section renderers for: " + type); owner = renderer; } if (owner != null) capabilityMap.put(type, owner); }
-        renderers = Collections.unmodifiableMap(result);
-        capabilities = Collections.unmodifiableMap(capabilityMap);
+        Map<String, SectionRenderer> ids = new LinkedHashMap<String, SectionRenderer>(); Map<String, SectionRenderer> claimed = new LinkedHashMap<String, SectionRenderer>();
+        for (SectionRenderer value : values) { if (value == null || blank(value.getId()) || !value.supports(value.getId())) throw new IllegalStateException("Section renderer must support its own id"); if (ids.put(value.getId(), value) != null) throw new IllegalStateException("Duplicate section renderer id: " + value.getId()); }
+        for (SectionRenderer value : ids.values()) index(ids, claimed, value, value.getSupportedIds());
+        renderers = Collections.unmodifiableMap(ids); capabilities = Collections.unmodifiableMap(claimed);
     }
-    public SectionRenderer require(String id) { SectionRenderer value = renderers.get(id); if (value == null) value = capabilities.get(id); if (value == null) throw new IllegalArgumentException("Unknown section renderer: " + id); return value; }
+    private static void index(Map<String, SectionRenderer> ids, Map<String, SectionRenderer> claimed, SectionRenderer value, Set<String> declared) { if (declared == null) throw new IllegalStateException("Section renderer capabilities are required"); for (String capability : declared) { if (blank(capability) || !value.supports(capability)) throw new IllegalStateException("Renderer does not support declared capability"); SectionRenderer idOwner = ids.get(capability); SectionRenderer old = claimed.put(capability, value); if ((idOwner != null && idOwner != value) || (old != null && old != value)) throw new IllegalStateException("Conflicting section renderer capability: " + capability); } }
+    public SectionRenderer require(String id) { SectionRenderer value = renderers.containsKey(id) ? renderers.get(id) : capabilities.get(id); if (value == null || !value.supports(id)) throw new IllegalArgumentException("Unknown section renderer: " + id); return value; }
     public Map<String, SectionRenderer> asMap() { return renderers; }
+    private static boolean blank(String value) { return value == null || value.trim().isEmpty(); }
 }

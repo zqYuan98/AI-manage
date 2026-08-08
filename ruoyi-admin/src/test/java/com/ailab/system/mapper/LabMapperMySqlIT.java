@@ -798,6 +798,9 @@ class LabMapperMySqlIT {
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-legacy-fixture.sql")));
                 requireLegacySkillUniquenessState(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ailab.sql")));
+                requireLegacyReportTemplatePin(connection);
+                ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ailab.sql")));
+                requireLegacyReportTemplatePin(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-mapper-fixture.sql")));
             } catch (Exception exception) {
                 throw new IllegalStateException("Real MySQL 8 integration database is unavailable or could not be initialized. Configure LAB_IT_DB_URL/LAB_IT_DB_USERNAME/LAB_IT_DB_PASSWORD.", exception);
@@ -826,6 +829,21 @@ class LabMapperMySqlIT {
                 if (!result.next() || result.getInt(1) < 3 || result.getInt(2) < 2) {
                     throw new IllegalStateException("Legacy skill fixture must contain undeleted name and code collisions across statuses");
                 }
+            }
+        }
+
+        private static void requireLegacyReportTemplatePin(Connection connection) throws Exception {
+            try (java.sql.Statement statement = connection.createStatement();
+                    java.sql.ResultSet result = statement.executeQuery(
+                            "select template_code, template_revision from lab_report_instance where id=39990")) {
+                if (!result.next() || !"legacy-report-template-39990".equals(result.getString(1)) || result.getInt(2) != 7) {
+                    throw new IllegalStateException("Legacy report instance must be pinned to its template family and revision");
+                }
+            }
+            try (java.sql.Statement statement = connection.createStatement();
+                    java.sql.ResultSet result = statement.executeQuery(
+                            "select count(1) from information_schema.statistics where table_schema=database() and table_name='lab_report_instance' and index_name='idx_lab_report_instance_template_pin'")) {
+                if (!result.next() || result.getInt(1) != 2) throw new IllegalStateException("Template pin index must have both columns");
             }
         }
 

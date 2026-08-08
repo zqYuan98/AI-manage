@@ -177,3 +177,23 @@ INSERT INTO `lab_ipr`
 VALUES
  (39991,'IPR-LEGACY-39991','Legacy filing','PATENT','ACCEPTED',39203,'LEGACY-APPLICATION-39991','2026-06-15','https://example.invalid/legacy/ipr','it',NOW()),
  (39992,'IPR-LEGACY-39992','Legacy draft filing','PATENT','DRAFTING',39203,NULL,NULL,'https://example.invalid/legacy/ipr-draft','it',NOW());
+
+-- Task 8 predecessor: instance layout is complete except for immutable template-code/revision pins.
+DROP TABLE IF EXISTS `lab_report_instance`;
+DROP TABLE IF EXISTS `lab_report_template`;
+CREATE TABLE `lab_report_template` (
+ `id` bigint NOT NULL, `template_code` varchar(64) NOT NULL, `template_name` varchar(200) NOT NULL, `period_type` varchar(16) NOT NULL,
+ `revision_no` int NOT NULL, `latest_flag` char(1), `default_flag` char(1), `status` varchar(16), `header_json` json, `style_json` json,
+ `version` int, `del_flag` char(1) DEFAULT '0', `create_by` varchar(64), `create_time` datetime, `update_by` varchar(64), `update_time` datetime, `remark` varchar(500), PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `lab_report_instance` (
+ `id` bigint NOT NULL, `report_no` varchar(64) NOT NULL, `template_id` bigint NOT NULL, `period` varchar(16) NOT NULL, `biz_line` varchar(32), `revision_no` int NOT NULL,
+ `lifecycle_status` varchar(32), `current_flag` char(1), `final_flag` char(1), `sensitive_flag` char(1), `source_data_json` json, `source_perf_revision` int,
+ `content_json` json, `content_markdown` longtext, `json_status` varchar(16), `json_path` varchar(1000), `json_error` varchar(2000),
+ `markdown_status` varchar(16), `markdown_path` varchar(1000), `markdown_error` varchar(2000), `word_status` varchar(16), `word_path` varchar(1000), `word_error` varchar(2000),
+ `pdf_status` varchar(16), `pdf_path` varchar(1000), `pdf_error` varchar(2000), `version` int, `del_flag` char(1) DEFAULT '0', `create_by` varchar(64), `create_time` datetime, `update_by` varchar(64), `update_time` datetime, `remark` varchar(500), PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+INSERT INTO `lab_report_template` (`id`,`template_code`,`template_name`,`period_type`,`revision_no`,`latest_flag`,`default_flag`,`status`,`version`,`del_flag`,`create_by`,`create_time`) VALUES
+ (39990,'legacy-report-template-39990','Legacy report template','MONTH',7,'1','1','ENABLED',0,'0','it',NOW());
+INSERT INTO `lab_report_instance` (`id`,`report_no`,`template_id`,`period`,`biz_line`,`revision_no`,`lifecycle_status`,`current_flag`,`final_flag`,`sensitive_flag`,`version`,`del_flag`,`create_by`,`create_time`) VALUES
+ (39990,'RPT-LEGACY-39990',39990,'2026-06','ALL',1,'FINAL','1','1','0',0,'0','it',NOW());

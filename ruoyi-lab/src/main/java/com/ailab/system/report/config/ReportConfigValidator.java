@@ -38,6 +38,15 @@ public final class ReportConfigValidator {
         if ("PERF_SUMMARY".equals(provider) || nonBlank(section.getSensitivePermission())) section.setSensitiveFlag("1");
     }
 
+    /** Updates are checked against the persisted sensitive snapshot, never only against client input. */
+    public void validateUpdate(LabReportSection existingPersisted, LabReportSection candidate) {
+        if (existingPersisted == null) throw new IllegalArgumentException("Persisted section is required");
+        validateSection(candidate);
+        if (existingPersisted.isSensitive() && !candidate.isSensitive()) throw new IllegalStateException("Sensitive sections cannot be downgraded");
+        if (nonBlank(existingPersisted.getSensitivePermission())
+                && !existingPersisted.getSensitivePermission().equals(candidate.getSensitivePermission())) throw new IllegalStateException("Sensitive permission cannot be cleared or changed");
+    }
+
     public void validateForSave(String serializedSection) { validateSerialized(serializedSection); }
     public void validateForImport(String serializedSection) { validateSerialized(serializedSection); }
 
@@ -103,9 +112,29 @@ public final class ReportConfigValidator {
     public static final class TemplateFamily {
         private final List<LabReportTemplate> revisions = new ArrayList<LabReportTemplate>();
         public TemplateFamily(List<LabReportTemplate> current) { if (current != null) for (LabReportTemplate item : current) revisions.add(copy(item)); assertInvariant(); }
-        public void publishAsDefault(LabReportTemplate candidate) { if (candidate == null || !"ENABLED".equals(candidate.getStatus())) throw new IllegalStateException("Default template must be enabled"); for (LabReportTemplate item : revisions) if (candidate.getReportType().equals(item.getReportType())) { item.setDefaultFlag("0"); item.setLatestFlag("0"); } LabReportTemplate copy = copy(candidate); copy.setDefaultFlag("1"); copy.setLatestFlag("1"); revisions.add(copy); assertInvariant(); }
+        public void publishAsDefault(LabReportTemplate candidate) {
+            if (candidate == null || !"ENABLED".equals(candidate.getStatus()) || !nonBlank(candidate.getTemplateCode())) throw new IllegalStateException("Default template must be enabled and named");
+            for (LabReportTemplate item : revisions) {
+                if (candidate.getReportType().equals(item.getReportType())) item.setDefaultFlag("0");
+                if (candidate.getTemplateCode().equals(item.getTemplateCode())) item.setLatestFlag("0");
+            }
+            LabReportTemplate copy = copy(candidate); copy.setDefaultFlag("1"); copy.setLatestFlag("1"); revisions.add(copy); assertInvariant();
+        }
         public int defaultLatestEnabledCount(String reportType) { int count = 0; for (LabReportTemplate item : revisions) if (reportType.equals(item.getReportType()) && item.isDefaultTemplate() && item.isLatest() && "ENABLED".equals(item.getStatus())) count++; return count; }
         public List<LabReportTemplate> snapshot() { List<LabReportTemplate> copy = new ArrayList<LabReportTemplate>(); for (LabReportTemplate item : revisions) copy.add(ReportConfigValidator.copy(item)); return Collections.unmodifiableList(copy); }
-        private void assertInvariant() { Map<String, Integer> counts = new LinkedHashMap<String, Integer>(); for (LabReportTemplate item : revisions) { String type = item.getReportType(); if (!counts.containsKey(type)) counts.put(type, 0); if (item.isDefaultTemplate() && item.isLatest() && "ENABLED".equals(item.getStatus())) counts.put(type, counts.get(type) + 1); } for (Integer count : counts.values()) if (count.intValue() != 1) throw new IllegalStateException("Exactly one default latest enabled template is required per report type"); }
+        private void assertInvariant() {
+            Map<String, Integer> defaults = new LinkedHashMap<String, Integer>(); Map<String, Integer> latest = new LinkedHashMap<String, Integer>();
+            for (LabReportTemplate item : revisions) {
+                String type = item.getReportType(); String code = item.getTemplateCode();
+                if (!defaults.containsKey(type)) defaults.put(type, 0); if (!latest.containsKey(code)) latest.put(code, 0);
+                if (item.isLatest()) latest.put(code, latest.get(code) + 1);
+                if (item.isDefaultTemplate()) {
+                    if (!item.isLatest() || !"ENABLED".equals(item.getStatus())) throw new IllegalStateException("Default must be latest and enabled");
+                    defaults.put(type, defaults.get(type) + 1);
+                }
+            }
+            for (Integer count : defaults.values()) if (count.intValue() != 1) throw new IllegalStateException("Exactly one default latest enabled template is required per report type");
+            for (Integer count : latest.values()) if (count.intValue() != 1) throw new IllegalStateException("Exactly one latest revision is required per template code");
+        }
     }
 }

@@ -12,13 +12,14 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.io.Writer;
 import java.lang.reflect.Array;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
@@ -94,19 +95,98 @@ public final class SafeFreemarkerFactory {
 
     private void validateSource(String source) {
         if (source == null || source.length() > MAX_TEMPLATE_CHARS) throw validationFailure();
-        String normalized = source.toLowerCase(Locale.ROOT);
-        String[] forbidden = { "?api", "?has_api", "?new", "?eval", "?interpret", "<#include", "<#import", "<#list", "<#macro", "<#function", "<@", "[#include", "[#import", "[#list", "[#macro", "[#function", "[@", ".class", "getclass", "classloader", "?static" };
-        for (String token : forbidden) if (normalized.contains(token)) throw validationFailure();
-        validateBuiltinRegions(normalized, "${", "}"); validateBuiltinRegions(normalized, "<#", ">");
+        for (int index = 0; index < source.length();) {
+            if (source.startsWith("<#--", index)) {
+                int end = source.indexOf("-->", index + 4);
+                if (end < 0) throw validationFailure();
+                index = end + 3;
+            } else if (source.startsWith("${", index)) {
+                index = validateExpression(source, index + 2);
+            } else if (source.startsWith("<#", index)) {
+                int end = tagEnd(source, index + 2);
+                validateDirective(source.substring(index + 2, end));
+                index = end + 1;
+            } else if (source.startsWith("<@", index) || source.startsWith("[#", index) || source.startsWith("[@", index)) {
+                throw validationFailure();
+            } else {
+                index++;
+            }
+        }
     }
 
-    private void validateBuiltinRegions(String source, String startToken, String endToken) {
-        int start = source.indexOf(startToken);
-        while (start >= 0) { int end = source.indexOf(endToken, start + startToken.length()); if (end < 0) throw validationFailure(); validateBuiltins(source.substring(start + startToken.length(), end)); start = source.indexOf(startToken, end + endToken.length()); }
+    /** Small FTL-aware lexer: quotes, escapes, comments and directive boundaries are syntax, not substrings. */
+    private int validateExpression(String source, int start) {
+        int end = expressionEnd(source, start);
+        validateCode(source, start, end);
+        return end + 1;
     }
-    private void validateBuiltins(String expression) {
-        for (int index = 0; index < expression.length(); index++) if (expression.charAt(index) == '?') { int nameStart = index + 1; while (nameStart < expression.length() && Character.isWhitespace(expression.charAt(nameStart))) nameStart++; int end = nameStart; while (end < expression.length() && (Character.isLetter(expression.charAt(end)) || expression.charAt(end) == '_')) end++; if (end <= nameStart || !SAFE_BUILTINS.contains(expression.substring(nameStart, end))) throw validationFailure(); }
+
+    private int expressionEnd(String source, int start) {
+        int nestedBraces = 0;
+        for (int index = start; index < source.length(); index++) {
+            char current = source.charAt(index);
+            if (current == '\'' || current == '"') { index = quotedEnd(source, index); continue; }
+            if (current == '{') nestedBraces++;
+            else if (current == '}' && nestedBraces-- == 0) return index;
+        }
+        throw validationFailure();
     }
+
+    private int tagEnd(String source, int start) {
+        for (int index = start; index < source.length(); index++) {
+            char current = source.charAt(index);
+            if (current == '\'' || current == '"') { index = quotedEnd(source, index); continue; }
+            if (current == '>') return index;
+        }
+        throw validationFailure();
+    }
+
+    private int quotedEnd(String source, int start) {
+        char quote = source.charAt(start);
+        for (int index = start + 1; index < source.length(); index++) {
+            if (source.charAt(index) == '\\') { index++; continue; }
+            if (source.charAt(index) == quote) return index;
+        }
+        throw validationFailure();
+    }
+
+    private void validateDirective(String directive) {
+        int start = skipWhitespace(directive, 0);
+        int end = identifierEnd(directive, start);
+        if (end == start) throw validationFailure();
+        String name = directive.substring(start, end).toLowerCase(java.util.Locale.ROOT);
+        if ("include".equals(name) || "import".equals(name) || "list".equals(name) || "macro".equals(name) || "function".equals(name)) throw validationFailure();
+        validateCode(directive, end, directive.length());
+    }
+
+    private void validateCode(String code, int start, int end) {
+        for (int index = start; index < end; index++) {
+            char current = code.charAt(index);
+            if (current == '\'' || current == '"') { validateQuotedInterpolations(code, index, quotedEnd(code, index)); index = quotedEnd(code, index); continue; }
+            if (current == '?') {
+                int builtinStart = skipWhitespace(code, index + 1);
+                int builtinEnd = identifierEnd(code, builtinStart);
+                if (builtinEnd == builtinStart || !SAFE_BUILTINS.contains(code.substring(builtinStart, builtinEnd))) throw validationFailure();
+                index = builtinEnd - 1;
+            } else if (Character.isLetter(current) || current == '_') {
+                int identifierEnd = identifierEnd(code, index);
+                String identifier = code.substring(index, identifierEnd).toLowerCase(java.util.Locale.ROOT);
+                if ("class".equals(identifier) || "getclass".equals(identifier) || "classloader".equals(identifier)) throw validationFailure();
+                index = identifierEnd - 1;
+            }
+        }
+    }
+
+    private void validateQuotedInterpolations(String source, int start, int end) {
+        if (source.charAt(start) != '"') return;
+        for (int index = start + 1; index < end; index++) {
+            if (source.charAt(index) == '\\') { index++; continue; }
+            if (source.startsWith("${", index)) index = validateExpression(source, index + 2) - 1;
+        }
+    }
+
+    private int skipWhitespace(String text, int index) { while (index < text.length() && Character.isWhitespace(text.charAt(index))) index++; return index; }
+    private int identifierEnd(String text, int index) { while (index < text.length() && (Character.isLetterOrDigit(text.charAt(index)) || text.charAt(index) == '_')) index++; return index; }
 
     private Map<String, Object> sanitizeModel(Map<String, Object> model) {
         Map<String, Object> source = model == null ? Collections.<String, Object>emptyMap() : model;
@@ -121,7 +201,7 @@ public final class SafeFreemarkerFactory {
 
     private Object copySimple(Object value, int depth) {
         if (depth > MAX_MODEL_DEPTH) throw validationFailure();
-        if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean) {
+        if (isSimpleScalar(value)) {
             if (value instanceof String && ((String) value).length() > MAX_TEMPLATE_CHARS) throw validationFailure();
             return value;
         }
@@ -140,6 +220,12 @@ public final class SafeFreemarkerFactory {
             List<Object> copy = new ArrayList<Object>(); for (int i = 0; i < length; i++) copy.add(copySimple(Array.get(value, i), depth + 1)); return Collections.unmodifiableList(copy);
         }
         throw validationFailure();
+    }
+
+    private boolean isSimpleScalar(Object value) {
+        return value == null || value instanceof String || value instanceof Boolean || value instanceof Character
+                || value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long
+                || value instanceof Float || value instanceof Double || value instanceof BigInteger || value instanceof BigDecimal;
     }
 
     private SafeTemplateException validationFailure() { return new SafeTemplateException("Safe template validation failed"); }

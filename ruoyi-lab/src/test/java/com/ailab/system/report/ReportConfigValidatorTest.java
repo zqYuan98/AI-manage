@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.time.temporal.TemporalAccessor;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
@@ -131,6 +132,19 @@ class ReportConfigValidatorTest {
     }
 
     @Test
+    void persistedSensitiveSectionsCannotBeDowngradedOrHaveTheirPermissionCleared() {
+        LabReportSection persisted = section("TEXT", "GOAL_PROGRESS");
+        persisted.setSensitiveFlag("1");
+        persisted.setSensitivePermission("lab:report:sensitive");
+        LabReportSection downgrade = section("TEXT", "GOAL_PROGRESS");
+        downgrade.setSensitiveFlag("0");
+        assertThrows(IllegalStateException.class, () -> validator.validateUpdate(persisted, downgrade));
+        LabReportSection clearPermission = section("TEXT", "GOAL_PROGRESS");
+        clearPermission.setSensitiveFlag("1");
+        assertThrows(IllegalStateException.class, () -> validator.validateUpdate(persisted, clearPermission));
+    }
+
+    @Test
     void rejectsTemplateFamiliesThatDoNotHaveExactlyOneDefaultLatestEnabledRevision() {
         assertThrows(IllegalStateException.class, () -> new TemplateFamily(Collections.singletonList(template("monthly", 1, 0, true, false, "ENABLED"))));
     }
@@ -145,9 +159,20 @@ class ReportConfigValidatorTest {
         assertTrue(schema.contains("`template_code` varchar(64) not null") && schema.contains("`template_revision` int not null"));
         assertTrue(schema.contains("'task_detail'") && schema.contains("'task_stat'") && schema.contains("'task_coord'"));
         assertTrue(schema.contains("'filters'") && schema.contains("'bizline'"));
-        Path migration = root.resolve("sql/migrations/20260808_report_template_pin.sql");
-        String upgrade = new String(Files.readAllBytes(migration), StandardCharsets.UTF_8).toLowerCase().replaceAll("\\s+", " ");
-        assertTrue(upgrade.contains("alter table `lab_report_instance`") && upgrade.contains("update `lab_report_instance` r join `lab_report_template` t"));
+        String compact = schema.replaceAll("\\s+", " ");
+        int reportTable = compact.indexOf("create table if not exists `lab_report_instance`");
+        int pinUpgrade = compact.indexOf("table_name='lab_report_instance' and column_name='template_code'");
+        int reportSeed = compact.indexOf("insert into `lab_report_instance`");
+        assertTrue(pinUpgrade > reportTable && pinUpgrade < reportSeed, "pin upgrade must run after table creation and before every report seed");
+        assertTrue(compact.contains("information_schema.columns") && compact.contains("information_schema.statistics"));
+        assertTrue(compact.contains("add column `template_code` varchar(64) null") && compact.contains("add column `template_revision` int null"));
+        assertTrue(compact.contains("update `lab_report_instance` r left join `lab_report_template` t"));
+        assertFalse(compact.contains("t.`id`=r.`template_id` and t.`del_flag`='0'"), "historical pins must use a soft-deleted template revision when it still exists");
+        assertTrue(compact.contains("index_name='idx_lab_report_instance_template_pin'"));
+        assertFalse(Files.exists(root.resolve("sql/migrations/20260808_report_template_pin.sql")), "main bootstrap is the only runner-needed pin migration");
+        String legacy = new String(Files.readAllBytes(root.resolve("sql/test/ailab-legacy-fixture.sql")), StandardCharsets.UTF_8).toLowerCase();
+        assertTrue(legacy.contains("legacy-report-template-39990") && legacy.contains("create table `lab_report_instance`"));
+        assertFalse(legacy.substring(legacy.indexOf("create table `lab_report_instance`")).contains("`template_code` varchar(64)"), "legacy fixture must predate pin columns");
     }
 
     @Test
@@ -161,6 +186,24 @@ class ReportConfigValidatorTest {
         assertEquals(first, new DataSourceProviderRegistry(Collections.singletonList(first)).require("TASK_DETAIL"));
         assertEquals("table", new SectionRendererRegistry(Collections.singletonList(renderer("table", "TABLE"))).require("TABLE").getId());
         assertEquals("json", new ReportExporterRegistry(Collections.singletonList(exporter("json", "JSON"))).require("JSON").getId());
+    }
+
+    @Test
+    void registriesRequireOwnIdSupportAndIndexEveryDeclaredCapabilityWithoutShadowing() {
+        assertThrows(IllegalStateException.class, () -> new DataSourceProviderRegistry(Collections.singletonList(new DataSourceProvider() {
+            @Override public String getId() { return "impl"; } @Override public boolean supports(String id) { return "TASK_DETAIL".equals(id); }
+            @Override public ReportSectionData load(ReportContext context, ReportSectionConfig config) { return null; }
+        })));
+        assertThrows(IllegalStateException.class, () -> new SectionRendererRegistry(Collections.singletonList(new SectionRenderer() {
+            @Override public String getId() { return "impl"; } @Override public boolean supports(String id) { return "TABLE".equals(id); }
+            @Override public ReportSectionData render(ReportContext context, ReportSectionConfig config, ReportSectionData data) { return data; }
+        })));
+        assertThrows(IllegalStateException.class, () -> new ReportExporterRegistry(Collections.singletonList(new ReportExporter() {
+            @Override public String getId() { return "impl"; } @Override public boolean supports(String id) { return "JSON".equals(id); }
+            @Override public byte[] export(com.ailab.system.report.model.ReportData data) { return new byte[0]; }
+        })));
+        DataSourceProvider custom = provider("custom", "CUSTOM_CAPABILITY");
+        assertEquals(custom, new DataSourceProviderRegistry(Collections.singletonList(custom)).require("CUSTOM_CAPABILITY"));
     }
 
     @Test
@@ -181,6 +224,44 @@ class ReportConfigValidatorTest {
                 Collections.<String, Object>singletonMap("unsafe", new Date())));
         assertThrows(IllegalArgumentException.class, () -> new ReportContext("2026-08", "ALL", 1L, Instant.EPOCH,
                 Collections.<String, Object>singletonMap("unsafe", new AtomicInteger(1))));
+        TemporalAccessor mutableTemporal = new TemporalAccessor() {
+            @Override public boolean isSupported(java.time.temporal.TemporalField field) { return false; }
+            @Override public java.time.temporal.ValueRange range(java.time.temporal.TemporalField field) { throw new UnsupportedOperationException(); }
+            @Override public long getLong(java.time.temporal.TemporalField field) { throw new UnsupportedOperationException(); }
+            @Override public <R> R query(java.time.temporal.TemporalQuery<R> query) { return null; }
+            @Override public String toString() { throw new AssertionError("must not call custom scalar toString"); }
+        };
+        assertThrows(IllegalArgumentException.class, () -> new ReportContext("2026-08", "ALL", 1L, Instant.EPOCH,
+                Collections.<String, Object>singletonMap("unsafe", mutableTemporal)));
+    }
+
+    @Test
+    void templateLatestIsPerCodeWhileDefaultIsGlobalPerReportType() {
+        LabReportTemplate alpha = template("alpha", 1, 1, true, true, "ENABLED");
+        LabReportTemplate beta = template("beta", 1, 1, true, false, "ENABLED");
+        TemplateFamily family = new TemplateFamily(Arrays.asList(alpha, beta));
+        family.publishAsDefault(template("beta", 2, 0, false, false, "ENABLED"));
+        int alphaLatest = 0;
+        for (LabReportTemplate item : family.snapshot()) if ("alpha".equals(item.getTemplateCode()) && item.isLatest()) alphaLatest++;
+        assertEquals(1, alphaLatest, "switching defaults must not clear another family latest revision");
+        assertEquals(1, family.defaultLatestEnabledCount("MONTH"));
+    }
+
+    @Test
+    void sectionConfigCarriesAnImmutableRendererReadySnapshot() {
+        LabReportSection source = section("TABLE", "TASK_DETAIL");
+        source.setId(9L); source.setSectionCode("DELIVERY"); source.setSectionName("Delivery"); source.setSortNo(20);
+        source.setManualFlag("1"); source.setVisibleFlag("0"); source.setSensitivePermission("lab:report:sensitive");
+        source.setStyleConfigJson("{\"titleLevel\":\"H2\",\"nested\":{\"color\":\"blue\"}}");
+        ReportSectionConfig config = new ReportSectionConfig(source);
+        assertEquals(Long.valueOf(9L), config.getSectionId());
+        assertEquals("Delivery", config.getSectionName());
+        assertEquals("Delivery", config.getTitle());
+        assertEquals("H2", config.getTitleLevel());
+        assertEquals(Integer.valueOf(20), config.getSortNo());
+        assertTrue(config.isManual()); assertFalse(config.isVisible());
+        assertEquals("lab:report:sensitive", config.getSensitivePermission());
+        assertThrows(UnsupportedOperationException.class, () -> mutableMap((Map<?, ?>) config.getStyleConfig().get("nested")).put("color", "red"));
     }
 
     @Test
@@ -219,7 +300,8 @@ class ReportConfigValidatorTest {
     private DataSourceProvider provider(final String id, final String supported) {
         return new DataSourceProvider() {
             @Override public String getId() { return id; }
-            @Override public boolean supports(String value) { return supported.equals(value); }
+            @Override public boolean supports(String value) { return id.equals(value) || supported.equals(value); }
+            @Override public java.util.Set<String> getSupportedIds() { return Collections.singleton(supported); }
             @Override public ReportSectionData load(ReportContext context, ReportSectionConfig config) { return null; }
         };
     }
@@ -227,7 +309,8 @@ class ReportConfigValidatorTest {
     private SectionRenderer renderer(final String id, final String supported) {
         return new SectionRenderer() {
             @Override public String getId() { return id; }
-            @Override public boolean supports(String value) { return supported.equals(value); }
+            @Override public boolean supports(String value) { return id.equals(value) || supported.equals(value); }
+            @Override public java.util.Set<String> getSupportedIds() { return Collections.singleton(supported); }
             @Override public ReportSectionData render(ReportContext context, ReportSectionConfig config, ReportSectionData data) { return data; }
         };
     }
@@ -235,8 +318,12 @@ class ReportConfigValidatorTest {
     private ReportExporter exporter(final String id, final String supported) {
         return new ReportExporter() {
             @Override public String getId() { return id; }
-            @Override public boolean supports(String value) { return supported.equals(value); }
+            @Override public boolean supports(String value) { return id.equals(value) || supported.equals(value); }
+            @Override public java.util.Set<String> getSupportedIds() { return Collections.singleton(supported); }
             @Override public byte[] export(com.ailab.system.report.model.ReportData data) throws IOException { return new byte[0]; }
         };
     }
+
+    @SuppressWarnings("unchecked")
+    private Map<Object, Object> mutableMap(Map<?, ?> value) { return (Map<Object, Object>) value; }
 }

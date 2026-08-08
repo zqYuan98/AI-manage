@@ -48,6 +48,21 @@ class SafeFreemarkerFactoryTest {
     }
 
     @Test
+    void lexesFtlBoundariesInsteadOfTreatingQuotedTextOrCommentsAsExpressions() {
+        Map<String, Object> model = new LinkedHashMap<String, Object>();
+        model.put("map", Collections.<String, Object>singletonMap("key", "value"));
+        model.put("value", "ok");
+
+        // The first > is part of the string literal.  A truncated directive scanner would miss ?keys.
+        assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
+                () -> factory.render("<#assign x=\">\" + map?keys?size>${x}", model)).getMessage());
+        assertEquals("?literal", factory.render("${'?literal'}", model));
+        assertEquals("ok", factory.render("<#-- ${map?keys} -->${value}", model));
+        assertEquals("Safe template validation failed", assertThrows(SafeTemplateException.class,
+                () -> factory.render("<#assign x=\"${map?keys}\">${x}", model)).getMessage());
+    }
+
+    @Test
     void rejectsObjectsAndBoundsInputOutputAndNestedData() {
         Map<String, Object> unsafe = new LinkedHashMap<String, Object>();
         unsafe.put("object", new Object());

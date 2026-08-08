@@ -22,7 +22,7 @@ final class ImmutableReportValue {
         if (source instanceof Collection) { List<Object> copy = new ArrayList<Object>(); for (Object item : (Collection<?>) source) copy.add(value(item)); return Collections.unmodifiableList(copy); }
         if (source != null && source.getClass().isArray()) { List<Object> copy = new ArrayList<Object>(); for (int i = 0; i < Array.getLength(source); i++) copy.add(value(Array.get(source, i))); return Collections.unmodifiableList(copy); }
         if (source == null || source instanceof String || source instanceof Boolean || source instanceof Character
-                || source instanceof Enum || source instanceof java.time.temporal.TemporalAccessor
+                || source instanceof Enum
                 || source instanceof Byte || source instanceof Short || source instanceof Integer || source instanceof Long
                 || source instanceof Float || source instanceof Double || source instanceof java.math.BigInteger
                 || source instanceof java.math.BigDecimal) return source;

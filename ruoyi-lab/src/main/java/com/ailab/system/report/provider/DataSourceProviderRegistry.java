@@ -4,30 +4,30 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
-/** Startup-time registry: ambiguous providers are configuration errors, never runtime guesses. */
+/** Startup-time registry: every declared capability has one supporting, non-shadowed owner. */
 public final class DataSourceProviderRegistry {
-    private final Map<String, DataSourceProvider> providers;
-    private final Map<String, DataSourceProvider> capabilities;
+    private final Map<String, DataSourceProvider> providers; private final Map<String, DataSourceProvider> capabilities;
     public DataSourceProviderRegistry(Collection<? extends DataSourceProvider> values) {
-        Map<String, DataSourceProvider> result = new LinkedHashMap<String, DataSourceProvider>();
+        Map<String, DataSourceProvider> ids = new LinkedHashMap<String, DataSourceProvider>();
+        Map<String, DataSourceProvider> claimed = new LinkedHashMap<String, DataSourceProvider>();
         for (DataSourceProvider value : values) {
-            if (value == null || blank(value.getId())) throw new IllegalStateException("Report provider id is required");
-            if (result.put(value.getId(), value) != null) throw new IllegalStateException("Duplicate report provider id: " + value.getId());
+            if (value == null || blank(value.getId()) || !value.supports(value.getId())) throw new IllegalStateException("Report provider must support its own id");
+            if (ids.put(value.getId(), value) != null) throw new IllegalStateException("Duplicate report provider id: " + value.getId());
         }
-        Map<String, DataSourceProvider> capabilityMap = new LinkedHashMap<String, DataSourceProvider>();
-        for (String supported : ReportConfigValidatorIds.PROVIDER_IDS) {
-            DataSourceProvider owner = null;
-            for (DataSourceProvider provider : result.values()) if (provider.supports(supported)) {
-                if (owner != null) throw new IllegalStateException("Conflicting report providers for: " + supported);
-                owner = provider;
-            }
-            if (owner != null) capabilityMap.put(supported, owner);
-        }
-        providers = Collections.unmodifiableMap(result);
-        capabilities = Collections.unmodifiableMap(capabilityMap);
+        for (DataSourceProvider value : ids.values()) index(ids, claimed, value, value.getSupportedIds());
+        providers = Collections.unmodifiableMap(ids); capabilities = Collections.unmodifiableMap(claimed);
     }
-    public DataSourceProvider require(String id) { DataSourceProvider value = providers.get(id); if (value == null) value = capabilities.get(id); if (value == null) throw new IllegalArgumentException("Unknown report provider: " + id); return value; }
+    private static void index(Map<String, DataSourceProvider> ids, Map<String, DataSourceProvider> claimed, DataSourceProvider value, Set<String> declared) {
+        if (declared == null) throw new IllegalStateException("Report provider capabilities are required");
+        for (String capability : declared) {
+            if (blank(capability) || !value.supports(capability)) throw new IllegalStateException("Provider does not support declared capability");
+            DataSourceProvider idOwner = ids.get(capability); DataSourceProvider old = claimed.put(capability, value);
+            if ((idOwner != null && idOwner != value) || (old != null && old != value)) throw new IllegalStateException("Conflicting report provider capability: " + capability);
+        }
+    }
+    public DataSourceProvider require(String id) { DataSourceProvider value = providers.containsKey(id) ? providers.get(id) : capabilities.get(id); if (value == null || !value.supports(id)) throw new IllegalArgumentException("Unknown report provider: " + id); return value; }
     public Map<String, DataSourceProvider> asMap() { return providers; }
     private static boolean blank(String value) { return value == null || value.trim().isEmpty(); }
 }
