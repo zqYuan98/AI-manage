@@ -33,5 +33,10 @@ class PdfReportExporterTest {
         ReportExportException failed = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "nonzero")); assertTrue(failed.isRetryable());
         ReportExportException missing = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "missing")); assertTrue(missing.isRetryable());
         ReportExportException timeout = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "timeout")); assertTrue(timeout.isRetryable());
+        ReportExportException tree = assertThrows(ReportExportException.class, () -> runner.convert(new byte[] {1}, "tree")); assertTrue(tree.isRetryable());
+        long child = Long.parseLong(new String(Files.readAllBytes(temp.resolve("child.pid")), java.nio.charset.StandardCharsets.US_ASCII));
+        Object optional = Class.forName("java.lang.ProcessHandle").getMethod("of", long.class).invoke(null, Long.valueOf(child));
+        Object handle = optional.getClass().getMethod("orElse", Object.class).invoke(optional, new Object[] {null});
+        assertTrue(handle == null || !((Boolean) Class.forName("java.lang.ProcessHandle").getMethod("isAlive").invoke(handle)).booleanValue());
     }
 }
