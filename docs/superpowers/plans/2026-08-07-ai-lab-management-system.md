@@ -736,7 +736,7 @@ Build the exact demonstration `ReportData` from SQL seed semantics and assert de
 
 - [ ] **Step 2: Implement externalized configuration and docs**
 
-Document JDK 8, Maven, compatible Node/npm, MySQL 8, Redis, LibreOffice, initialization order, Windows/Linux paths, permissions, backup, report retries, period reopen, default credentials rotation, and troubleshooting.
+Document JDK 8, Maven, compatible Node/npm, MySQL 8, Redis, LibreOffice, initialization order, Windows/Linux paths, permissions, backup, report retries, period reopen, default credentials rotation, and troubleshooting. The Linux deployment note must require kernel 5.3 or newer on x86_64/aarch64 and permit the `pidfd_open`/`pidfd_send_signal` syscalls in the container seccomp profile; PDF conversion intentionally fails closed when a stable pidfd lease is unavailable and must never fall back to a raw PID kill.
 
 - [ ] **Step 3: Generate tracked sample artifacts through production exporters**
 

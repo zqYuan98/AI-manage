@@ -14,7 +14,6 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
-import java.util.LinkedHashMap;
 import java.util.Optional;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +50,7 @@ import javax.xml.namespace.QName;
 public final class WordReportExporter implements ReportExporter {
     private static final String FONT = "Microsoft YaHei";
     private static final int MAX_SECTIONS = 200, MAX_ROWS = 10000, MAX_CELLS = 100000, MAX_TEXT = 1024 * 1024;
-    private static final int MAX_GROUPS = 150000, MAX_PARAGRAPHS = 150000;
+    private static final int MAX_GROUPS = 5000, MAX_PARAGRAPHS = 10000;
     private static final int MAX_IMAGE = 512 * 1024, MAX_OUTPUT = 8 * 1024 * 1024;
     @Override public String getId() { return "WORD"; }
     @Override public boolean supports(String value) { return "WORD".equals(value); }
@@ -116,21 +115,22 @@ public final class WordReportExporter implements ReportExporter {
         List<String> headers = strings(section.getSummary().get("headers"));
         if (headers.isEmpty() || section.getRows().isEmpty()) { paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false, limits); return; }
         tableGrid(limits, headers.size(), section.getRows().size());
+        List<String> fields = strings(section.getSummary().get("fields"));
         List<String> aligns = strings(section.getSummary().get("alignments")); XWPFTable table = document.createTable();
         XWPFTableRow header = table.getRow(0); header.getCtRow().addNewTrPr().addNewTblHeader();
         for (int i = 0; i < headers.size(); i++) { XWPFTableCell cell = i == 0 ? header.getCell(0) : header.addNewTableCell(); formatCell(cell, "D9EAF7"); writeCell(cell, headers.get(i), alignment(aligns, i), true, limits); }
         for (Map<String, Object> row : section.getRows()) {
-            Map<String,Object> values = valuesFor(row, headers);
+            List<Object> values = valuesFor(row, fields, headers.size());
             XWPFTableRow target = table.createRow();
-            for (int i = 0; i < headers.size(); i++) { Object value = values.get(headers.get(i)); formatCell(target.getCell(i), null); writeCell(target.getCell(i), text(value), alignment(aligns, i), false, limits); }
+            for (int i = 0; i < headers.size(); i++) { Object value = values.get(i); formatCell(target.getCell(i), null); writeCell(target.getCell(i), text(value), alignment(aligns, i), false, limits); }
         }
     }
-    private Map<String,Object> valuesFor(Map<String,Object> row, List<String> headers) {
+    private List<Object> valuesFor(Map<String,Object> row, List<String> fields, int columns) {
         List<Object> positional = new ArrayList<Object>(row.values());
-        Map<String,Object> resolved = new LinkedHashMap<String,Object>();
-        for (int i = 0; i < headers.size(); i++) {
-            String header = headers.get(i);
-            resolved.put(header, row.containsKey(header) ? row.get(header)
+        List<Object> resolved = new ArrayList<Object>(columns);
+        for (int i = 0; i < columns; i++) {
+            String field = i < fields.size() ? fields.get(i) : null;
+            resolved.add(field != null && row.containsKey(field) ? row.get(field)
                     : i < positional.size() ? positional.get(i) : "");
         }
         return resolved;
@@ -175,7 +175,24 @@ public final class WordReportExporter implements ReportExporter {
     private String safe(String value, Limits limits) throws IOException { String cleaned = value == null ? "暂无数据" : value.replace('\u0000', ' '); limits.text += cleaned.length(); if (limits.text > MAX_TEXT) throw new ReportExportException("DOCX text limit exceeded", false); return cleaned; }
     private static final class Limits { int rows, cells, text, groups, paragraphs; }
 
-    private void preflight(ReportData data) throws IOException { Limits limits = new Limits(); paragraphs(limits, 2); addText(limits, "人工智能实验室月报"); addText(limits, data.getContext().getPeriod()); addText(limits, data.getContext().getBizLine()); for (ReportSectionData section : data.getSections()) { paragraphs(limits, 1); addText(limits, section.getTitle()); grid(limits, section); for (Map<String,Object> row : section.getRows()) { for (Map.Entry<String,Object> entry : row.entrySet()) { addText(limits, entry.getKey()); addText(limits, text(entry.getValue())); } } scan(limits, section.getSummary()); } }
+    private void preflight(ReportData data) throws IOException {
+        Limits structure = new Limits();
+        for (ReportSectionData section : data.getSections()) structure(structure, section);
+        Limits limits = new Limits(); paragraphs(limits, 2); addText(limits, "人工智能实验室月报"); addText(limits, data.getContext().getPeriod()); addText(limits, data.getContext().getBizLine()); for (ReportSectionData section : data.getSections()) { paragraphs(limits, 1); addText(limits, section.getTitle()); grid(limits, section); for (Map<String,Object> row : section.getRows()) { for (Map.Entry<String,Object> entry : row.entrySet()) { addText(limits, entry.getKey()); addText(limits, text(entry.getValue())); } } scan(limits, section.getSummary()); }
+    }
+    private void structure(Limits limits, ReportSectionData section) throws IOException {
+        String type = section.getSectionType();
+        if ("TABLE".equals(type) || ("STAT".equals(type) && section.getSummary().get("text") == null)) {
+            int columns = strings(section.getSummary().get("headers")).size();
+            if (columns > 0 && !section.getRows().isEmpty()) tableStructure(limits, columns, section.getRows().size());
+        } else if ("CHART".equals(type) && png(section.getSummary().get("pngBase64")) == null) {
+            int categories = strings(section.getSummary().get("categories")).size();
+            if (categories > 0) tableStructure(limits, 2, categories);
+        }
+    }
+    private void tableStructure(Limits limits, int columns, int dataRows) throws IOException {
+        int renderedRows = plusOne(dataRows); rows(limits, renderedRows); cells(limits, columns, renderedRows);
+    }
     /** Mirrors the only render paths that allocate a Word table. */
     private void grid(Limits limits, ReportSectionData section) throws IOException { String type = section.getSectionType(); if ("TABLE".equals(type)) { tableOrFallback(limits, section); return; } if ("STAT".equals(type)) { if (section.getSummary().get("text") != null || section.getRows().isEmpty()) paragraphs(limits, 1); else tableOrFallback(limits, section); return; } if ("TEXT".equals(type) || "MANUAL".equals(type)) { paragraphs(limits, 1); return; } if ("GROUP_TEXT".equals(type)) { groupGrid(limits, section.getSummary().get("groups")); return; } if ("CHART".equals(type)) { if (png(section.getSummary().get("pngBase64")) != null) { paragraphs(limits, 1); return; } int categories = strings(section.getSummary().get("categories")).size(); if (categories > 0) { int renderedRows = plusOne(categories); rows(limits, renderedRows); cells(limits, 2, renderedRows); paragraphs(limits, 2 * renderedRows); } else paragraphs(limits, 1); return; } paragraphs(limits, 1); }
     private void tableOrFallback(Limits limits, ReportSectionData section) throws IOException { int columns = strings(section.getSummary().get("headers")).size(); if (columns <= 0 || section.getRows().isEmpty()) paragraphs(limits, 1); else tableGrid(limits, columns, section.getRows().size()); }

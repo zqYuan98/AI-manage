@@ -2,6 +2,7 @@ package com.ailab.system.report;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -26,6 +27,24 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import org.junit.jupiter.api.Test;
 
 class WordReportExporterTest {
+    @Test
+    void duplicateDisplayHeadersStillResolveRowsByFieldIdentity() throws Exception {
+        ReportSectionData table = new ReportSectionData("table", "TABLE", "table",
+                Collections.singletonList(map("a", "A", "b", "B")),
+                map("fields", Arrays.asList("a", "b"), "headers", Arrays.asList("值", "值")));
+        ReportData value = new ReportData(report().getContext(), "t", 1,
+                Collections.singletonList(table), Collections.<String,Object>emptyMap());
+
+        String document = xmlEntries(new WordReportExporter().export(value)).get("word/document.xml");
+        org.w3c.dom.NodeList rows = xml(document).getElementsByTagNameNS(
+                "http://schemas.openxmlformats.org/wordprocessingml/2006/main", "tr");
+        org.w3c.dom.NodeList cells = ((org.w3c.dom.Element) rows.item(1)).getElementsByTagNameNS(
+                "http://schemas.openxmlformats.org/wordprocessingml/2006/main", "tc");
+
+        assertEquals("A", cells.item(0).getTextContent());
+        assertEquals("B", cells.item(1).getTextContent());
+    }
+
     @Test
     void writesAStableSafeOoxmlPackageForEveryCanonicalSectionType() throws Exception {
         WordReportExporter exporter = new WordReportExporter();
@@ -125,9 +144,9 @@ class WordReportExporterTest {
     @Test
     void groupTextEmptyMapsConsumeOneGlobalGroupAndTwoGlobalParagraphsEach() {
         java.util.List<Map<String,Object>> first = new java.util.ArrayList<Map<String,Object>>(
-                Collections.nCopies(37500, Collections.<String,Object>emptyMap()));
+                Collections.nCopies(2500, Collections.<String,Object>emptyMap()));
         java.util.List<Map<String,Object>> second = new java.util.ArrayList<Map<String,Object>>(
-                Collections.nCopies(37500, Collections.<String,Object>emptyMap()));
+                Collections.nCopies(2500, Collections.<String,Object>emptyMap()));
         ReportData value = new ReportData(report().getContext(), "t", 1, Arrays.asList(
                 new ReportSectionData("g1", "GROUP_TEXT", "g1", Collections.<Map<String,Object>>emptyList(),
                         map("groups", first)),
@@ -141,8 +160,8 @@ class WordReportExporterTest {
 
     @Test
     void groupTextGroupBudgetIsGlobalEvenForEntriesThatRenderNoParagraphs() {
-        java.util.List<Integer> first = new java.util.ArrayList<Integer>(Collections.nCopies(75001, 1));
-        java.util.List<Integer> second = new java.util.ArrayList<Integer>(Collections.nCopies(75001, 2));
+        java.util.List<Integer> first = new java.util.ArrayList<Integer>(Collections.nCopies(2500, 1));
+        java.util.List<Integer> second = new java.util.ArrayList<Integer>(Collections.nCopies(2501, 2));
         ReportData value = new ReportData(report().getContext(), "t", 1, Arrays.asList(
                 new ReportSectionData("g1", "GROUP_TEXT", "g1", Collections.<Map<String,Object>>emptyList(),
                         map("groups", first)),
@@ -155,15 +174,54 @@ class WordReportExporterTest {
     }
 
     @Test
+    void conservativeGroupBudgetAllowsExactlyFiveThousandEntries() {
+        java.util.List<Integer> groups = new java.util.ArrayList<Integer>(Collections.nCopies(5000, 1));
+        ReportData value = new ReportData(report().getContext(), "t", 1,
+                Collections.singletonList(new ReportSectionData("g", "GROUP_TEXT", "g",
+                        Collections.<Map<String,Object>>emptyList(), map("groups", groups))),
+                Collections.<String,Object>emptyMap());
+
+        assertDoesNotThrow(() -> invokePreflight(value));
+    }
+
+    @Test
+    void conservativeParagraphBudgetAllowsExactlyTenThousandParagraphs() {
+        java.util.List<Map<String,Object>> groups = new java.util.ArrayList<Map<String,Object>>(
+                Collections.nCopies(4997, Collections.<String,Object>emptyMap()));
+        ReportData value = new ReportData(report().getContext(), "t", 1, Arrays.asList(
+                new ReportSectionData("g", "GROUP_TEXT", "g", Collections.<Map<String,Object>>emptyList(),
+                        map("groups", groups)),
+                new ReportSectionData("table", "TABLE", "table", Collections.singletonList(map("a", "A")),
+                        map("fields", Collections.singletonList("a"), "headers", Collections.singletonList("value")))),
+                Collections.<String,Object>emptyMap());
+
+        assertDoesNotThrow(() -> invokePreflight(value));
+    }
+
+    @Test
+    void conservativeParagraphBudgetRejectsTheNextRenderedParagraphBeforePoi() {
+        java.util.List<Map<String,Object>> groups = new java.util.ArrayList<Map<String,Object>>(
+                Collections.nCopies(4998, Collections.<String,Object>emptyMap()));
+        ReportData value = new ReportData(report().getContext(), "t", 1, Arrays.asList(
+                new ReportSectionData("g", "GROUP_TEXT", "g", Collections.<Map<String,Object>>emptyList(),
+                        map("groups", groups)),
+                new ReportSectionData("text", "TEXT", "text", Collections.<Map<String,Object>>emptyList(),
+                        map("text", "body"))), Collections.<String,Object>emptyMap());
+
+        java.io.IOException failure = assertThrows(java.io.IOException.class, () -> invokePreflight(value));
+        assertTrue(failure.getMessage().contains("paragraph limit"));
+    }
+
+    @Test
     void tableFallbackValuesAreIndexedOncePerRowInsteadOfOncePerMissingHeader() throws Exception {
         CountingValuesMap row = new CountingValuesMap();
         row.put("first", "a");
         row.put("second", "b");
 
-        Map<String,Object> values = invokeValuesFor(row, Arrays.asList("missing-a", "missing-b"));
+        java.util.List<Object> values = invokeValuesFor(row, Collections.<String>emptyList(), 2);
 
         assertTrue(row.valuesCalls == 1, "row values must be indexed exactly once");
-        assertTrue("a".equals(values.get("missing-a")) && "b".equals(values.get("missing-b")));
+        assertTrue("a".equals(values.get(0)) && "b".equals(values.get(1)));
     }
 
     @Test
@@ -204,12 +262,13 @@ class WordReportExporterTest {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String,Object> invokeValuesFor(Map<String,Object> row, java.util.List<String> headers)
+    private java.util.List<Object> invokeValuesFor(Map<String,Object> row, java.util.List<String> fields,
+            int columns)
             throws Exception {
         java.lang.reflect.Method method = WordReportExporter.class.getDeclaredMethod(
-                "valuesFor", Map.class, java.util.List.class);
+                "valuesFor", Map.class, java.util.List.class, int.class);
         method.setAccessible(true);
-        return (Map<String,Object>) method.invoke(new WordReportExporter(), row, headers);
+        return (java.util.List<Object>) method.invoke(new WordReportExporter(), row, fields, columns);
     }
 
     private static final class CountingValuesMap extends LinkedHashMap<String,Object> {
