@@ -26,6 +26,10 @@ import com.ailab.system.report.provider.TaskUndoneProvider;
 import com.ailab.system.mapper.LabReportDataMapper;
 import com.ailab.system.mapper.LabDashboardMapper;
 import com.ailab.system.dto.GoalHealthFact;
+import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.service.LabAccessService;
+import com.ailab.system.report.model.TrustedReportContextFactory;
+import com.ruoyi.system.service.ISysMenuService;
 import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
@@ -159,6 +163,27 @@ class ReportProviderContractTest {
     }
 
     @Test
+    void trustedFactoryUsesServerResolvedManagerPermissions() {
+        LabAccessService access = org.mockito.Mockito.mock(LabAccessService.class);
+        ISysMenuService menus = org.mockito.Mockito.mock(ISysMenuService.class);
+        LabAccessContext actor = new LabAccessContext(); actor.setRoleKey("lab_manager"); actor.setBizLine("platform"); actor.setMemberId(30005L);
+        org.mockito.Mockito.when(access.context(9L)).thenReturn(actor);
+        org.mockito.Mockito.when(menus.selectMenuPermsByUserId(9L)).thenReturn(Collections.singleton("lab:report:sensitive"));
+        ReportAccessScope scope = new TrustedReportContextFactory(access, menus).resolve(9L);
+        assertEquals(ReportAccessScope.Kind.MANAGER, scope.getKind());
+        assertTrue(scope.hasPermission("lab:report:sensitive"));
+    }
+
+    @Test
+    void renderGroupByProducesDeterministicGroupsForCoordination() throws Exception {
+        TaskCoordProvider provider = new TaskCoordProvider(); Map<String,Object> value = row(); value.put("bizLine", "platform"); value.put("coordination", "help");
+        inject(provider, mapperWith(value));
+        LabReportSection source = new LabReportSection(); source.setSectionCode("LINE_GROUP"); source.setSectionName("Lines"); source.setSectionType("GROUP_TEXT"); source.setDataSource("TASK_COORD"); source.setManualFlag("0"); source.setVisibleFlag("1"); source.setQueryConfigJson("{\"filters\":[]}"); source.setRenderConfigJson("{\"groupBy\":\"bizLine\"}"); source.setStyleConfigJson("{}");
+        ReportSectionData data = provider.load(context("2026-08"), new ReportSectionConfig(source));
+        assertEquals("platform", ((Map<?, ?>) ((List<?>) data.getSummary().get("groups")).get(0)).get("key"));
+    }
+
+    @Test
     void taskPeriodsCompileToTypedWeekAndMonthRanges() {
         ReportQueryCriteria week = new ReportQueryCriteria("2026-W32", context("2026-W32").getAccessScope());
         ReportQueryCriteria quarter = new ReportQueryCriteria("2026Q3", context("2026Q3").getAccessScope());
@@ -172,6 +197,13 @@ class ReportProviderContractTest {
     void undoneProjectionKeepsUndoneResultsAndUnconfirmedWorkButExcludesConfirmedDone() throws Exception {
         String xml = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportDataMapper.xml")), java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(xml.contains("(t.result_status='UNDONE' or t.workflow_status in ('DRAFT','ACTIVE','PENDING_REVIEW'))"));
+    }
+
+    @Test
+    void iprProjectionIsAllReadableAndUsesTypedDateRange() throws Exception {
+        String xml = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportDataMapper.xml")), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(xml.contains("coalesce(i.actual_submit_date,i.planned_submit_date) between #{dateStart} and #{dateEnd}"));
+        assertTrue(!xml.substring(xml.indexOf("<select id=\"selectIprs\""), xml.indexOf("</select>", xml.indexOf("<select id=\"selectIprs\""))).contains("iprScope"));
     }
 
     @Test
@@ -208,6 +240,8 @@ class ReportProviderContractTest {
             String sql = configuration.getMappedStatement("com.ailab.system.mapper.LabReportDataMapper." + statement).getBoundSql(member).getSql();
             assertTrue(!sql.trim().isEmpty()); assertTrue(!sql.contains("${"));
         }
+        assertTrue(configuration.getMappedStatement("com.ailab.system.mapper.LabReportDataMapper.selectTasks").getBoundSql(member).getSql().contains("? as period"));
+        assertTrue(configuration.getMappedStatement("com.ailab.system.mapper.LabReportDataMapper.selectTaskStats").getBoundSql(member).getSql().contains("? as period"));
     }
 
     private ReportContext context(String period) {

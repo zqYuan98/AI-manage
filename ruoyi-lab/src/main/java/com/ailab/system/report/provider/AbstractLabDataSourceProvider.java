@@ -42,7 +42,7 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
         Map<String, Object> summaryCopy = new LinkedHashMap<String, Object>(summary == null ? Collections.<String, Object>emptyMap() : summary);
         recomputeFilteredSummary(preLimit, summaryCopy);
         summaryCopy.put("matchedCount", matched); summaryCopy.put("returnedCount", filtered.size()); if (summaryCopy.containsKey("count")) summaryCopy.put("count", matched);
-        if (criteria.getGroupBy() != null) summaryCopy.put("groups", groups(preLimit, column(criteria.getGroupBy())));
+        if (criteria.getGroupBy() != null) summaryCopy.put("groups", groups(preLimit, criteria.getGroupBy()));
         return new ReportSectionData(cfg.getSectionCode(), cfg.getSectionType(), cfg.getTitle(), filtered, summaryCopy);
     }
     protected final Map<String, Object> summaryCount(List<Map<String, Object>> rows) { Map<String,Object> value = new LinkedHashMap<String,Object>(); value.put("count", rows.size()); return value; }
@@ -61,12 +61,12 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
     private List<Map<String, Object>> applyQueryConfig(ReportQueryCriteria criteria, List<Map<String, Object>> source) {
         List<Map<String, Object>> rows = copyRows(source);
         for (ReportQueryCriteria.Filter filter : criteria.getFilters()) {
-            String field = column(filter.getField()); String operator = filter.getOperator(); Object expected = filter.getValue();
+            String field = filter.getField(); String operator = filter.getOperator(); Object expected = filter.getValue();
             List<Map<String, Object>> next = new ArrayList<Map<String, Object>>();
             for (Map<String, Object> row : rows) if (matches(row.get(field), operator, expected)) next.add(row); rows = next;
         }
-        if (criteria.getSort() != null) sort(rows, column(criteria.getSort()));
-        if (criteria.getGroupBy() != null) sort(rows, column(criteria.getGroupBy()));
+        if (criteria.getSort() != null) sort(rows, criteria.getSort());
+        if (criteria.getGroupBy() != null) sort(rows, criteria.getGroupBy());
         return rows;
     }
     private boolean matches(Object actual, String operator, Object expected) {
@@ -80,6 +80,5 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
     private List<Map<String, Object>> groups(List<Map<String, Object>> rows, String field) { Map<String, Integer> counts = new LinkedHashMap<String, Integer>(); for (Map<String, Object> row : rows) { String key = String.valueOf(row.get(field)); counts.put(key, counts.containsKey(key) ? counts.get(key) + 1 : 1); } List<Map<String, Object>> result = new ArrayList<Map<String, Object>>(); for (Map.Entry<String, Integer> item : counts.entrySet()) { Map<String, Object> group = new LinkedHashMap<String, Object>(); group.put("field", field); group.put("key", item.getKey()); group.put("count", item.getValue()); result.add(group); } return result; }
     private boolean same(Object actual, Object expected) { return compare(actual, expected) == 0; }
     private int compare(Object actual, Object expected) { if (actual == expected) return 0; if (actual == null) return -1; if (expected == null) return 1; try { return number(actual).compareTo(number(expected)); } catch (RuntimeException ignored) { return String.valueOf(actual).compareTo(String.valueOf(expected)); } }
-    private String column(String field) { if ("owner".equals(field) || "memberId".equals(field)) return "ownerId"; return field; }
     private void checkField(Object value) { if (value != null && (!(value instanceof String) || !fields.contains(value))) throw new IllegalArgumentException("Unsupported report field"); }
 }

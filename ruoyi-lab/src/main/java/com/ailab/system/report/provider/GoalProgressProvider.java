@@ -49,11 +49,14 @@ public final class GoalProgressProvider extends AbstractLabDataSourceProvider {
             row.put("expectedProgress", fact.getExpectedProgress() == null ? BigDecimal.ZERO : fact.getExpectedProgress());
             rows.add(row);
         }
+        Map<String, Object> summary = summaryCount(rows);
+        recomputeFilteredSummary(rows, summary);
+        return section(criteria, section, rows, summary);
+    }
+    @Override protected void recomputeFilteredSummary(List<Map<String,Object>> rows, Map<String,Object> summary) {
         BigDecimal total = BigDecimal.ZERO;
         for (Map<String, Object> row : rows) total = total.add(number(row.get("progressRate")));
-        Map<String, Object> summary = summaryCount(rows);
         summary.put("averageProgressRate", rows.isEmpty() ? BigDecimal.ZERO : total.divide(BigDecimal.valueOf(rows.size()), 2, RoundingMode.HALF_UP));
-        return section(criteria, section, rows, summary);
     }
 
     private static LabAccessContext allGoalsScope() {
