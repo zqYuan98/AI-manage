@@ -14,6 +14,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.Optional;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +51,7 @@ import javax.xml.namespace.QName;
 public final class WordReportExporter implements ReportExporter {
     private static final String FONT = "Microsoft YaHei";
     private static final int MAX_SECTIONS = 200, MAX_ROWS = 10000, MAX_CELLS = 100000, MAX_TEXT = 1024 * 1024;
+    private static final int MAX_GROUPS = 150000, MAX_PARAGRAPHS = 150000;
     private static final int MAX_IMAGE = 512 * 1024, MAX_OUTPUT = 8 * 1024 * 1024;
     @Override public String getId() { return "WORD"; }
     @Override public boolean supports(String value) { return "WORD".equals(value); }
@@ -64,9 +66,9 @@ public final class WordReportExporter implements ReportExporter {
             document.getProperties().getCoreProperties().setCreated(Optional.of(Date.from(data.getContext().getGeneratedAt())));
             document.getProperties().getCoreProperties().setModified(Optional.of(Date.from(data.getContext().getGeneratedAt())));
             styles(document);
-            paragraph(document, "人工智能实验室月报", "ReportTitle", ParagraphAlignment.CENTER, true);
-            paragraph(document, data.getContext().getPeriod() + " · " + data.getContext().getBizLine(), "ReportBody", ParagraphAlignment.CENTER, false);
             Limits limits = new Limits();
+            paragraph(document, "人工智能实验室月报", "ReportTitle", ParagraphAlignment.CENTER, true, limits);
+            paragraph(document, data.getContext().getPeriod() + " · " + data.getContext().getBizLine(), "ReportBody", ParagraphAlignment.CENTER, false, limits);
             for (ReportSectionData section : data.getSections()) render(document, section, limits);
             ByteArrayOutputStream raw = new ByteArrayOutputStream(); document.write(new BoundedOutputStream(raw, MAX_OUTPUT));
             byte[] stable = normalizeZip(raw.toByteArray());
@@ -88,39 +90,51 @@ public final class WordReportExporter implements ReportExporter {
         style.getRPr().addNewSzCs().setVal(BigInteger.valueOf(halfPoints)); if (bold) style.getRPr().addNewB();
         document.createStyles().addStyle(new XWPFStyle(style));
     }
-    private XWPFParagraph paragraph(XWPFDocument document, String value, String style, ParagraphAlignment alignment, boolean keepNext) throws IOException {
+    private XWPFParagraph paragraph(XWPFDocument document, String value, String style,
+            ParagraphAlignment alignment, boolean keepNext, Limits limits) throws IOException {
+        paragraphs(limits, 1);
         XWPFParagraph paragraph = document.createParagraph(); paragraph.setStyle(style); paragraph.setAlignment(alignment);
         if (keepNext) paragraph.getCTP().addNewPPr().addNewKeepNext();
-        run(paragraph, safe(value), style.equals("ReportTable") ? 8.5 : style.equals("ReportBody") ? 10.5 : style.equals("ReportSection") ? 12 : 15, false);
+        run(paragraph, safe(value, limits), style.equals("ReportTable") ? 8.5 : style.equals("ReportBody") ? 10.5 : style.equals("ReportSection") ? 12 : 15, false);
         return paragraph;
     }
     private void render(XWPFDocument document, ReportSectionData section, Limits limits) throws IOException {
-        paragraph(document, section.getTitle(), "ReportSection", ParagraphAlignment.LEFT, true);
+        paragraph(document, section.getTitle(), "ReportSection", ParagraphAlignment.LEFT, true, limits);
         String type = section.getSectionType();
         if ("TABLE".equals(type)) table(document, section, limits);
         else if ("STAT".equals(type)) stat(document, section, limits);
-        else if ("TEXT".equals(type) || "MANUAL".equals(type)) paragraph(document, text(section.getSummary().get("text")), "ReportBody", ParagraphAlignment.LEFT, false);
+        else if ("TEXT".equals(type) || "MANUAL".equals(type)) paragraph(document, text(section.getSummary().get("text")), "ReportBody", ParagraphAlignment.LEFT, false, limits);
         else if ("GROUP_TEXT".equals(type)) groups(document, section.getSummary().get("groups"), limits);
         else if ("CHART".equals(type)) chart(document, section, limits);
-        else paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false);
+        else paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false, limits);
     }
     private void stat(XWPFDocument document, ReportSectionData section, Limits limits) throws IOException {
-        if (section.getSummary().get("text") != null) paragraph(document, text(section.getSummary().get("text")), "ReportBody", ParagraphAlignment.LEFT, false);
-        else if (section.getRows().isEmpty()) paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false); else table(document, section, limits);
+        if (section.getSummary().get("text") != null) paragraph(document, text(section.getSummary().get("text")), "ReportBody", ParagraphAlignment.LEFT, false, limits);
+        else if (section.getRows().isEmpty()) paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false, limits); else table(document, section, limits);
     }
     private void table(XWPFDocument document, ReportSectionData section, Limits limits) throws IOException {
         List<String> headers = strings(section.getSummary().get("headers"));
-        if (headers.isEmpty() || section.getRows().isEmpty()) { paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false); return; }
+        if (headers.isEmpty() || section.getRows().isEmpty()) { paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false, limits); return; }
         tableGrid(limits, headers.size(), section.getRows().size());
         List<String> aligns = strings(section.getSummary().get("alignments")); XWPFTable table = document.createTable();
         XWPFTableRow header = table.getRow(0); header.getCtRow().addNewTrPr().addNewTblHeader();
         for (int i = 0; i < headers.size(); i++) { XWPFTableCell cell = i == 0 ? header.getCell(0) : header.addNewTableCell(); formatCell(cell, "D9EAF7"); writeCell(cell, headers.get(i), alignment(aligns, i), true, limits); }
         for (Map<String, Object> row : section.getRows()) {
+            Map<String,Object> values = valuesFor(row, headers);
             XWPFTableRow target = table.createRow();
-            for (int i = 0; i < headers.size(); i++) { Object value = valueFor(row, headers.get(i), i); formatCell(target.getCell(i), null); writeCell(target.getCell(i), text(value), alignment(aligns, i), false, limits); }
+            for (int i = 0; i < headers.size(); i++) { Object value = values.get(headers.get(i)); formatCell(target.getCell(i), null); writeCell(target.getCell(i), text(value), alignment(aligns, i), false, limits); }
         }
     }
-    private Object valueFor(Map<String, Object> row, String header, int index) { if (row.containsKey(header)) return row.get(header); int cursor = 0; for (Object value : row.values()) if (cursor++ == index) return value; return ""; }
+    private Map<String,Object> valuesFor(Map<String,Object> row, List<String> headers) {
+        List<Object> positional = new ArrayList<Object>(row.values());
+        Map<String,Object> resolved = new LinkedHashMap<String,Object>();
+        for (int i = 0; i < headers.size(); i++) {
+            String header = headers.get(i);
+            resolved.put(header, row.containsKey(header) ? row.get(header)
+                    : i < positional.size() ? positional.get(i) : "");
+        }
+        return resolved;
+    }
     private void formatCell(XWPFTableCell cell, String color) {
         cell.setVerticalAlignment(XWPFTableCell.XWPFVertAlign.CENTER); if (cell.getCTTc().getTcPr() == null) cell.getCTTc().addNewTcPr();
         margins(cell);
@@ -130,18 +144,19 @@ public final class WordReportExporter implements ReportExporter {
         XWPFParagraph paragraph = cell.getParagraphs().get(0); paragraph.setStyle("ReportTable"); paragraph.setAlignment(alignment); run(paragraph, safe(value, limits), 8.5, bold); if (bold) paragraph.getCTP().addNewPPr().addNewKeepNext();
     }
     private void groups(XWPFDocument document, Object raw, Limits limits) throws IOException {
-        if (!(raw instanceof List) || ((List<?>) raw).isEmpty()) { paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false); return; }
-        for (Object entry : (List<?>) raw) if (entry instanceof Map) { Map<?, ?> group = (Map<?, ?>) entry; paragraph(document, text(group.get("title")), "ReportSection", ParagraphAlignment.LEFT, true); paragraph(document, safe(text(group.get("summary")), limits), "ReportBody", ParagraphAlignment.LEFT, false); }
+        if (!(raw instanceof List) || ((List<?>) raw).isEmpty()) { paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false, limits); return; }
+        groupCount(limits, ((List<?>) raw).size());
+        for (Object entry : (List<?>) raw) if (entry instanceof Map) { Map<?, ?> group = (Map<?, ?>) entry; paragraph(document, text(group.get("title")), "ReportSection", ParagraphAlignment.LEFT, true, limits); paragraph(document, text(group.get("summary")), "ReportBody", ParagraphAlignment.LEFT, false, limits); }
     }
     private void chart(XWPFDocument document, ReportSectionData section, Limits limits) throws IOException {
         byte[] png = png(section.getSummary().get("pngBase64")); if (png == null) { chartTable(document, section, limits); return; }
-        XWPFParagraph p = document.createParagraph(); p.setAlignment(ParagraphAlignment.CENTER); XWPFRun run = p.createRun(); fonts(run, 10.5, false);
+        paragraphs(limits, 1); XWPFParagraph p = document.createParagraph(); p.setAlignment(ParagraphAlignment.CENTER); XWPFRun run = p.createRun(); fonts(run, 10.5, false);
         try (InputStream image = new ByteArrayInputStream(png)) { run.addPicture(image, Document.PICTURE_TYPE_PNG, "chart.png", Units.toEMU(640), Units.toEMU(320)); }
         catch (Exception ex) { throw new ReportExportException("Cannot embed trusted chart PNG", false, ex); }
     }
     private void chartTable(XWPFDocument document, ReportSectionData section, Limits limits) throws IOException {
         List<String> categories = strings(section.getSummary().get("categories")); List<?> values = section.getSummary().get("values") instanceof List ? (List<?>) section.getSummary().get("values") : Collections.emptyList();
-        if (categories.isEmpty()) { paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false); return; }
+        if (categories.isEmpty()) { paragraph(document, "暂无数据", "ReportBody", ParagraphAlignment.LEFT, false, limits); return; }
         List<Map<String,Object>> rows = new ArrayList<Map<String,Object>>(); for (int i = 0; i < categories.size(); i++) { java.util.LinkedHashMap<String,Object> row = new java.util.LinkedHashMap<String,Object>(); row.put("分类", categories.get(i)); row.put("数值", i < values.size() ? values.get(i) : "-"); rows.add(row); }
         java.util.LinkedHashMap<String,Object> summary = new java.util.LinkedHashMap<String,Object>(); summary.put("headers", java.util.Arrays.asList("分类", "数值")); summary.put("alignments", java.util.Arrays.asList("left", "right")); table(document, new ReportSectionData(section.getSectionCode(), "TABLE", section.getTitle(), rows, summary), limits);
     }
@@ -157,17 +172,20 @@ public final class WordReportExporter implements ReportExporter {
     private ParagraphAlignment alignment(List<String> aligns, int index) { String value = index < aligns.size() ? aligns.get(index) : "left"; return "right".equalsIgnoreCase(value) ? ParagraphAlignment.RIGHT : "center".equalsIgnoreCase(value) ? ParagraphAlignment.CENTER : ParagraphAlignment.LEFT; }
     private List<String> strings(Object raw) { if (!(raw instanceof List)) return Collections.emptyList(); List<String> output = new ArrayList<String>(); for (Object value : (List<?>) raw) output.add(text(value)); return output; }
     private String text(Object value) { return value == null ? "暂无数据" : String.valueOf(value); }
-    private String safe(String value) throws IOException { return safe(value, new Limits()); }
     private String safe(String value, Limits limits) throws IOException { String cleaned = value == null ? "暂无数据" : value.replace('\u0000', ' '); limits.text += cleaned.length(); if (limits.text > MAX_TEXT) throw new ReportExportException("DOCX text limit exceeded", false); return cleaned; }
-    private static final class Limits { int rows, cells, text; }
+    private static final class Limits { int rows, cells, text, groups, paragraphs; }
 
-    private void preflight(ReportData data) throws IOException { Limits limits = new Limits(); addText(limits, "人工智能实验室月报"); addText(limits, data.getContext().getPeriod()); addText(limits, data.getContext().getBizLine()); for (ReportSectionData section : data.getSections()) { addText(limits, section.getTitle()); grid(limits, section); for (Map<String,Object> row : section.getRows()) { for (Map.Entry<String,Object> entry : row.entrySet()) { addText(limits, entry.getKey()); addText(limits, text(entry.getValue())); } } scan(limits, section.getSummary()); } }
+    private void preflight(ReportData data) throws IOException { Limits limits = new Limits(); paragraphs(limits, 2); addText(limits, "人工智能实验室月报"); addText(limits, data.getContext().getPeriod()); addText(limits, data.getContext().getBizLine()); for (ReportSectionData section : data.getSections()) { paragraphs(limits, 1); addText(limits, section.getTitle()); grid(limits, section); for (Map<String,Object> row : section.getRows()) { for (Map.Entry<String,Object> entry : row.entrySet()) { addText(limits, entry.getKey()); addText(limits, text(entry.getValue())); } } scan(limits, section.getSummary()); } }
     /** Mirrors the only render paths that allocate a Word table. */
-    private void grid(Limits limits, ReportSectionData section) throws IOException { String type = section.getSectionType(); if ("TABLE".equals(type) || ("STAT".equals(type) && section.getSummary().get("text") == null)) { tableGrid(limits, strings(section.getSummary().get("headers")).size(), section.getRows().size()); return; } if ("CHART".equals(type) && png(section.getSummary().get("pngBase64")) == null) { int categories = strings(section.getSummary().get("categories")).size(); if (categories > 0) { int renderedRows = plusOne(categories); rows(limits, renderedRows); cells(limits, 2, renderedRows); } } }
+    private void grid(Limits limits, ReportSectionData section) throws IOException { String type = section.getSectionType(); if ("TABLE".equals(type)) { tableOrFallback(limits, section); return; } if ("STAT".equals(type)) { if (section.getSummary().get("text") != null || section.getRows().isEmpty()) paragraphs(limits, 1); else tableOrFallback(limits, section); return; } if ("TEXT".equals(type) || "MANUAL".equals(type)) { paragraphs(limits, 1); return; } if ("GROUP_TEXT".equals(type)) { groupGrid(limits, section.getSummary().get("groups")); return; } if ("CHART".equals(type)) { if (png(section.getSummary().get("pngBase64")) != null) { paragraphs(limits, 1); return; } int categories = strings(section.getSummary().get("categories")).size(); if (categories > 0) { int renderedRows = plusOne(categories); rows(limits, renderedRows); cells(limits, 2, renderedRows); paragraphs(limits, 2 * renderedRows); } else paragraphs(limits, 1); return; } paragraphs(limits, 1); }
+    private void tableOrFallback(Limits limits, ReportSectionData section) throws IOException { int columns = strings(section.getSummary().get("headers")).size(); if (columns <= 0 || section.getRows().isEmpty()) paragraphs(limits, 1); else tableGrid(limits, columns, section.getRows().size()); }
+    private void groupGrid(Limits limits, Object raw) throws IOException { if (!(raw instanceof List) || ((List<?>) raw).isEmpty()) { paragraphs(limits, 1); return; } List<?> values = (List<?>) raw; groupCount(limits, values.size()); for (Object value : values) if (value instanceof Map) paragraphs(limits, 2); }
     private void rows(Limits limits, int count) throws IOException { if ((long) limits.rows + (long) count > MAX_ROWS) throw new ReportExportException("DOCX row limit exceeded", false); limits.rows += count; }
-    private void tableGrid(Limits limits, int columns, int dataRows) throws IOException { if (columns > 0 && dataRows > 0) { int renderedRows = plusOne(dataRows); rows(limits, renderedRows); cells(limits, columns, renderedRows); } }
+    private void tableGrid(Limits limits, int columns, int dataRows) throws IOException { if (columns > 0 && dataRows > 0) { int renderedRows = plusOne(dataRows); rows(limits, renderedRows); cells(limits, columns, renderedRows); paragraphs(limits, columns * renderedRows); } }
     private int plusOne(int value) throws IOException { if (value == Integer.MAX_VALUE) throw new ReportExportException("DOCX row limit exceeded", false); return value + 1; }
     private void cells(Limits limits, int columns, int rows) throws IOException { long required = (long) columns * (long) rows; if (required > MAX_CELLS - (long) limits.cells) throw new ReportExportException("DOCX cell limit exceeded", false); limits.cells += (int) required; }
+    private void groupCount(Limits limits, int count) throws IOException { if ((long) limits.groups + (long) count > MAX_GROUPS) throw new ReportExportException("DOCX group limit exceeded", false); limits.groups += count; }
+    private void paragraphs(Limits limits, int count) throws IOException { if ((long) limits.paragraphs + (long) count > MAX_PARAGRAPHS) throw new ReportExportException("DOCX paragraph limit exceeded", false); limits.paragraphs += count; }
     private void scan(Limits limits, Object value) throws IOException { if (value == null) return; if (value instanceof String || value instanceof Number || value instanceof Boolean || value instanceof Character) { addText(limits, String.valueOf(value)); return; } if (value instanceof Map) { for (Map.Entry<?,?> entry : ((Map<?,?>) value).entrySet()) { addText(limits, String.valueOf(entry.getKey())); scan(limits, entry.getValue()); } return; } if (value instanceof Iterable) for (Object item : (Iterable<?>) value) scan(limits, item); }
     private void addText(Limits limits, String value) throws IOException { int bytes = (value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length); limits.text += bytes; if (limits.text > MAX_TEXT) throw new ReportExportException("DOCX text limit exceeded", false); }
     private static final class BoundedOutputStream extends java.io.OutputStream { private final java.io.OutputStream target; private final int maximum; private int size; BoundedOutputStream(java.io.OutputStream target,int maximum){this.target=target;this.maximum=maximum;} @Override public void write(int value)throws IOException{check(1);target.write(value);} @Override public void write(byte[] value,int offset,int length)throws IOException{check(length);target.write(value,offset,length);} private void check(int count)throws IOException{if(count>maximum-size)throw new ReportExportException("DOCX output byte limit exceeded",false);size+=count;} }

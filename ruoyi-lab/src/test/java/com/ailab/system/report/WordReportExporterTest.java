@@ -123,6 +123,50 @@ class WordReportExporterTest {
     }
 
     @Test
+    void groupTextEmptyMapsConsumeOneGlobalGroupAndTwoGlobalParagraphsEach() {
+        java.util.List<Map<String,Object>> first = new java.util.ArrayList<Map<String,Object>>(
+                Collections.nCopies(37500, Collections.<String,Object>emptyMap()));
+        java.util.List<Map<String,Object>> second = new java.util.ArrayList<Map<String,Object>>(
+                Collections.nCopies(37500, Collections.<String,Object>emptyMap()));
+        ReportData value = new ReportData(report().getContext(), "t", 1, Arrays.asList(
+                new ReportSectionData("g1", "GROUP_TEXT", "g1", Collections.<Map<String,Object>>emptyList(),
+                        map("groups", first)),
+                new ReportSectionData("g2", "GROUP_TEXT", "g2", Collections.<Map<String,Object>>emptyList(),
+                        map("groups", second))), Collections.<String,Object>emptyMap());
+
+        java.io.IOException failure = assertThrows(java.io.IOException.class, () -> invokePreflight(value));
+
+        assertTrue(failure.getMessage().contains("paragraph limit"));
+    }
+
+    @Test
+    void groupTextGroupBudgetIsGlobalEvenForEntriesThatRenderNoParagraphs() {
+        java.util.List<Integer> first = new java.util.ArrayList<Integer>(Collections.nCopies(75001, 1));
+        java.util.List<Integer> second = new java.util.ArrayList<Integer>(Collections.nCopies(75001, 2));
+        ReportData value = new ReportData(report().getContext(), "t", 1, Arrays.asList(
+                new ReportSectionData("g1", "GROUP_TEXT", "g1", Collections.<Map<String,Object>>emptyList(),
+                        map("groups", first)),
+                new ReportSectionData("g2", "GROUP_TEXT", "g2", Collections.<Map<String,Object>>emptyList(),
+                        map("groups", second))), Collections.<String,Object>emptyMap());
+
+        java.io.IOException failure = assertThrows(java.io.IOException.class, () -> invokePreflight(value));
+
+        assertTrue(failure.getMessage().contains("group limit"));
+    }
+
+    @Test
+    void tableFallbackValuesAreIndexedOncePerRowInsteadOfOncePerMissingHeader() throws Exception {
+        CountingValuesMap row = new CountingValuesMap();
+        row.put("first", "a");
+        row.put("second", "b");
+
+        Map<String,Object> values = invokeValuesFor(row, Arrays.asList("missing-a", "missing-b"));
+
+        assertTrue(row.valuesCalls == 1, "row values must be indexed exactly once");
+        assertTrue("a".equals(values.get("missing-a")) && "b".equals(values.get("missing-b")));
+    }
+
+    @Test
     void boundedSerializerRefusesBytesBeyondTheConfiguredCap() throws Exception {
         Class<?> type = nested("BoundedOutputStream");
         java.lang.reflect.Constructor<?> constructor = type.getDeclaredConstructor(java.io.OutputStream.class, int.class); constructor.setAccessible(true);
@@ -157,6 +201,23 @@ class WordReportExporterTest {
         for (Class<?> type : WordReportExporter.class.getDeclaredClasses())
             if (simpleName.equals(type.getSimpleName())) return type;
         throw new AssertionError("missing nested type " + simpleName);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String,Object> invokeValuesFor(Map<String,Object> row, java.util.List<String> headers)
+            throws Exception {
+        java.lang.reflect.Method method = WordReportExporter.class.getDeclaredMethod(
+                "valuesFor", Map.class, java.util.List.class);
+        method.setAccessible(true);
+        return (Map<String,Object>) method.invoke(new WordReportExporter(), row, headers);
+    }
+
+    private static final class CountingValuesMap extends LinkedHashMap<String,Object> {
+        int valuesCalls;
+        @Override public java.util.Collection<Object> values() {
+            valuesCalls++;
+            return super.values();
+        }
     }
 
     private java.util.List<Map<String,Object>> repeatedRows(int count) {

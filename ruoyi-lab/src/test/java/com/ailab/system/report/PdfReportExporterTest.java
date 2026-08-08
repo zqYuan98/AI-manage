@@ -1,5 +1,6 @@
 package com.ailab.system.report;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -29,6 +30,29 @@ class PdfReportExporterTest {
         ReportExportException error = assertThrows(ReportExportException.class,
                 () -> exporter.exportFromWord(new byte[] {1, 2, 3}, "monthly report"));
         assertTrue(error.isRetryable());
+        assertArrayEquals(new byte[] {1, 2, 3}, error.getPreservedWord());
+    }
+
+    @Test
+    void standardPdfExportFailurePreservesTheSuccessfulWordArtifactForPersistence() throws Exception {
+        LabProperties properties = new LabProperties();
+        Path temp = Files.createTempDirectory("pdf preserves word ");
+        properties.setTempDirectory(temp.toString());
+        properties.setLibreOfficeExecutable(temp.resolve("missing soffice").toString());
+        PdfReportExporter exporter = new PdfReportExporter(properties);
+        com.ailab.system.report.model.ReportData report = new com.ailab.system.report.model.ReportData(
+                new com.ailab.system.report.model.ReportContext("2026-08", "lab", 1L,
+                        java.time.Instant.EPOCH, java.util.Collections.<String,Object>emptyMap()),
+                "t", 1, java.util.Collections.<com.ailab.system.report.model.ReportSectionData>emptyList(),
+                java.util.Collections.<String,Object>emptyMap());
+
+        ReportExportException error = assertThrows(ReportExportException.class,
+                () -> exporter.export(report));
+        byte[] preserved = error.getPreservedWord();
+
+        assertTrue(preserved.length > 4 && preserved[0] == 'P' && preserved[1] == 'K');
+        preserved[0] = 0;
+        assertTrue(error.getPreservedWord()[0] == 'P', "preserved Word must be defensively copied");
     }
 
     @Test
@@ -55,6 +79,10 @@ class PdfReportExporterTest {
                 () -> runner.convert(new byte[] {1}, "missing")).isRetryable());
         assertTrue(assertThrows(ReportExportException.class,
                 () -> runner.convert(new byte[] {1}, "invalid")).isRetryable());
+        assertTrue(assertThrows(ReportExportException.class,
+                () -> runner.convert(new byte[] {1}, "truncated")).isRetryable());
+        assertTrue(assertThrows(ReportExportException.class,
+                () -> runner.convert(new byte[] {1}, "bad-xref")).isRetryable());
         properties.setMaxUploadSizeBytes(1024L);
         assertTrue(assertThrows(ReportExportException.class,
                 () -> runner.convert(new byte[] {1}, "oversize")).isRetryable());

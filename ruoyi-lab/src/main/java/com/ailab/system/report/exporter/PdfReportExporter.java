@@ -12,5 +12,9 @@ public final class PdfReportExporter implements ReportExporter {
     @Override public String getId() { return "PDF"; }
     @Override public boolean supports(String value) { return "PDF".equals(value); }
     @Override public byte[] export(ReportData data) throws IOException { byte[] docx = word.export(data); return exportFromWord(docx, "report-" + data.getContext().getPeriod()); }
-    public byte[] exportFromWord(byte[] wordBytes, String safeName) throws ReportExportException { return runner.convert(wordBytes, safeName); }
+    /** Task 12 persists the supplied Word first, then calls this method for targeted PDF retry. */
+    public byte[] exportFromWord(byte[] wordBytes, String safeName) throws ReportExportException {
+        try { return runner.convert(wordBytes, safeName); }
+        catch (ReportExportException failure) { throw failure.preserveWord(wordBytes); }
+    }
 }

@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.Locale;
 
 /** Executed by ProcessBuilder in tests; it never invokes a shell or LibreOffice. */
 public final class FakeLibreOfficeMain {
@@ -12,6 +13,11 @@ public final class FakeLibreOfficeMain {
 
     public static void main(String[] args) throws Exception {
         if (args.length > 0 && "sleeper".equals(args[0])) {
+            Thread.sleep(SLEEP_MILLIS);
+            return;
+        }
+        if (args.length > 1 && "pid-sleeper".equals(args[0])) {
+            ProcessTestSupport.writeCurrentPid(Paths.get(args[1]));
             Thread.sleep(SLEEP_MILLIS);
             return;
         }
@@ -87,6 +93,8 @@ public final class FakeLibreOfficeMain {
             Thread.sleep(tag.contains("orphan") ? 400L : SLEEP_MILLIS);
             return;
         }
+        // A real office process lives long enough to be bound to a native lease before producing output.
+        Thread.sleep(700L);
         if (input.contains("nonzero")) {
             char[] chunk = new char[80000];
             Arrays.fill(chunk, 'x');
@@ -102,13 +110,42 @@ public final class FakeLibreOfficeMain {
             Files.write(out.resolve(file), "not-a-pdf".getBytes(StandardCharsets.US_ASCII));
             return;
         }
+        if (input.contains("truncated")) {
+            Files.write(out.resolve(file), "%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\nstartxref\n9\n"
+                    .getBytes(StandardCharsets.US_ASCII));
+            return;
+        }
+        if (input.contains("bad-xref")) {
+            Files.write(out.resolve(file), "%PDF-1.4\nstartxref\n999999\n%%EOF\n"
+                    .getBytes(StandardCharsets.US_ASCII));
+            return;
+        }
         if (input.contains("oversize")) {
             byte[] value = new byte[2048];
             value[0] = '%'; value[1] = 'P'; value[2] = 'D'; value[3] = 'F'; value[4] = '-';
             Files.write(out.resolve(file), value);
             return;
         }
-        Files.write(out.resolve(file), ("%PDF-1.4\n" + String.join("|", args)).getBytes(StandardCharsets.UTF_8));
+        Files.write(out.resolve(file), minimalPdf(String.join("|", args)));
+    }
+
+    private static byte[] minimalPdf(String payload) throws java.io.IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        write(out, "%PDF-1.4\n%ARGS " + payload.replace('\n', ' ').replace('\r', ' ') + "\n");
+        int catalog = out.size();
+        write(out, "1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n");
+        int pages = out.size();
+        write(out, "2 0 obj\n<</Type /Pages /Count 0 /Kids []>>\nendobj\n");
+        int xref = out.size();
+        write(out, "xref\n0 3\n0000000000 65535 f \n");
+        write(out, String.format(Locale.ROOT, "%010d 00000 n \n", catalog));
+        write(out, String.format(Locale.ROOT, "%010d 00000 n \n", pages));
+        write(out, "trailer\n<</Size 3 /Root 1 0 R>>\nstartxref\n" + xref + "\n%%EOF\n");
+        return out.toByteArray();
+    }
+
+    private static void write(java.io.ByteArrayOutputStream out, String value) throws java.io.IOException {
+        out.write(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private static void lateBroker(Path base, String tag) throws Exception {
