@@ -53,6 +53,8 @@ public final class SafeFreemarkerFactory {
     public SafeFreemarkerFactory() {
         configuration = new Configuration(Configuration.VERSION_2_3_31);
         configuration.setDefaultEncoding("UTF-8");
+        configuration.setLocale(java.util.Locale.ROOT);
+        configuration.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
         configuration.setTagSyntax(Configuration.ANGLE_BRACKET_TAG_SYNTAX);
         configuration.setInterpolationSyntax(Configuration.DOLLAR_INTERPOLATION_SYNTAX);
         configuration.setLocalizedLookup(false);

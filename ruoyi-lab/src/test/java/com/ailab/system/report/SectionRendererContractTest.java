@@ -1,8 +1,10 @@
 package com.ailab.system.report;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ailab.system.domain.LabReportSection;
@@ -18,6 +20,8 @@ import com.ailab.system.report.renderer.StatSectionRenderer;
 import com.ailab.system.report.renderer.TableSectionRenderer;
 import com.ailab.system.report.renderer.TextSectionRenderer;
 import java.time.Instant;
+import java.time.Duration;
+import java.math.BigDecimal;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.util.Base64;
@@ -25,6 +29,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -124,6 +129,41 @@ class SectionRendererContractTest {
         List<?> groups = (List<?>) new GroupTextSectionRenderer().render(context, section("GROUP_TEXT", "{\"groupBy\":\"goalId\"}"), source).getSummary().get("groups");
         assertEquals(1, ((List<?>) ((Map<?, ?>) groups.get(0)).get("rows")).size());
         assertEquals("（未分组）", ((Map<?, ?>) groups.get(1)).get("title")); assertEquals(1, ((List<?>) ((Map<?, ?>) groups.get(1)).get("rows")).size());
+    }
+
+    @Test
+    void textRenderingIsByteStableAcrossDefaultLocales() {
+        Locale original = Locale.getDefault(); byte[] expected = null;
+        try {
+            for (Locale locale : Arrays.asList(Locale.US, Locale.GERMANY, Locale.forLanguageTag("tr-TR"))) {
+                Locale.setDefault(locale);
+                ReportSectionData source = new ReportSectionData("s1", "TEXT", "text", Collections.<Map<String, Object>>emptyList(), row("amount", new BigDecimal("1234.5"), "word", "i"));
+                String text = String.valueOf(new TextSectionRenderer().render(context, section("TEXT", "{\"template\":\"${summary.amount} ${summary.word?upper_case}\"}"), source).getSummary().get("text"));
+                byte[] actual = text.getBytes(java.nio.charset.StandardCharsets.UTF_8); if (expected == null) expected = actual; else assertArrayEquals(expected, actual);
+                assertEquals("1,234.5 I", text);
+            }
+        } finally { Locale.setDefault(original); }
+    }
+
+    @Test
+    void chartPngDependsOnlyOnValuesAndNotLabelsOrHostFonts() {
+        ChartSectionRenderer renderer = new ChartSectionRenderer();
+        ReportSectionData first = new ReportSectionData("s1", "CHART", "chart", Collections.singletonList(row("label", "Alpha", "value", 7)), Collections.<String, Object>emptyMap());
+        ReportSectionData second = new ReportSectionData("s1", "CHART", "chart", Collections.singletonList(row("label", "不同字体", "value", 7)), Collections.<String, Object>emptyMap());
+        assertEquals(renderer.render(context, section("CHART"), first).getSummary().get("pngBase64"), renderer.render(context, section("CHART"), second).getSummary().get("pngBase64"));
+    }
+
+    @Test
+    void groupTextRejectsDuplicateOrIncorrectPrecomputedGroupsAndScalesToFiveThousand() {
+        GroupTextSectionRenderer renderer = new GroupTextSectionRenderer();
+        List<Map<String, Object>> twoRows = Arrays.asList(row("owner", "A"), row("owner", "B"));
+        assertThrows(IllegalArgumentException.class, () -> renderer.render(context, section("GROUP_TEXT", "{\"groupBy\":\"owner\"}"), new ReportSectionData("s1", "GROUP_TEXT", "g", twoRows, row("groups", Arrays.asList(row("field", "owner", "key", "A", "count", 1), row("field", "owner", "key", "A", "count", 1))))));
+        assertThrows(IllegalArgumentException.class, () -> renderer.render(context, section("GROUP_TEXT", "{\"groupBy\":\"owner\"}"), new ReportSectionData("s1", "GROUP_TEXT", "g", twoRows, row("groups", Collections.singletonList(row("field", "owner", "key", "A", "count", 2))))));
+        assertThrows(IllegalArgumentException.class, () -> renderer.render(context, section("GROUP_TEXT", "{\"groupBy\":\"owner\"}"), new ReportSectionData("s1", "GROUP_TEXT", "g", twoRows, row("groups", Collections.singletonList(row("field", "owner", "key", "A", "count", 1.5))))));
+        List<Map<String, Object>> rows = new java.util.ArrayList<Map<String, Object>>(); List<Map<String, Object>> groups = new java.util.ArrayList<Map<String, Object>>();
+        for (int i = 0; i < 5000; i++) { rows.add(row("owner", "G" + i)); groups.add(row("field", "owner", "key", "G" + i, "count", 1)); }
+        ReportSectionData rendered = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> renderer.render(context, section("GROUP_TEXT", "{\"groupBy\":\"owner\"}"), new ReportSectionData("s1", "GROUP_TEXT", "g", rows, row("groups", groups))));
+        assertEquals(5000, ((List<?>) rendered.getSummary().get("groups")).size());
     }
 
     @Test
