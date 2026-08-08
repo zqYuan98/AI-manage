@@ -14,13 +14,13 @@ public final class ReportContext {
     private final Map<String, Object> attributes;
 
     public ReportContext(String period, String bizLine, Long requesterId, Instant generatedAt, Map<String, Object> attributes) {
-        this(period, bizLine, requesterId, generatedAt, ReportAccessScope.member(bizLine, requesterId, java.util.Collections.<String>emptySet()), attributes);
+        this(period, bizLine, requesterId, generatedAt, ReportAccessScope.member(bizLine, requesterId), attributes);
     }
     public ReportContext(String period, String bizLine, Long requesterId, Instant generatedAt, ReportAccessScope accessScope, Map<String, Object> attributes) {
         this.period = require(period, "period"); this.bizLine = require(bizLine, "bizLine"); this.requesterId = requesterId;
         if (accessScope == null) throw new IllegalArgumentException("accessScope is required");
         if (accessScope.getKind() == ReportAccessScope.Kind.MEMBER && !Objects.equals(requesterId, accessScope.getMemberId())) throw new IllegalArgumentException("member scope must match requesterId");
-        if (accessScope.getKind() == ReportAccessScope.Kind.LEAD && !bizLine.equals(accessScope.getBizLine())) throw new IllegalArgumentException("lead scope must match bizLine");
+        if (accessScope.getKind() == ReportAccessScope.Kind.LEAD && (!bizLine.equals(accessScope.getBizLine()) || !Objects.equals(requesterId, accessScope.getMemberId()))) throw new IllegalArgumentException("lead scope must match requester");
         this.accessScope = accessScope;
         this.generatedAt = generatedAt == null ? Instant.now() : generatedAt;
         this.attributes = ImmutableReportValue.map(attributes);

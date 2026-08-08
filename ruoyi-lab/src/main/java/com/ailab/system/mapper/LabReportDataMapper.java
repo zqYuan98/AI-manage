@@ -6,7 +6,6 @@ import java.util.Map;
 
 /** Read-only report projections.  Each statement receives an explicit ReportAccessScope. */
 public interface LabReportDataMapper {
-    List<Map<String, Object>> selectGoalProgress(ReportQueryCriteria criteria);
     List<Map<String, Object>> selectTasks(ReportQueryCriteria criteria);
     List<Map<String, Object>> selectUndoneTasks(ReportQueryCriteria criteria);
     List<Map<String, Object>> selectNextTasks(ReportQueryCriteria criteria);

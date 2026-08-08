@@ -36,10 +36,11 @@ public final class ReportConfigCatalog {
     private static final Set<String> FILTER_OPERATORS = set("EQ", "NE", "IN", "GTE", "LTE", "BETWEEN");
     private static final Set<String> REPORT_TYPES = set("WEEK", "MONTH", "QUARTER", "YEAR");
     private static final Set<String> TEMPLATE_STATUSES = set("ENABLED", "DISABLED");
-    private static final Set<String> QUERY_FIELDS = set("period", "bizLine", "owner", "ownerId", "memberId",
-            "status", "resultStatus", "taskLevel", "planDate", "title", "deliverable", "nextAction",
-            "coordination", "block", "goalLevel", "progressRate", "assetStage", "assetType", "iprStage",
-            "iprType", "result", "sectionCode");
+    private static final Set<String> QUERY_FIELDS = set("id", "period", "bizLine", "owner", "ownerId", "ownerName", "memberId",
+            "status", "resultStatus", "taskLevel", "planDate", "title", "deliverable", "failReason", "nextAction",
+            "coordination", "coordinationSupport", "block", "blockType", "blockReason", "blockStartTime", "goalId", "goalTitle", "year", "expectedProgress", "progressRate",
+            "assetNo", "assetName", "assetStage", "assetType", "backupOwnerId", "criticalFlag", "backupOwnerStatus", "singlePointRisk",
+            "iprNo", "iprName", "iprStage", "iprType", "plannedSubmitDate", "actualSubmitDate", "score", "revisionNo", "redLineFlag", "confirmationStatus", "total", "result", "sectionCode");
     private static final Map<String, Set<String>> COMPATIBLE_PROVIDERS = compatibility();
 
     private ReportConfigCatalog() { }
