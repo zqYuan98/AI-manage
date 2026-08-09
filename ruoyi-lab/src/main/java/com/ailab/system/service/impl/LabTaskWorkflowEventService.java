@@ -7,6 +7,7 @@ import com.ailab.system.mapper.LabTaskWorkflowEventMapper;
 import com.ruoyi.common.exception.ServiceException;
 import java.time.Clock;
 import java.util.Date;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /** 只追加月度任务工作流事件。 */
@@ -15,6 +16,7 @@ public class LabTaskWorkflowEventService {
     private final LabTaskWorkflowEventMapper mapper;
     private final Clock clock;
 
+    @Autowired
     public LabTaskWorkflowEventService(LabTaskWorkflowEventMapper mapper) {
         this(mapper, Clock.systemDefaultZone());
     }

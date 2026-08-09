@@ -90,6 +90,8 @@ class LabTaskServiceTest {
 
         service.createTask(weekly, 8L);
         assertNotNull(weekly.getId());
+        assertEquals(LabConstants.EXECUTION_PLANNED, weekly.getExecutionStatus());
+        assertEquals(Integer.valueOf(0), weekly.getExecutionVersion());
     }
 
     @Test

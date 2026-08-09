@@ -53,7 +53,20 @@
 
 完整 seed 和可重跑迁移以 `sql/ailab.sql` 为准；`scripts/verify-sql.ps1` 对表、字典、权限、job 与演示成员数量执行静态合同校验。
 
-## 4. 权限边界摘要
+## 4. 周承诺、正式验收与关期快照
+
+| 对象 | 关键字段/状态 | 不变量 |
+| --- | --- | --- |
+| `lab_task` 周承诺投影 | `execution_status=PLANNED/ACTIVE/SELF_DONE/SELF_UNDONE/CANCELLED`、`execution_version`、`carried_from_id` | 与月度正式工作流独立；周承诺不直接进入绩效 |
+| `lab_task_execution_event` | `from_status/to_status/result_status/actual_finish_time/task_version/evidence_version` | 每次转换追加事件；当前状态必须等于最后事件；转期不覆盖原事实 |
+| `lab_task_migration_issue` | `issue_code/source_state_json/resolution_status` | 任一 OPEN 项阻止读写切换；源快照不可改写 |
+| `lab_task_workflow_event` | `from_status/to_status/result_status/task_version` | 月度正式结果的不可变审计链；关期前必须与当前月任务一致 |
+| `lab_formal_acceptance_revision/fact` | `period/biz_line/revision_no/evidence_version/reviewer_id` | 确认生成新修订并钉住审核与证据事实 |
+| `lab_period_close_snapshot/fact` | `period/revision_no/period_version/formal_revision_id` | 重开不改旧修订；再次关期只生成 N+1 |
+
+执行进度只读取到期周承诺：分母为已激活、`plan_date <= asOf` 且非管理者范围取消的承诺；分子为其中 `SELF_DONE`。正式进度和绩效只读取已验收的月度结果与关期快照，不读取周承诺自报终态。
+
+## 5. 权限边界摘要
 
 | 角色 | 读范围 | 写范围 | 敏感能力 |
 | --- | --- | --- | --- |

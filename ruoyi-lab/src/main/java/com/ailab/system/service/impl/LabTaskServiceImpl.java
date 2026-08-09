@@ -188,6 +188,9 @@ public class LabTaskServiceImpl implements LabTaskService {
         requireDefinitionWrite(task, actorId);
         task.setWorkflowStatus(LabConstants.WORKFLOW_DRAFT);
         task.setResultStatus(LabConstants.RESULT_DOING);
+        task.setExecutionStatus(LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel())
+                ? LabConstants.EXECUTION_PLANNED : null);
+        task.setExecutionVersion(0);
         task.setActualFinishTime(null);
         task.setResultDesc(null);
         task.setFailReason(null);

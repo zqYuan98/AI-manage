@@ -562,21 +562,25 @@ class LabMapperMySqlIT {
         assertTrue(memberRows.stream().allMatch(task -> Long.valueOf(39203L).equals(task.getOwnerId())));
         assertTrue(memberRows.stream().anyMatch(task -> Long.valueOf(39007L).equals(task.getId())));
 
-        LabTask own = taskService.getTask(39007L, 39103L); own.setTitle("member updated through real service");
-        assertEquals(1, taskService.updateTask(own, 39103L));
-        assertEquals("member updated through real service", taskMapper.selectTaskById(39007L).getTitle());
+        LabTask monthlyResult = taskService.getTask(39007L, 39103L);
+        monthlyResult.setTitle("member must not edit a formal monthly result");
+        assertThrows(ServiceException.class, () -> taskService.updateTask(monthlyResult, 39103L));
         assertThrows(ServiceException.class, () -> taskService.getTask(39003L, 39102L));
 
-        LabTask attemptedOtherOwner = newTask(39202L, "member cannot assign the lead");
+        LabTask attemptedOtherOwner = newWeeklyTask(39202L, "member cannot assign the lead");
         assertThrows(ServiceException.class, () -> taskService.createTask(attemptedOtherOwner, 39103L));
-        LabTask ownNew = newTask(39203L, "member creates own task");
+        LabTask ownNew = newWeeklyTask(39203L, "member creates own commitment");
         assertEquals(1, taskService.createTask(ownNew, 39103L));
+        LabTask own = taskService.getTask(ownNew.getId(), 39103L);
+        own.setTitle("member updated own weekly commitment");
+        assertEquals(1, taskService.updateTask(own, 39103L));
+        assertEquals("member updated own weekly commitment", taskMapper.selectTaskById(ownNew.getId()).getTitle());
         LabTaskEvidence attributed = new LabTaskEvidence(); attributed.setEvidenceType("URL"); attributed.setEvidenceTitle("IT proof");
         attributed.setEvidenceUrl("https://example.invalid/it/member-proof");
         taskService.addEvidence(ownNew.getId(), attributed, 39103L);
         assertEquals(Long.valueOf(39203L), attributed.getSubmitterId());
 
-        LabTask removable = newTask(39203L, "member removes own draft task");
+        LabTask removable = newWeeklyTask(39203L, "member removes own draft commitment");
         assertEquals(1, taskService.createTask(removable, 39103L));
         assertEquals(1, taskService.deleteTask(removable.getId(), removable.getVersion(), 39103L));
         assertNull(taskMapper.selectTaskById(removable.getId()));
@@ -709,14 +713,15 @@ class LabMapperMySqlIT {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void concurrentCloseReopenAndRecloseKeepImmutableRevisionsAndIdempotentDeductions() throws Exception {
         String period = "2098-11";
-        long taskId = 39880L;
+        long taskId = 49880L;
         cleanupPerformanceFixture(period, taskId);
         jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,asset_id,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values(?,0,39001,39002,'month',?,'algorithm','key','IT concurrent close',39203,101,'2098-11-20','artifact',100,100,'ACTIVE','DOING',39301,'0','0','0',0,'0','it',now())", taskId, period);
         assertThrows(ServiceException.class, () -> performanceService.closePeriod(period, "must roll back", 39101L));
         assertEquals(0, jdbcTemplate.queryForObject("select count(1) from lab_period_close where period=?", Integer.class, period));
         assertEquals(0, jdbcTemplate.queryForObject("select count(1) from lab_perf_score where period=?", Integer.class, period));
         assertEquals("0", jdbcTemplate.queryForObject("select period_lock_flag from lab_task where id=?", String.class, taskId));
-        jdbcTemplate.update("insert into lab_task_quality_gate(id,task_id,gate_no,gate_name,gate_status,del_flag,create_by,create_time) values(39880,?,'IT-CLOSE-GATE','IT close gate','PENDING','0','it',now())", taskId);
+        appendWorkflowFixture(taskId, null, "ACTIVE", "DOING", 0, "IT-CLOSE-CREATE");
+        jdbcTemplate.update("insert into lab_task_quality_gate(id,task_id,gate_no,gate_name,gate_status,del_flag,create_by,create_time) values(49880,?,'IT-CLOSE-GATE','IT close gate','PENDING','0','it',now())", taskId);
         try {
             ExecutorService pool = Executors.newFixedThreadPool(2);
             try {
@@ -755,8 +760,9 @@ class LabMapperMySqlIT {
             assertEquals(1, jdbcTemplate.queryForObject("select json_length(reopen_history_json) from lab_period_close where period=?", Integer.class, period));
 
             jdbcTemplate.update("update lab_task set workflow_status='CONFIRMED',result_status='ONTIME',actual_finish_time='2098-11-19 10:00:00',result_desc='fixed',version=version+1 where id=?", taskId);
-            jdbcTemplate.update("insert into lab_task_evidence(id,task_id,evidence_type,evidence_title,evidence_url,submitter_id,submit_time,audit_status,auditor_id,audit_time,audit_comment,del_flag,create_by,create_time) values(39880,?,'URL','IT corrected evidence','https://example.invalid/it/fixed',39203,now(),'APPROVED',39201,now(),'verified','0','it',now())", taskId);
-            jdbcTemplate.update("update lab_task_quality_gate set gate_status='PASSED',evidence_id=39880,checker_id=39201,check_time='2098-11-30 10:00:00',check_result='verified' where id=39880");
+            appendWorkflowFixture(taskId, "ACTIVE", "CONFIRMED", "ONTIME", 1, "IT-CLOSE-CONFIRMED");
+            jdbcTemplate.update("insert into lab_task_evidence(id,task_id,evidence_type,evidence_title,evidence_url,submitter_id,submit_time,audit_status,auditor_id,audit_time,audit_comment,del_flag,create_by,create_time) values(49880,?,'URL','IT corrected evidence','https://example.invalid/it/fixed',39203,now(),'APPROVED',39201,now(),'verified','0','it',now())", taskId);
+            jdbcTemplate.update("update lab_task_quality_gate set gate_status='PASSED',evidence_id=49880,checker_id=39201,check_time='2098-11-30 10:00:00',check_result='verified' where id=49880");
             LabCollaborationRecord training = new LabCollaborationRecord(); training.setTaskId(taskId); training.setPeriod(period); training.setToMemberId(39203L);
             training.setCategory("BACKUP"); training.setSignedScore(new BigDecimal("4")); training.setEvidenceUrl("https://example.invalid/it/backup");
             performanceService.createCollaboration(training, 39102L);
@@ -797,7 +803,7 @@ class LabMapperMySqlIT {
 
     @Test
     void quarterBackupFactsIncludeJulyAndAugustButExcludeSeptemberAndOtherOwners() {
-        long taskId = 39881L;
+        long taskId = 49881L;
         jdbcTemplate.update("insert into lab_task(id,parent_id,goal_id,milestone_id,task_level,period,biz_line,task_type,title,owner_id,dept_id,plan_date,deliverable,perf_weight,goal_weight,workflow_status,result_status,asset_id,coordination_required,current_block_flag,period_lock_flag,version,del_flag,create_by,create_time) values(?,0,39001,39002,'month','2098-08','algorithm','daily','IT backup cutoff',39203,101,'2098-08-20','artifact',0,0,'CONFIRMED','ONTIME',39301,'0','0','0',0,'0','it',now())", taskId);
         jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?,'2098-07',39202,39203,'BACKUP',4,'https://example.invalid/it/july-backup',39201,'APPROVED',now(),'July training',0,'0','it',now())", taskId);
         jdbcTemplate.update("insert into lab_collaboration_record(task_id,period,from_member_id,to_member_id,category,signed_score,evidence_url,reviewer_id,review_status,review_time,review_comment,version,del_flag,create_by,create_time) values(?,'2098-08',39203,39202,'BACKUP',4,'https://example.invalid/it/unrelated-backup',39201,'APPROVED',now(),'Other owner',0,'0','it',now())", taskId);
@@ -878,6 +884,23 @@ class LabMapperMySqlIT {
         return task;
     }
 
+    private LabTask newWeeklyTask(Long ownerId, String title) {
+        LabTask task = new LabTask(); task.setParentId(39007L); task.setGoalId(39001L); task.setMilestoneId(39002L);
+        task.setTaskLevel("week"); task.setPeriod("2026-W12"); task.setBizLine("algorithm"); task.setTaskType("daily");
+        task.setTitle(title); task.setOwnerId(ownerId); task.setDeptId(101L); task.setPlanDate(new Date(1773964800000L));
+        task.setDeliverable("IT commitment evidence"); task.setPerfWeight(BigDecimal.ZERO); task.setGoalWeight(BigDecimal.ZERO);
+        task.setCoordinationRequired("0");
+        return task;
+    }
+
+    private void appendWorkflowFixture(long taskId, String fromStatus, String toStatus,
+            String resultStatus, int taskVersion, String key) {
+        jdbcTemplate.update("insert into lab_task_workflow_event(task_id,from_status,to_status,result_status,actor_id,"
+                        + "event_type,reason,task_version,event_time,idempotency_key,del_flag,create_by,create_time) "
+                        + "values(?,?,?,?,39201,'IT_FIXTURE','IT lifecycle fixture',?,now(),?,'0','it',now())",
+                taskId, fromStatus, toStatus, resultStatus, taskVersion, key + ":" + taskId);
+    }
+
     private <T> T asUser(Long userId, Supplier<T> action) {
         SysUser user = userService.selectUserById(userId);
         for (SysRole role : user.getRoles()) role.setPermissions(Collections.singleton("lab:task:list"));
@@ -894,7 +917,15 @@ class LabMapperMySqlIT {
             String password = value("LAB_IT_DB_PASSWORD", "password");
             Path root = repositoryRoot();
             try (Connection connection = DriverManager.getConnection(url, username, password)) {
+                bootstrap(connection, root);
+            } catch (Exception exception) {
+                throw new IllegalStateException("Real MySQL 8 integration database is unavailable or could not be initialized. Configure LAB_IT_DB_URL/LAB_IT_DB_USERNAME/LAB_IT_DB_PASSWORD.", exception);
+            }
+        }
+
+        static void bootstrap(Connection connection, Path root) throws Exception {
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ry_20240629.sql")));
+                ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/quartz.sql")));
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-legacy-fixture.sql")));
                 requireLegacySkillUniquenessState(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/ailab.sql")));
@@ -914,9 +945,6 @@ class LabMapperMySqlIT {
                 requirePermissionDrivenSensitiveUpgrade(connection);
                 requireNullableLifecycleActiveJobTerminalized(connection);
                 ScriptUtils.executeSqlScript(connection, new FileSystemResource(root.resolve("sql/test/ailab-mapper-fixture.sql")));
-            } catch (Exception exception) {
-                throw new IllegalStateException("Real MySQL 8 integration database is unavailable or could not be initialized. Configure LAB_IT_DB_URL/LAB_IT_DB_USERNAME/LAB_IT_DB_PASSWORD.", exception);
-            }
         }
 
         private static void requireLegacySkillUniquenessState(Connection connection) throws Exception {
@@ -1033,7 +1061,7 @@ class LabMapperMySqlIT {
             return environment == null || environment.isEmpty() ? fallback : environment;
         }
 
-        private static Path repositoryRoot() {
+        static Path repositoryRoot() {
             Path cursor = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
             while (cursor != null && !Files.exists(cursor.resolve("sql/ailab.sql"))) cursor = cursor.getParent();
             if (cursor == null) throw new IllegalStateException("Could not locate repository SQL directory");

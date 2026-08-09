@@ -44,6 +44,8 @@ Linux 报告节点只支持 `x86_64` 或 `aarch64`，内核必须为 **5.3 或�
 | `LAB_LIBREOFFICE_EXECUTABLE` | `/usr/lib/libreoffice/program/oosplash` | Linux 使用真实启动器而非 `/usr/bin/soffice` shell 包装；容器镜像必须含 Writer |
 | `LAB_REPORT_CONVERSION_TIMEOUT_SECONDS` | `120` | 不建议低于 30 秒 |
 | `LAB_REPORT_MAX_UPLOAD_SIZE_BYTES` | `52428800` | 最终制品硬上限，接口另有更小类型上限 |
+| `LAB_COMMITMENT_READ_NEW_MODEL` | `false` / `true` | 受控读切换；隔离项未清零时启动失败 |
+| `LAB_COMMITMENT_WRITE_SELF_CLOSE` | `false` / `true` | 仅在新读取稳定后启用；首次成员事件形成不可回退点 |
 | `DRUID_STAT_ENABLED` | `false` | 生产默认关闭；开启时同时设置 allow、用户名、强密码 |
 
 ## 4. 启动示例
@@ -81,14 +83,18 @@ exec /usr/lib/jvm/java-8/bin/java -jar /opt/ailab/ruoyi-admin.jar
 
 容器需挂载 `/srv/ailab/runtime` 持久卷，限制服务账号权限，并在 seccomp 中显式放行 `pidfd_open`、`pidfd_send_signal`。不要授予容器特权模式来规避错误配置。
 
-## 5. 首次登录与权限
+## 5. 周承诺事实模型切换
+
+生产切换必须按[周承诺事实模型切换运行手册](commitment-cutover-runbook.md)执行。先 expand 和幂等基线迁移，处理全部隔离项并冻结写入完成全消费者比较；再启用读取、排练回滚，最后启用成员自主闭环。首次非迁移成员事件写入后只允许前向修复，禁止恢复旧读取口径。
+
+## 6. 首次登录与权限
 
 - 上游 RuoYi 基础 SQL 带有默认管理员账号；在开放网络前立即轮换 `admin` 密码、token secret 与 Druid 凭据。
 - `ailab.sql` 的六个演示用户均为禁用状态，注释明确要求管理员先设置独立强密码，再按需启用；不要复用 seed 中的哈希。
 - 角色权限由 `lab_manager`、`lab_lead`、`lab_member` 菜单授权控制。敏感绩效/报告还要求 `lab:report:sensitive`，下载时会重新读取实时权限，撤权后不能继续下载历史敏感制品。
 - 报告、模板和绩效写接口同时执行对象级校验；不得仅依赖前端按钮隐藏。
 
-## 6. 备份、恢复与运维
+## 7. 备份、恢复与运维
 
 ### 一致性备份
 
@@ -111,7 +117,7 @@ exec /usr/lib/jvm/java-8/bin/java -jar /opt/ailab/ruoyi-admin.jar
 - 重开会使原评分/报告历史仍保持不可变，同时允许新修订；不要直接更新 `lab_period_close` 或覆盖定稿报告。
 - 重开前确认纠正证据已提交，并在操作日志中保留审批依据。
 
-## 7. 故障排查
+## 8. 故障排查
 
 | 症状 | 检查与处理 |
 | --- | --- |

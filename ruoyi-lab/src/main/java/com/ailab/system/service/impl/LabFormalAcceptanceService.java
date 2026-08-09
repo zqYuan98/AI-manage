@@ -12,6 +12,7 @@ import com.ruoyi.common.exception.ServiceException;
 import java.time.Clock;
 import java.util.Date;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +24,7 @@ public class LabFormalAcceptanceService {
     private final LabFormalAcceptanceMapper mapper;
     private final Clock clock;
 
+    @Autowired
     public LabFormalAcceptanceService(LabFormalAcceptanceMapper mapper) {
         this(mapper, Clock.systemDefaultZone());
     }

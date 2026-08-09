@@ -27,6 +27,10 @@ class DeploymentContractTest {
         assertFalse(druid.contains("${MYSQL_PASSWORD:}"));
         assertTrue(application.contains("enabled: ${SWAGGER_ENABLED:false}"));
         assertTrue(demo.contains("enabled: ${SWAGGER_ENABLED:false}"));
+        assertTrue(application.contains("read-new-model: ${LAB_COMMITMENT_READ_NEW_MODEL:false}"));
+        assertTrue(application.contains("write-self-close: ${LAB_COMMITMENT_WRITE_SELF_CLOSE:false}"));
+        assertTrue(demo.contains("read-new-model: ${LAB_COMMITMENT_READ_NEW_MODEL:false}"));
+        assertTrue(demo.contains("write-self-close: ${LAB_COMMITMENT_WRITE_SELF_CLOSE:false}"));
         assertTrue(logback.contains("value=\"${LOG_PATH:-/home/ruoyi/logs}\""),
                 "a non-root service must be able to place logs in its writable runtime directory");
         assertTrue(deployment.contains("| `LOG_PATH` |"));

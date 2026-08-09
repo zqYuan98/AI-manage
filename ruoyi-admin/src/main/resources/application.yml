@@ -139,3 +139,5 @@ lab:
     conversion-timeout-seconds: ${LAB_REPORT_CONVERSION_TIMEOUT_SECONDS:120}
     max-upload-size-bytes: ${LAB_REPORT_MAX_UPLOAD_SIZE_BYTES:52428800}
     share-all-finalized-non-sensitive: ${LAB_REPORT_SHARE_ALL_FINALIZED_NON_SENSITIVE:true}
+    read-new-model: ${LAB_COMMITMENT_READ_NEW_MODEL:false}
+    write-self-close: ${LAB_COMMITMENT_WRITE_SELF_CLOSE:false}
