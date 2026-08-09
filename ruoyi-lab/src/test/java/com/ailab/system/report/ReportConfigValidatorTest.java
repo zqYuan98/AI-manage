@@ -411,6 +411,9 @@ class ReportConfigValidatorTest {
         assertFalse(Files.exists(root.resolve("sql/migrations/20260808_report_template_pin.sql")), "main bootstrap is the only runner-needed pin migration");
         String legacy = new String(Files.readAllBytes(root.resolve("sql/test/ailab-legacy-fixture.sql")), StandardCharsets.UTF_8).toLowerCase();
         assertTrue(legacy.contains("legacy-report-template-39990") && legacy.contains("create table `lab_report_instance`"));
+        assertTrue(legacy.indexOf("drop table if exists `lab_report_job`") >= 0
+                        && legacy.indexOf("drop table if exists `lab_report_job`") < legacy.indexOf("drop table if exists `lab_report_instance`"),
+                "the legacy bootstrap fixture must discard a prior durable queue before replacing its report instances");
         assertFalse(legacy.substring(legacy.indexOf("create table `lab_report_instance`")).contains("`template_code` varchar(64)"), "legacy fixture must predate pin columns");
         assertTrue(legacy.contains("create table `lab_report_section`"));
         String legacySection = legacy.substring(legacy.indexOf("create table `lab_report_section`"), legacy.indexOf("create table `lab_report_template`"));

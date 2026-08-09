@@ -179,6 +179,7 @@ VALUES
  (39992,'IPR-LEGACY-39992','Legacy draft filing','PATENT','DRAFTING',39203,NULL,NULL,'https://example.invalid/legacy/ipr-draft','it',NOW());
 
 -- Task 8 predecessor: instance layout is complete except for immutable template-code/revision pins.
+DROP TABLE IF EXISTS `lab_report_job`;
 DROP TABLE IF EXISTS `lab_report_instance`;
 DROP TABLE IF EXISTS `lab_report_section`;
 DROP TABLE IF EXISTS `lab_report_template`;

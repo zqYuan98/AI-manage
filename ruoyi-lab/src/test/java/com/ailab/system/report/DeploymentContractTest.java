@@ -25,6 +25,26 @@ class DeploymentContractTest {
         assertTrue(demo.contains("enabled: ${SWAGGER_ENABLED:false}"));
         assertEquals(2, occurrences(druid, "enabled: ${DRUID_STAT_ENABLED:false}"));
         assertTrue(verifier.contains("@('-pl','ruoyi-lab','-am','clean','test')"));
+        assertTrue(verifier.contains("@('-pl','ruoyi-admin','-am','-DskipTests','clean','package')"),
+                "the deployable jar must be rebuilt from a clean thin admin jar so stale nested modules cannot survive");
+    }
+
+    @Test
+    void realMySqlProfileDefinesEveryRequiredDruidPoolSetting() throws Exception {
+        String profile = read("../ruoyi-admin/src/test/resources/application-lab-it.yml");
+        String mysqlIt = read("../ruoyi-admin/src/test/java/com/ailab/system/mapper/LabMapperMySqlIT.java");
+        for (String setting : new String[] {
+                "timeBetweenEvictionRunsMillis:", "minEvictableIdleTimeMillis:",
+                "maxEvictableIdleTimeMillis:", "testWhileIdle:", "testOnBorrow:", "testOnReturn:"
+        }) {
+            assertTrue(profile.contains(setting), "lab-it profile is missing Druid setting " + setting);
+        }
+        assertTrue(profile.contains("secret: lab-it-only-token-secret-not-for-production"),
+                "the isolated integration profile needs an explicit test-only token secret");
+        assertFalse(profile.contains("web-application-type: none"),
+                "the full application IT needs MVC mappings even though it does not listen on a port");
+        assertTrue(mysqlIt.contains("webEnvironment = SpringBootTest.WebEnvironment.MOCK"),
+                "the full application IT must use a mock servlet context for its security configuration");
     }
 
     private static String read(String path) throws Exception {

@@ -32,9 +32,11 @@ import com.ailab.system.service.impl.LabMemberServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.core.page.TableDataInfo;
 import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -197,6 +199,36 @@ class LabMemberServiceTest {
         assertNotSame(mapped, visible.get(0));
         assertEquals(Long.valueOf(90L), mapped.getUserId(), "mapper entity must remain untouched");
         assertPublicDirectoryShape(visible.get(0));
+    }
+
+    @Test
+    void memberDirectoryAccessLookupCannotConsumeTheRequestedPage() {
+        PageHelper.startPage(2, 3, "id desc");
+        try {
+            when(accessService.context(1L)).thenAnswer(invocation -> {
+                assertNull(PageHelper.getLocalPage(), "access lookup must execute outside the requested member page");
+                return context(1L, 10L, LabAccessServiceImpl.MANAGER, "manage");
+            });
+            when(memberMapper.selectMemberList(any(LabMember.class))).thenAnswer(invocation -> {
+                Page<?> requested = PageHelper.getLocalPage();
+                assertNotNull(requested, "the member mapper must receive the restored page request");
+                assertEquals(2, requested.getPageNum());
+                assertEquals(3, requested.getPageSize());
+                assertEquals("id desc", requested.getOrderBy());
+                PageHelper.clearPage();
+                Page<LabMember> rows = new Page<LabMember>(2, 3);
+                rows.setTotal(6L);
+                rows.add(member(20L, 90L, "algorithm"));
+                return rows;
+            });
+
+            List<LabMember> rows = service.listMembers(new LabMember(), 1L);
+
+            assertTrue(rows instanceof Page);
+            assertEquals(6L, ((Page<?>) rows).getTotal());
+        } finally {
+            PageHelper.clearPage();
+        }
     }
 
     @Test

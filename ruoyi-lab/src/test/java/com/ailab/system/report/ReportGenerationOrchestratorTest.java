@@ -1,6 +1,8 @@
 package com.ailab.system.report;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -18,6 +20,7 @@ import com.ailab.system.domain.LabReportJob;
 import com.ailab.system.domain.LabReportSummary;
 import com.ailab.system.controller.LabReportController;
 import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.dto.ReportStatusView;
 import com.ailab.system.dto.ReportSummarySectionView;
 import com.ailab.system.mapper.LabReportMapper;
 import com.ailab.system.config.LabProperties;
@@ -39,6 +42,8 @@ import com.ailab.system.report.renderer.SectionRendererRegistry;
 import com.ailab.system.service.LabAccessService;
 import com.ailab.system.service.impl.LabReportTempFileEligibilityImpl;
 import com.ailab.system.service.impl.LabReportServiceImpl;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.system.service.ISysMenuService;
 import java.io.InputStream;
@@ -623,6 +628,23 @@ class ReportGenerationOrchestratorTest {
         java.util.List<com.ailab.system.dto.ReportStatusView> result=service.history(null,null,1001L);
 
         assertTrue(result instanceof com.github.pagehelper.Page);assertEquals(37L,((com.github.pagehelper.Page<?>)result).getTotal());
+    }
+
+    @Test
+    void reportHistoryAccessLookupCannotConsumeTheRequestedPage() {
+        LabAccessContext manager=new LabAccessContext();manager.setUserId(1001L);manager.setMemberId(11L);manager.setRoleKey("lab_manager");manager.setBizLine("manage");
+        when(access.context(1001L)).thenAnswer(call->{assertNull(PageHelper.getLocalPage(),"access lookup must run outside the requested history page");return manager;});
+        when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.<String>emptySet());
+        when(mapper.selectReportHistory("2026-08","ALL",true,false)).thenAnswer(call->{Page<?> requested=PageHelper.getLocalPage();assertNotNull(requested,"history query must receive the requested page");assertEquals(3,requested.getPageNum());assertEquals(7,requested.getPageSize());assertEquals("create_time desc",requested.getOrderBy());Page<LabReportInstance> mapped=new Page<LabReportInstance>(3,7);mapped.setTotal(15L);mapped.add(draft(31L,0));return mapped;});
+        LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));
+
+        PageHelper.startPage(3,7,"create_time desc").setReasonable(true);
+        try {
+            List<ReportStatusView> result=service.history("2026-08","ALL",1001L);
+            assertTrue(result instanceof Page);assertEquals(15L,((Page<?>)result).getTotal());
+        } finally {
+            PageHelper.clearPage();
+        }
     }
 
     @Test

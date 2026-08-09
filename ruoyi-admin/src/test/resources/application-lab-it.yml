@@ -1,6 +1,4 @@
 spring:
-  main:
-    web-application-type: none
   datasource:
     druid:
       master:
@@ -15,7 +13,13 @@ spring:
       maxWait: 10000
       connectTimeout: 10000
       socketTimeout: 30000
+      timeBetweenEvictionRunsMillis: 60000
+      minEvictableIdleTimeMillis: 300000
+      maxEvictableIdleTimeMillis: 900000
       validationQuery: SELECT 1
+      testWhileIdle: true
+      testOnBorrow: false
+      testOnReturn: false
   quartz:
     auto-startup: false
   redis:
@@ -30,3 +34,6 @@ mybatis:
 
 swagger:
   enabled: false
+
+token:
+  secret: lab-it-only-token-secret-not-for-production

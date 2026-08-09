@@ -80,7 +80,7 @@ public class LabPerformanceServiceImpl implements LabPerformanceService {
         mapper.ensureOpenPeriod(period,actor(actorUserId));
         LabPeriodClose close=mapper.selectPeriodForUpdate(period);
         if(close==null)throw new ServiceException("Period row could not be locked");
-        if(LabConstants.PERIOD_CLOSED.equals(close.getCloseStatus()))return mapper.selectCurrentScores(period);
+        if(LabConstants.PERIOD_CLOSED.equals(close.getCloseStatus()))return mapper.selectCurrentScoresForUpdate(period);
         if(!LabConstants.PERIOD_OPEN.equals(close.getCloseStatus()))throw new ServiceException("Unsupported period close state");
         List<LabTask> tasks=safe(mapper.selectPeriodTasksForUpdate(period)); List<LabMember> members=safe(mapper.selectActiveMembersForUpdate());
         assertStable(tasks,members); List<Long> taskIds=new ArrayList<Long>();for(LabTask task:tasks)taskIds.add(task.getId());

@@ -88,7 +88,7 @@ import org.springframework.transaction.annotation.Propagation;
  * Real MySQL 8 mapper integration. This class deliberately ends in IT so normal
  * Surefire unit-test discovery does not run it without an explicitly prepared database.
  */
-@SpringBootTest(classes = RuoYiApplication.class, webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@SpringBootTest(classes = RuoYiApplication.class, webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @ActiveProfiles("lab-it")
 @ContextConfiguration(initializers = LabMapperMySqlIT.DatabaseInitializer.class)
 @Transactional
@@ -113,6 +113,16 @@ class LabMapperMySqlIT {
     @Autowired private ReportJobQueuePersistence reportJobQueuePersistence;
     @Autowired private ISysUserService userService;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private org.apache.ibatis.session.SqlSessionFactory sqlSessionFactory;
+
+    @Test
+    void legacyReportNumbersRemainUniqueAfterBootstrap() {
+        assertEquals(2, jdbcTemplate.queryForObject(
+                "select count(1) from information_schema.statistics where table_schema=database() and table_name='lab_report_instance' and index_name='uk_lab_report_instance_no' and non_unique=0",
+                Integer.class));
+        assertThrows(org.springframework.dao.DuplicateKeyException.class, () -> jdbcTemplate.update(
+                "insert into lab_report_instance(id,report_no,template_id,template_code,template_revision,period,biz_line,revision_no,lifecycle_status,current_flag,final_flag,sensitive_flag,source_type,version,del_flag,create_by,create_time) values(89999,'RPT-LEGACY-39990',39990,'legacy-report-template-39990',7,'2099-01','ALL',1,'DRAFT','0','0','0','AUTO',0,'0','it',now())"));
+    }
 
     @Test
     void remindersDashboardScopeAndAggregatesUseRealMySqlContracts() {
@@ -137,12 +147,14 @@ class LabMapperMySqlIT {
 
         jdbcTemplate.update("update lab_task_block_event set block_status='CLOSED',block_end_time=now() where task_id=? and episode_no=1", taskId);
         jdbcTemplate.update("update lab_task set current_block_flag='0',current_block_start=null where id=?", taskId);
+        clearMapperCache();
         int beforeResolvedScan = jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=?", Integer.class, taskId);
         reminderService.scanBlocks();
         assertEquals(beforeResolvedScan, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=?", Integer.class, taskId));
 
         jdbcTemplate.update("update lab_task set current_block_flag='1',current_block_start=date_sub(now(),interval 7 day) where id=?", taskId);
         jdbcTemplate.update("insert into lab_task_block_event(task_id,episode_no,block_type,block_reason,block_start_time,block_status,del_flag,create_by,create_time) values(?,2,'DEPENDENCY','new IT blocker',date_sub(now(),interval 7 day),'OPEN','0','it',now())", taskId);
+        clearMapperCache();
         reminderService.scanBlocks();
         assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_reminder where task_id=? and episode_no=2 and recipient_id=39203 and reminder_level='WARNING' and del_flag='0'", Integer.class, taskId));
 
@@ -304,6 +316,7 @@ class LabMapperMySqlIT {
         assertTrue(candidates.stream().allMatch(candidate -> "OWNER".equals(candidate.getAudience())));
 
         jdbcTemplate.update("insert into lab_period_close(period,close_status,version,del_flag,create_by,create_time) values(?,'CLOSED',0,'0','it',now())", period);
+        clearMapperCache();
         assertTrue(dashboardMapper.selectPendingTaskReminderCandidates(period, false).isEmpty(),
                 "closing the parent month suppresses both month and weekly-child reminders");
     }
@@ -353,6 +366,7 @@ class LabMapperMySqlIT {
                 + "(39690,'IT-ASSET-SCOPE-RISK','IT platform scoped risk','v1','platform','DEPLOYED',30003,null,'0','ACTIVE',0,'0','it',now()),"
                 + "(39691,'IT-ASSET-NON-RISK','IT verifying non risk','v1','platform','VERIFYING',30003,null,'0','ACTIVE',0,'0','it',now()),"
                 + "(39692,'IT-ASSET-INACTIVE-CRITICAL','IT inactive critical risk','v1','platform','VERIFYING',30003,null,'1','INACTIVE',0,'0','it',now())");
+        clearMapperCache();
         assertEquals(managerBefore + 2, dashboardMapper.selectKpiFact("2096-08", dashboardAsOf, accessService.context(39101L)).getAssetsWithoutBackupCount(),
                 "the shared policy includes both active in-use and inactive critical assets");
         assertEquals(leadBefore, dashboardMapper.selectKpiFact("2096-08", dashboardAsOf, accessService.context(39102L)).getAssetsWithoutBackupCount());
@@ -470,6 +484,7 @@ class LabMapperMySqlIT {
         } finally {
             org.springframework.jdbc.datasource.DataSourceUtils.releaseConnection(connection, jdbcTemplate.getDataSource());
         }
+        clearMapperCache();
 
         assertEquals(Arrays.asList(1, 2), jdbcTemplate.queryForList(
                 "select episode_no from lab_task_block_event where task_id=39990 order by block_start_time,id",
@@ -632,11 +647,15 @@ class LabMapperMySqlIT {
         assertNotNull(ledgerService.getOne2One(39301L, 39101L));
         assertThrows(ServiceException.class, () -> ledgerService.getOne2One(39301L, 39102L));
 
+        int skillHistory = jdbcTemplate.queryForObject("select count(1) from lab_member_skill where member_id=39203", Integer.class);
+        int assetHistory = jdbcTemplate.queryForObject("select count(1) from lab_asset where primary_owner_id=39203", Integer.class);
+        int oneToOneHistory = jdbcTemplate.queryForObject("select count(1) from lab_one2one where member_id=39203", Integer.class);
+        assertTrue(skillHistory >= 2 && assetHistory >= 2 && oneToOneHistory >= 1);
         assertEquals(1, memberService.deactivateMember(39203L, 0, 39101L));
         assertEquals("INACTIVE", memberMapper.selectMemberById(39203L).getMemberStatus());
-        assertEquals(2, jdbcTemplate.queryForObject("select count(1) from lab_member_skill where member_id=39203", Integer.class));
-        assertEquals(2, jdbcTemplate.queryForObject("select count(1) from lab_asset where primary_owner_id=39203", Integer.class));
-        assertEquals(1, jdbcTemplate.queryForObject("select count(1) from lab_one2one where member_id=39203", Integer.class));
+        assertEquals(skillHistory, jdbcTemplate.queryForObject("select count(1) from lab_member_skill where member_id=39203", Integer.class));
+        assertEquals(assetHistory, jdbcTemplate.queryForObject("select count(1) from lab_asset where primary_owner_id=39203", Integer.class));
+        assertEquals(oneToOneHistory, jdbcTemplate.queryForObject("select count(1) from lab_one2one where member_id=39203", Integer.class));
         assertTrue(memberMapper.selectAvailableSystemUsers().stream()
                 .noneMatch(candidate -> Long.valueOf(39103L).equals(candidate.getUserId())),
                 "inactive member history must be reactivated instead of offered as a new profile");
@@ -806,6 +825,15 @@ class LabMapperMySqlIT {
         jdbcTemplate.update("delete from lab_task_evidence where task_id=?", taskId);
         jdbcTemplate.update("delete from lab_task where id=?", taskId);
         jdbcTemplate.update("delete from lab_period_close where period=?", period);
+    }
+
+    private void clearMapperCache() {
+        org.apache.ibatis.session.SqlSession session = org.mybatis.spring.SqlSessionUtils.getSqlSession(sqlSessionFactory);
+        try {
+            session.clearCache();
+        } finally {
+            org.mybatis.spring.SqlSessionUtils.closeSqlSession(session, sqlSessionFactory);
+        }
     }
 
     private void shutdownExecutor(ExecutorService executor) {

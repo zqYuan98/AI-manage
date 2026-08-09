@@ -458,6 +458,10 @@ SET @ailab_ddl=(SELECT IF(COUNT(*)>0,'ALTER TABLE `lab_report_instance` MODIFY C
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
 SET @ailab_ddl=(SELECT IF(COUNT(*)=0,'ALTER TABLE `lab_report_instance` ADD INDEX `idx_lab_report_instance_template_pin` (`template_code`,`template_revision`)','SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_report_instance' AND index_name='idx_lab_report_instance_template_pin');
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+SET @ailab_ddl=(SELECT IF(COUNT(*)=0,'ALTER TABLE `lab_report_instance` ADD COLUMN `active_unique_flag` tinyint GENERATED ALWAYS AS (CASE WHEN `del_flag`=''0'' THEN 1 ELSE NULL END) STORED COMMENT ''active record unique marker''','SELECT 1') FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_report_instance' AND column_name='active_unique_flag');
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
+SET @ailab_ddl=(SELECT IF(COUNT(*)=0,'ALTER TABLE `lab_report_instance` ADD UNIQUE INDEX `uk_lab_report_instance_no` (`report_no`,`active_unique_flag`)','SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lab_report_instance' AND index_name='uk_lab_report_instance_no');
+PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
 SET @ailab_ddl=(SELECT IF(COUNT(*)=0,'ALTER TABLE `lab_report_instance` ADD COLUMN `source_type` varchar(32) NOT NULL DEFAULT ''AUTO'' COMMENT ''AUTO or MANUAL_IMPORT'' AFTER `sensitive_flag`','SELECT 1') FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='lab_report_instance' AND column_name='source_type');
 PREPARE ailab_ddl FROM @ailab_ddl; EXECUTE ailab_ddl; DEALLOCATE PREPARE ailab_ddl;
 DROP TEMPORARY TABLE IF EXISTS `ailab_report_family_revision`;

@@ -90,16 +90,16 @@ mvn -pl ruoyi-admin -am -Dspring.profiles.active=lab-it -Dtest=LabMapperMySqlIT 
 
 ## H. 本地验收记录（2026-08-09，Asia/Shanghai）
 
-Task17 基线提交：`223cd8dabc9e606e44789c78bf80483d96ef42eb`。
+Task17 基线提交：`223cd8dabc9e606e44789c78bf80483d96ef42eb`；本轮真实环境验收在 `e709d26` 基础上完成，修复与证据随本验收提交保存。
 
 | 项目 | 命令/端口 | 结果 |
 | --- | --- | --- |
-| 自动化总门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-project.ps1` | PASS：8/8 阶段；clean backend 34 suites / 497 tests / 0F / 0E / 2 个条件式 LibreOffice skip；SQL 20/59/48/5/6；10 个 Mapper XML；admin package；前端定向 lint 与生产 build；四制品检查 |
-| MySQL | `127.0.0.1:3306` | BLOCKED：端口关闭；Windows/WSL 均未安装 MySQL 服务 |
-| Redis | `127.0.0.1:6379` | BLOCKED：端口关闭；Windows/WSL 均未安装 Redis 服务 |
-| 后端/前端 | `127.0.0.1:8080` / `127.0.0.1:1024` | NOT STARTED：真实验收所需的 MySQL/Redis 未就绪，端口均关闭 |
-| 真实 Mapper IT | `mvn -pl ruoyi-admin -am -Dspring.profiles.active=lab-it -Dtest=LabMapperMySqlIT -Dsurefire.failIfNoSpecifiedTests=false test` | BLOCKED：19 tests / 0 failures / 19 context errors；统一根因 `Connection refused: 3306`，未进入业务断言 |
+| 自动化总门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-project.ps1` | PASS：8/8 阶段；clean backend 500 tests / 0F / 0E / 2 个条件式 LibreOffice skip；SQL 20/59/48/5/6；10 个 Mapper XML；clean admin package；前端定向 lint 与生产 build；四制品检查。门禁显式 `clean`，不会执行已删除测试遗留的 class |
+| MySQL | WSL Ubuntu，`127.0.0.1:3306` | PASS：MySQL 8.0.46；演示库按 `ry_20240629.sql` → `quartz.sql` → `ailab.sql` 初始化；另用隔离库/用户执行 Mapper IT |
+| Redis | WSL Ubuntu，`127.0.0.1:6379` | PASS：Redis 7.0.15，后端真实连接成功 |
+| 后端/前端 | `127.0.0.1:8080` / `127.0.0.1:1024` | PASS：真实 MySQL/Redis 上启动并完成浏览器验收；验收结束后已停止两个进程，端口释放 |
+| 真实 Mapper IT | `mvn -pl ruoyi-admin -am -Dspring.profiles.active=lab-it -Dtest=LabMapperMySqlIT -Dsurefire.failIfNoSpecifiedTests=false test` | PASS：隔离 MySQL 8 数据库，20 tests / 0 failures / 0 errors / 0 skipped，14.33 秒；覆盖真实 Mapper、迁移重放、`report_no`/家族唯一约束和生命周期路径 |
 | LibreOffice/PDF | WSL `/usr/bin/libreoffice`；Poppler 120dpi 渲染 | PASS：tracked PDF 为真实 LibreOffice 输出，单页 Letter，中文/表格/图表完整且无裁切；Windows PATH 无 LibreOffice，因此 Windows 单测有 2 个 capability skip |
-| 浏览器业务路径 | Dashboard/模板/权限/关期/异步恢复/下载 | NOT RUN：没有数据库、Redis 和后端；不得以 mock 或静态页面替代真实验收 |
+| 浏览器业务路径 | 真实 manager 登录；Dashboard/任务/成员/报告/模板 | PASS：Dashboard 指标与钻取、5 条任务、6 名成员、2026-07 已定稿报告及四制品、模板 6 个 typed section 均由真实 API 加载；桌面/窄屏无控制台错误；报告历史响应含 `private, no-store`、`no-cache`、`nosniff`；验收账号已恢复停用 |
 
-解除阻塞后，先按 [部署说明](deployment.md) 初始化 MySQL 8 与 Redis，再重跑真实 Mapper IT、启动 8080/1024，并逐项勾选 B–G。不要把本表中的环境性 BLOCKED 解释为业务断言通过。
+浏览器截图保存在本地忽略目录 `output/playwright/`：`dashboard-desktop.png`、`dashboard-narrow.png`、`template-desktop.png`、`template-narrow.png`。验收过程中发现并修复了成员列表与报告历史在权限查询前被 PageHelper 提前消费的问题；修复均有回归测试。数据库/Redis 服务保留供后续复验，应用进程与临时浏览器会话均已关闭。

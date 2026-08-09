@@ -438,11 +438,12 @@ class LabPerformanceServiceTest {
         manager(100L, 900L);
         LabPeriodClose closed = period("2026-08", "CLOSED", 4);
         when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(closed);
-        when(mapper.selectCurrentScores("2026-08")).thenReturn(Collections.singletonList(score(1L, 7L, 3)));
+        when(mapper.selectCurrentScoresForUpdate("2026-08")).thenReturn(Collections.singletonList(score(1L, 7L, 3)));
 
         List<LabPerfScore> result = service.closePeriod("2026-08", "again", 100L);
 
         assertEquals(1, result.size());
+        verify(mapper, never()).selectCurrentScores("2026-08");
         verify(mapper, never()).selectPeriodTasksForUpdate(any(String.class));
         verify(mapper, never()).insertOverdueRecord(any(LabCollaborationRecord.class));
         verify(mapper, never()).insertPerfScore(any(LabPerfScore.class));

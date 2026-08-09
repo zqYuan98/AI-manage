@@ -78,7 +78,7 @@ try {
         Write-Host "Parsed $($mappers.Count) lab mapper XML files"
     }
     Invoke-Stage 'Backend unit tests' { Invoke-Native $Maven @('-pl','ruoyi-lab','-am','clean','test') }
-    Invoke-Stage 'Backend package' { Invoke-Native $Maven @('-pl','ruoyi-admin','-am','-DskipTests','package') }
+    Invoke-Stage 'Backend package' { Invoke-Native $Maven @('-pl','ruoyi-admin','-am','-DskipTests','clean','package') }
     Invoke-Stage 'Lab frontend lint and production build' {
         Push-Location (Join-Path $ProjectRoot 'ruoyi-ui')
         try {

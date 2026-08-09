@@ -13,6 +13,7 @@ import com.ailab.system.service.LabAssetRiskPolicy;
 import com.ailab.system.service.LabMemberService;
 import com.ruoyi.common.exception.ServiceException;
 import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -45,7 +46,9 @@ public class LabMemberServiceImpl implements LabMemberService {
 
     @Override
     public List<LabMember> listMembers(LabMember query, Long actorId) {
+        Page<?> requestedPage = detachPage();
         LabAccessContext actor = accessService.context(actorId);
+        restorePage(requestedPage);
         List<LabMember> mapped = memberMapper.selectMemberList(query == null ? new LabMember() : query);
         if (mapped instanceof Page) {
             for (int i = 0; i < mapped.size(); i++) mapped.set(i, visibleMember(mapped.get(i), actor));
@@ -54,6 +57,19 @@ public class LabMemberServiceImpl implements LabMemberService {
         List<LabMember> visible = new ArrayList<LabMember>();
         for (LabMember row : mapped) visible.add(visibleMember(row, actor));
         return visible;
+    }
+
+    private Page<?> detachPage() {
+        Page<?> requested = PageHelper.getLocalPage();
+        if (requested != null) PageHelper.clearPage();
+        return requested;
+    }
+
+    private void restorePage(Page<?> requested) {
+        if (requested == null) return;
+        Page<?> restored = PageHelper.startPage(requested.getPageNum(), requested.getPageSize(), requested.getOrderBy());
+        restored.setReasonable(requested.getReasonable());
+        restored.setPageSizeZero(requested.getPageSizeZero());
     }
 
     @Override

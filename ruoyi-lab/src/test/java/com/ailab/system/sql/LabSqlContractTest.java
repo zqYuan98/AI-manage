@@ -108,6 +108,13 @@ class LabSqlContractTest {
         assertTrue(compact.contains("uk_lab_report_job_active_step(report_id,job_type,active_step_unique_flag)"));
         assertTrue(compact.contains("updatelab_report_jobsetjob_status='queued'wherejob_status='pending'"));
         assertTrue(compact.contains("setr.revision_no=-f.family_revision"),"family revisions need a collision-free temporary phase");
+        int activeFlagUpgrade = compact.indexOf("altertablelab_report_instanceaddcolumnactive_unique_flag");
+        int reportNoUniqueIndex = compact.indexOf("altertablelab_report_instanceadduniqueindexuk_lab_report_instance_no");
+        int familyUniqueIndex = compact.indexOf("altertablelab_report_instanceadduniqueindexuk_lab_report_instance_period_rev");
+        assertTrue(activeFlagUpgrade >= 0 && activeFlagUpgrade < reportNoUniqueIndex && reportNoUniqueIndex < familyUniqueIndex,
+                "a legacy report instance must receive active_unique_flag before both report-number and family unique indexes reference it");
+        assertTrue(compact.contains("adduniqueindexuk_lab_report_instance_no(report_no,active_unique_flag)"),
+                "legacy report instances must regain the fresh-schema report number uniqueness contract");
         assertTrue(compact.contains("adduniqueindexuk_lab_report_instance_period_rev(template_code,period,biz_line,revision_no,active_unique_flag)"),"legacy or missing family uniqueness must be created");
         assertTrue(compact.contains("uk_lab_report_tpl_period_default(period_type,default_unique_flag)"),"one enabled latest default must be enforced per report type");
         assertTrue(compact.contains("partitionbyperiod_typeorderbyrevision_nodesc,iddesc"),"legacy duplicate defaults must be deterministically collapsed");
@@ -431,7 +438,13 @@ class LabSqlContractTest {
         Set<String> taskColumns = columns(tableBlocks(sql).get("lab_task")).keySet();
         assertTrue(taskColumns.containsAll(set("coordination_required", "coordination_owner_id", "coordination_dept_id", "coordination_content", "coordination_support")), "task coordination fields missing");
     }
-    private static void assertNoPostCreateActiveUniquenessMigration(String sql) { assertTrue(!Pattern.compile("(?is)ALTER\\s+TABLE\\s+`?lab_[a-z0-9_]+`?\\s+ADD\\s+COLUMN\\s+`?active_unique_flag").matcher(sql).find(), "active uniqueness must be declared in CREATE TABLE"); }
+    private static void assertNoPostCreateActiveUniquenessMigration(String sql) {
+        Matcher matcher = Pattern.compile("(?is)ALTER\\s+TABLE\\s+`?(lab_[a-z0-9_]+)`?\\s+ADD\\s+COLUMN\\s+`?active_unique_flag").matcher(sql);
+        while (matcher.find()) {
+            assertEquals("lab_report_instance", matcher.group(1).toLowerCase(Locale.ROOT),
+                    "only the explicitly supported legacy report instance may need a post-create active uniqueness upgrade");
+        }
+    }
 
     private static String readSql() throws IOException { return new String(Files.readAllBytes(findRoot().resolve("sql/ailab.sql")), StandardCharsets.UTF_8); }
     private static void assertLookupIndexes(Map<String, String> blocks) { for (String contract : LOOKUP_INDEXES) { String[] parts = contract.split("\\|", 2); String compact = blocks.get(parts[0]).toLowerCase(Locale.ROOT).replace("`", "").replaceAll("\\s+", ""); assertTrue(compact.contains(parts[1]), "lookup index missing in table " + contract); } }
