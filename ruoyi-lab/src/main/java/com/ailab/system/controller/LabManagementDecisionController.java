@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class LabManagementDecisionController extends BaseController {
     private final LabManagementDecisionService service;
     public LabManagementDecisionController(LabManagementDecisionService service){this.service=service;}
-    @PreAuthorize("@ss.hasPermi('lab:dashboard:list')") @GetMapping("/list")
+    @PreAuthorize("@ss.hasPermi('lab:dashboard:view')") @GetMapping("/list")
     public AjaxResult list(@RequestParam String period,@RequestParam(required=false) String status){return success(service.list(period,status,SecurityUtils.getUserId()));}
     @PreAuthorize("@ss.hasPermi('lab:task:edit')")
     @Log(title="管理决策",businessType=BusinessType.INSERT,isSaveRequestData=false,isSaveResponseData=false)

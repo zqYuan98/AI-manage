@@ -50,6 +50,10 @@ class LabDashboardSqlContractTest {
                 && compact.contains("ri.pdf_status='ready'")
                 && compact.contains("coalesce(ri.update_time,ri.create_time)due_date"),
                 "non-managers may see current FINAL/READY and future immutable report revisions with a usable timestamp");
+        assertTrue(compact.contains("casewhenri.lifecycle_status='final'then'finalized'elseri.lifecycle_statusenditem_status"),
+                "dashboard report rows must expose one canonical lifecycle status for the Chinese status catalog");
+        assertFalse(compact.contains("concat(ri.lifecycle_status"),
+                "artifact diagnostics must not be smuggled into the report lifecycle display field");
         assertTrue(compact.contains("r.recipient_id=#{scope.memberid}") && compact.contains("recipient.biz_line=#{scope.bizline}"));
         assertFalse(compact.contains("'coordinator'audience"),
                 "seven-day block reminders go only to the owner; coordinators are not escalation recipients");

@@ -39,6 +39,8 @@ class DeploymentContractTest {
                 "both supported startup examples must externalize the Logback directory");
         assertEquals(2, occurrences(druid, "enabled: ${DRUID_STAT_ENABLED:false}"));
         assertTrue(verifier.contains("@('-pl','ruoyi-lab','-am','clean','test')"));
+        assertTrue(verifier.contains("[char]0x7B97"),
+                "Windows PowerShell 5 must not parse UTF-8 Chinese string literals as the system code page");
         assertTrue(verifier.contains("@('-pl','ruoyi-admin','-am','-DskipTests','clean','package')"),
                 "the deployable jar must be rebuilt from a clean thin admin jar so stale nested modules cannot survive");
     }
@@ -82,6 +84,23 @@ class DeploymentContractTest {
             count++;
         }
         assertEquals(11, count, "all lab page menu components must be covered by this contract");
+    }
+
+    @Test
+    void lightweightManagementAcceptanceIsReproducibleAndDoesNotPersistCredentials() throws Exception {
+        String acceptance = read("../scripts/accept-lab-workbench.ps1");
+        assertTrue(acceptance.contains("AILAB_ACCEPTANCE_MANAGER_PASSWORD"));
+        assertTrue(acceptance.contains("AILAB_ACCEPTANCE_LEAD_PASSWORD"));
+        assertTrue(acceptance.contains("AILAB_ACCEPTANCE_MEMBER_PASSWORD"));
+        assertTrue(acceptance.contains("Assert-Workbench 'manager'"));
+        assertTrue(acceptance.contains("Assert-Workbench 'lead'"));
+        assertTrue(acceptance.contains("Assert-Workbench 'member'"));
+        assertTrue(acceptance.contains("member.monthlyResults"));
+        assertTrue(acceptance.contains("/usr/bin/soffice"));
+        assertTrue(acceptance.contains("summary.json"));
+        assertFalse(acceptance.contains("LabMgr#"));
+        assertFalse(acceptance.contains("LabLead#"));
+        assertFalse(acceptance.contains("LabMember#"));
     }
 
     private static String read(String path) throws Exception {

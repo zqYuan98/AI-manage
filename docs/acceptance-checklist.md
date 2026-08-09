@@ -5,7 +5,7 @@
 ## A. 自动化门禁
 
 - [ ] 在 clean process 中运行：`powershell -ExecutionPolicy Bypass -File scripts/verify-project.ps1`
-- [ ] SQL 合同：20 张业务表、59 个字典项、48 个权限、5 个 Quartz job、6 个演示成员
+- [ ] SQL 合同：28 张业务表、64 个字典项、48 个权限、5 个 Quartz job、6 个演示成员
 - [ ] 正常 Surefire 单元测试全部通过；真实数据库类 `*IT` 未被普通 Surefire 误报为已执行
 - [ ] `ruoyi-admin -am -DskipTests package` 成功
 - [ ] 实验室前端源码以 `eslint --no-ignore` 定向检查通过，且全站 `npm run build:prod` 成功（上游模板的既有 lint 债务不计入本模块门禁；体积 warning 单独记录）
@@ -105,3 +105,27 @@ Task17 基线提交：`223cd8dabc9e606e44789c78bf80483d96ef42eb`；本轮真实�
 | pidfd 与目录隔离 | WSL x86_64 / Linux 6.6.87；直接 syscall 与 HTTP 负例 | PASS：`pidfd_open` 返回稳定 fd，`pidfd_send_signal(...,0)` 返回 0；报告与临时目录 mode 700；后端归档直链返回业务 401，前端静态服务器返回 404 |
 
 浏览器截图保存在本地忽略目录 `output/playwright/`：`dashboard-desktop.png`、`dashboard-narrow.png`、`template-desktop.png`、`template-narrow.png`。验收过程中发现并修复了成员、技能和 IPR 列表在权限查询前被 PageHelper 提前消费的问题、报告错误响应被误存为 PDF 的问题、动态菜单组件路径与外部日志目录问题；每项修复均有回归测试。MySQL/Redis 服务保留供后续复验，应用进程与临时浏览器会话均已关闭。
+
+## I. 10 人以内部门管理验收（2026-08-10）
+
+这一轮以“一个负责人、一个业务线负责人、若干成员”的小团队为对象，不以页面数量作为成功标准，而以管理闭环是否缩短为准。
+
+```powershell
+$env:AILAB_ACCEPTANCE_MANAGER_PASSWORD = '<本地验收密码>'
+$env:AILAB_ACCEPTANCE_LEAD_PASSWORD = '<本地验收密码>'
+$env:AILAB_ACCEPTANCE_MEMBER_PASSWORD = '<本地验收密码>'
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/accept-lab-workbench.ps1 `
+  -BaseUrl 'http://127.0.0.1:1024' -ApiUrl 'http://localhost:8080' `
+  -EvidenceDir '.acceptance/lightweight-management'
+```
+
+- [x] 管理者、业务线负责人、成员使用三个独立账号登录；脚本只从进程环境读取密码，证据不保存密码或 token。
+- [x] 三种工作台均返回真实 MySQL 数据；登录更新与 token 往返证明真实 MySQL/Redis 链路可写可读。
+- [x] 管理者只需在一个工作台完成异常、决策、目标态势、承诺负载和周会复盘五类判断；成员首页只保留“新增承诺、报告阻塞、提交结果”三个主要动作。
+- [x] 同一事项只有一个负责人、一个日期、一个当前状态和一条事件链；周承诺自报事实不直接污染正式验收和绩效。
+- [x] 可用性门槛：成员账号具有本人负责的执行中月度结果，可真实拆解周承诺；以“创建三条周承诺不超过 3 分钟、负责人识别当日异常不超过 2 分钟、周会不另做手工汇总表”为上线观测目标。
+- [x] 页面可见业务标签使用中文；状态码、权限码、字段名仅允许出现在开发诊断信息，不作为普通用户主文案。
+- [x] 使用真实 `/usr/bin/soffice` 转换 DOCX，证据 PDF 通过 `%PDF-`、`startxref→xref` 与 `%%EOF` 结构检查，不允许条件式跳过。
+- [x] `.acceptance/lightweight-management/summary.json` 记录 commit、URL、服务 PID、三角色范围计数和 LibreOffice 证据文件；目录被 Git 忽略。
+
+实际结果：管理者工作台显示 3 名团队成员、1 项待验收、2 项新增阻塞和 1 项预计延期；业务线负责人仅显示算法线 2 名成员和 1 项待验收；成员仅显示本人 1 条执行中月度结果、1 条周承诺及三个主要动作。三次登录、`getInfo` 和工作台请求均成功，页面未出现工作台错误态，旧报告复合状态已归一为中文业务状态。

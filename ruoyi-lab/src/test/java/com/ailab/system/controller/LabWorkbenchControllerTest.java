@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import com.ruoyi.common.annotation.Log;
-import java.util.Date;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,10 +21,15 @@ class LabWorkbenchControllerTest {
     void exposesThreeRoleSpecificReadEndpointsUnderTheDashboardPermission() throws Exception {
         for (String name : new String[]{"manager", "lead", "member"}) {
             java.lang.reflect.Method method = LabWorkbenchController.class
-                    .getMethod(name, String.class, Date.class);
-            assertEquals("@ss.hasPermi('lab:dashboard:list')", method.getAnnotation(PreAuthorize.class).value());
+                    .getMethod(name, String.class, Instant.class);
+            assertEquals("@ss.hasPermi('lab:dashboard:view')", method.getAnnotation(PreAuthorize.class).value());
             assertEquals("/" + name, method.getAnnotation(GetMapping.class).value()[0]);
         }
+
+        java.lang.reflect.Method decisions = LabManagementDecisionController.class
+                .getMethod("list", String.class, String.class);
+        assertEquals("@ss.hasPermi('lab:dashboard:view')",
+                decisions.getAnnotation(PreAuthorize.class).value());
     }
 
     @Test

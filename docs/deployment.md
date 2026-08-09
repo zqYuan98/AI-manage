@@ -131,3 +131,21 @@ exec /usr/lib/jvm/java-8/bin/java -jar /opt/ailab/ruoyi-admin.jar
 | 403 | 核对菜单权限、业务线/本人对象范围、敏感权限实时状态；不要临时扩大角色 |
 
 部署后执行 `scripts/verify-project.ps1`，再按 [验收清单](acceptance-checklist.md) 完成真实 MySQL/Redis、浏览器和制品视觉验收。
+
+## 9. 10 人以内团队的上线验收
+
+先为 manager、line lead、member 分别设置独立临时验收密码并启用对应账号。密码只注入当前 PowerShell 进程，不写入脚本、日志或证据：
+
+```powershell
+$env:AILAB_ACCEPTANCE_MANAGER_PASSWORD = '<manager password>'
+$env:AILAB_ACCEPTANCE_LEAD_PASSWORD = '<lead password>'
+$env:AILAB_ACCEPTANCE_MEMBER_PASSWORD = '<member password>'
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/accept-lab-workbench.ps1 `
+  -BaseUrl 'http://127.0.0.1:1024' `
+  -ApiUrl 'http://localhost:8080' `
+  -EvidenceDir '.acceptance/lightweight-management'
+```
+
+脚本要求前后端、真实 MySQL、真实 Redis 以及 WSL Ubuntu 的 `/usr/bin/soffice` 已就绪。它会验证三角色登录和对象范围、三个工作台、前端入口、Redis token 往返、MySQL 登录更新/业务投影，并执行一次不可跳过的 LibreOffice 转换；只生成脱敏 `summary.json` 和 PDF 证据。若任一角色、服务或 PDF 结构校验失败，脚本以非零状态退出。
+
+生产上线时不要沿用验收账号密码。关闭或轮换临时账号后，再按浏览器清单人工检查中文文案、键盘操作、窄屏布局和错误重试状态。

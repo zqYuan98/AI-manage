@@ -400,7 +400,7 @@
     </select>
     <select id="selectRecentReports" resultMap="ActionResult">
         select ri.id,'REPORT' item_type,ri.report_no title,
-        concat(ri.lifecycle_status,'/',ri.json_status,'/',ri.markdown_status,'/',ri.word_status,'/',ri.pdf_status) item_status,coalesce(ri.update_time,ri.create_time) due_date
+        case when ri.lifecycle_status='FINAL' then 'FINALIZED' else ri.lifecycle_status end item_status,coalesce(ri.update_time,ri.create_time) due_date
         from lab_report_instance ri where ri.period=#{period} and ri.del_flag='0'
         and ((#{scope.roleKey}='lab_manager' and (coalesce(ri.sensitive_flag,'0')='0' or #{sensitive})) or (coalesce(ri.sensitive_flag,'0')='0' and ri.final_flag='1' and
             ((ri.lifecycle_status='FINAL' and ri.json_status='READY' and ri.markdown_status='READY'
@@ -410,7 +410,7 @@
     </select>
     <select id="selectLatestReport" resultMap="ActionResult">
         select ri.id,'REPORT' item_type,ri.report_no title,
-        concat(ri.lifecycle_status,'/',ri.json_status,'/',ri.markdown_status,'/',ri.word_status,'/',ri.pdf_status) item_status,coalesce(ri.update_time,ri.create_time) due_date
+        case when ri.lifecycle_status='FINAL' then 'FINALIZED' else ri.lifecycle_status end item_status,coalesce(ri.update_time,ri.create_time) due_date
         from lab_report_instance ri where ri.period=#{period} and ri.del_flag='0'
         and ((#{scope.roleKey}='lab_manager' and (coalesce(ri.sensitive_flag,'0')='0' or #{sensitive})) or (coalesce(ri.sensitive_flag,'0')='0' and ri.final_flag='1' and
             ((ri.lifecycle_status='FINAL' and ri.json_status='READY' and ri.markdown_status='READY'

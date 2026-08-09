@@ -50,4 +50,5 @@ nbdist/
 
 # Local browser acceptance artifacts
 .playwright-cli/
+.acceptance/
 output/
