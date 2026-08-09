@@ -105,12 +105,9 @@ public class ReportGenerationOrchestrator {
     }
 
     public LabReportInstance authorizeView(Long reportId, Long actorUserId) {
-        LabAccessContext actor = access.context(actorUserId); LabReportInstance report = requiredReport(mapper.selectReportById(reportId));
-        Set<String> permissions = menus.selectMenuPermsByUserId(actorUserId);
-        if ("1".equals(report.getSensitiveFlag()) && (permissions == null || !permissions.contains("lab:report:sensitive"))) throw new ServiceException("Sensitive report permission is required");
-        if (!"lab_manager".equals(actor.getRoleKey()) && !("FINALIZED".equals(report.getLifecycleStatus()) || "SUPERSEDED".equals(report.getLifecycleStatus()))) {
-            throw new ServiceException("Only immutable report history is visible outside management");
-        }
+        LabReportInstance report = requiredReport(mapper.selectReportById(reportId));
+        boolean immutable="FINALIZED".equals(report.getLifecycleStatus())||"SUPERSEDED".equals(report.getLifecycleStatus());
+        access.requireReportRead(report.getBizLine(),"1".equals(report.getSensitiveFlag()),immutable,actorUserId);
         return report;
     }
 

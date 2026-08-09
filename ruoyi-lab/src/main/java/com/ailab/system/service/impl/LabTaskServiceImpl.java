@@ -163,7 +163,7 @@ public class LabTaskServiceImpl implements LabTaskService {
         lockKeyTaskCollectionsForCreate(task, lockedGoals);
         Map<Long, LabTask> lockedTasks = lockTaskHierarchyForCreate(task);
         validateTaskConnections(task, actorId, lockedGoals, lockedTasks, lockedOwners);
-        accessService.requireTaskWrite(task, actorId);
+        requireDefinitionWrite(task, actorId);
         task.setWorkflowStatus(LabConstants.WORKFLOW_DRAFT);
         task.setResultStatus(LabConstants.RESULT_DOING);
         task.setActualFinishTime(null);
@@ -193,14 +193,18 @@ public class LabTaskServiceImpl implements LabTaskService {
         LabTask stored = taskMapper.selectTaskById(task.getId());
         if (stored == null || !stored.getVersion().equals(task.getVersion())) throw optimisticConflict();
         requireContentMutable(stored);
-        accessService.requireTaskWrite(stored, actorId);
-        accessService.requireTaskWrite(task, actorId);
+        requireDefinitionWrite(stored, actorId);
+        requireDefinitionWrite(task, actorId);
+        boolean definitionAudit=requiresDefinitionAudit(stored,task);
+        if(definitionAudit&&blank(task.getRemark()))throw new ServiceException("已激活定义变更必须填写原因");
         requireStableActivatedFields(stored, task, lockedGoals);
         requireMonthChildrenStable(stored, task);
         validateTaskConnections(task, actorId, lockedGoals, lockedTasks, lockedOwners);
         preserveServerState(task, stored);
         task.setUpdateBy(actor(actorId));
         if (taskMapper.updateTask(task) != 1) throw optimisticConflict();
+        if(definitionAudit)appendDefinitionAudit(task,stored.getWorkflowStatus(),
+                member(actorId),"DEFINITION_CHANGE",task.getRemark().trim());
         return 1;
     }
 
@@ -215,7 +219,7 @@ public class LabTaskServiceImpl implements LabTaskService {
         LabTask stored = taskMapper.selectTaskById(id);
         if (stored == null || version == null || !version.equals(stored.getVersion())) throw optimisticConflict();
         requireContentMutable(stored);
-        accessService.requireTaskWrite(stored, actorId);
+        requireDefinitionWrite(stored, actorId);
         if (!LabConstants.WORKFLOW_DRAFT.equals(stored.getWorkflowStatus())) {
             throw new ServiceException("Only draft tasks can be deleted");
         }
@@ -231,7 +235,7 @@ public class LabTaskServiceImpl implements LabTaskService {
         LabPeriodUtils.parseMonth(period);
         if (taskMapper.lockMemberForUpdate(ownerId) == null) throw new ServiceException("Task owner is not an active lab member");
         List<LabTask> tasks = taskMapper.selectKeyMonthTasksByOwnerPeriodForUpdate(ownerId, period);
-        for (LabTask task : tasks) { requireUnlocked(task); accessService.requireTaskWrite(task, actorId); }
+        for (LabTask task : tasks) { requireUnlocked(task); accessService.requireMonthlyDefinitionWrite(task, actorId); }
         BigDecimal total = BigDecimal.ZERO;
         for (LabTask task : tasks) total = total.add(zero(task.getPerfWeight()));
         if (tasks.isEmpty() || total.compareTo(ONE_HUNDRED) != 0) {
@@ -259,7 +263,7 @@ public class LabTaskServiceImpl implements LabTaskService {
         LabTask task = taskMapper.selectTaskForUpdate(id);
         if (task == null || version == null || !version.equals(task.getVersion())) throw optimisticConflict();
         requireUnlocked(task);
-        accessService.requireTaskWrite(task, actorId);
+        accessService.requireWeeklyWrite(task, actorId);
         if (!LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel())) {
             throw new ServiceException("Monthly key tasks must be activated through owner-period plan activation");
         }
@@ -586,6 +590,35 @@ public class LabTaskServiceImpl implements LabTaskService {
         if (workflowEventService != null && LabConstants.TASK_LEVEL_MONTH.equals(task.getTaskLevel())) {
             workflowEventService.append(task, fromStatus, toStatus, actorMemberId, eventType, reason);
         }
+    }
+
+    private void requireDefinitionWrite(LabTask task, Long actorId) {
+        if (task != null && LabConstants.TASK_LEVEL_MONTH.equals(task.getTaskLevel())) {
+            accessService.requireMonthlyDefinitionWrite(task, actorId);
+        } else {
+            accessService.requireWeeklyWrite(task, actorId);
+        }
+    }
+
+    private void appendDefinitionAudit(LabTask task, String status, Long actorMemberId,
+            String eventType, String reason) {
+        if (workflowEventService != null) {
+            workflowEventService.append(task, status, status, actorMemberId, eventType, reason);
+        }
+    }
+
+    private boolean requiresDefinitionAudit(LabTask stored, LabTask proposed) {
+        if (stored == null || proposed == null || LabConstants.WORKFLOW_DRAFT.equals(stored.getWorkflowStatus())) return false;
+        return !same(stored.getTitle(),proposed.getTitle()) || !same(stored.getDeliverable(),proposed.getDeliverable())
+                || !same(stored.getPlanDate(),proposed.getPlanDate()) || !same(stored.getOwnerId(),proposed.getOwnerId())
+                || !same(stored.getBizLine(),proposed.getBizLine()) || !same(stored.getParentId(),proposed.getParentId())
+                || !same(stored.getPerfWeight(),proposed.getPerfWeight()) || !same(stored.getGoalWeight(),proposed.getGoalWeight())
+                || !same(stored.getAssetId(),proposed.getAssetId())
+                || !same(stored.getCoordinationRequired(),proposed.getCoordinationRequired())
+                || !same(stored.getCoordinationOwnerId(),proposed.getCoordinationOwnerId())
+                || !same(stored.getCoordinationDeptId(),proposed.getCoordinationDeptId())
+                || !same(stored.getCoordinationContent(),proposed.getCoordinationContent())
+                || !same(stored.getCoordinationSupport(),proposed.getCoordinationSupport());
     }
 
     private void validateTaskConnections(LabTask task, Long actorId, Map<Long, LabGoal> lockedGoals,

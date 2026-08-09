@@ -24,6 +24,7 @@ import com.ailab.system.mapper.LabTaskEvidenceMapper;
 import com.ailab.system.mapper.LabTaskMapper;
 import com.ailab.system.service.impl.LabTaskServiceImpl;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
+import com.ailab.system.service.impl.LabTaskWorkflowEventService;
 import com.ailab.system.service.impl.TaskWorkflowServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.core.page.TableDataInfo;
@@ -55,6 +56,7 @@ class LabTaskServiceTest {
     private MemoryEvidenceMapper evidence;
     private MemoryGoalMapper goals;
     private MemoryAccessMapper access;
+    private LabTaskWorkflowEventService workflowEvents;
     private LabTaskService service;
 
     @BeforeEach
@@ -67,8 +69,9 @@ class LabTaskServiceTest {
         access.put(8L, 8L, "lab_member", "algorithm");
         access.put(9L, 9L, "lab_manager", "manage");
         access.put(900L, 8L, "lab_member", "algorithm");
+        workflowEvents = org.mockito.Mockito.mock(LabTaskWorkflowEventService.class);
         service = new LabTaskServiceImpl(tasks, evidence, goals, new TaskWorkflowServiceImpl(CLOCK),
-                new LabAccessServiceImpl(access), CLOCK);
+                new LabAccessServiceImpl(access), workflowEvents, null, CLOCK);
     }
 
     @Test
@@ -119,10 +122,10 @@ class LabTaskServiceTest {
         LabTask second = task(2L, 0L, "month", "2026-08", 8L, "50", "90");
         tasks.put(first); tasks.put(second);
 
-        assertThrows(ServiceException.class, () -> service.activateMonthlyPlan(8L, "2026-08", 8L));
+        assertThrows(ServiceException.class, () -> service.activateMonthlyPlan(8L, "2026-08", 9L));
         second.setPerfWeight(new BigDecimal("60"));
 
-        assertEquals(2, service.activateMonthlyPlan(8L, "2026-08", 8L));
+        assertEquals(2, service.activateMonthlyPlan(8L, "2026-08", 9L));
         assertEquals(LabConstants.WORKFLOW_ACTIVE, tasks.find(1L).getWorkflowStatus());
         assertEquals(LabConstants.WORKFLOW_ACTIVE, tasks.find(2L).getWorkflowStatus());
         assertEquals(new BigDecimal("90"), second.getGoalWeight(), "goal weight must not drive performance plan activation");
@@ -133,10 +136,10 @@ class LabTaskServiceTest {
         LabTask task = task(1L, 0L, "month", "2026-08", 8L, "100", "100");
         tasks.put(task); access.eligibleReviewerCount = 0;
 
-        assertThrows(ServiceException.class, () -> service.activateMonthlyPlan(8L, "2026-08", 8L));
+        assertThrows(ServiceException.class, () -> service.activateMonthlyPlan(8L, "2026-08", 9L));
 
         access.eligibleReviewerCount = 1;
-        assertEquals(1, service.activateMonthlyPlan(8L, "2026-08", 8L));
+        assertEquals(1, service.activateMonthlyPlan(8L, "2026-08", 9L));
     }
 
     @Test
@@ -548,7 +551,7 @@ class LabTaskServiceTest {
     }
 
     @Test
-    void memberCannotAttachOwnWeekToAnotherOwnersMonthButLeadCanAssignIt() {
+    void onlyTheWeeklyOwnerOrManagerCanAttachACommitmentToAnotherOwnersMonth() {
         goals.put(goal(1L, 0L, "YEAR", 2026, null));
         goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
         LabTask parent = activeTask(10L, 12L); parent.setGoalId(1L); parent.setMilestoneId(2L); tasks.put(parent);
@@ -556,7 +559,8 @@ class LabTaskServiceTest {
         week.setGoalId(1L); week.setMilestoneId(2L);
 
         assertThrows(ServiceException.class, () -> service.createTask(week, 3L));
-        service.createTask(week, 2L);
+        assertThrows(ServiceException.class, () -> service.createTask(week, 2L));
+        service.createTask(week, 9L);
         assertNotNull(week.getId());
 
         LabTask crossLineParent = activeTask(11L, 15L); crossLineParent.setBizLine("platform");
@@ -665,16 +669,16 @@ class LabTaskServiceTest {
         LabTask daily = task(null, 0L, "month", "2026-08", 8L, "0", "0");
         daily.setGoalId(1L); daily.setMilestoneId(2L); daily.setTaskType("daily");
 
-        service.createTask(daily, 8L);
+        service.createTask(daily, 9L);
         assertEquals(Arrays.asList(1L, 2L), goals.lockedGoalIds);
 
         goals.lockedGoalIds.clear();
         daily.setTitle("updated daily month");
-        service.updateTask(daily, 8L);
+        service.updateTask(daily, 9L);
         assertEquals(Arrays.asList(1L, 2L), goals.lockedGoalIds);
 
         goals.lockedGoalIds.clear();
-        service.deleteTask(daily.getId(), daily.getVersion(), 8L);
+        service.deleteTask(daily.getId(), daily.getVersion(), 9L);
         assertEquals(Arrays.asList(1L, 2L), goals.lockedGoalIds);
     }
 
@@ -690,7 +694,7 @@ class LabTaskServiceTest {
         movedUsingStaleQuarter.setGoalId(1L); movedUsingStaleQuarter.setMilestoneId(3L); movedUsingStaleQuarter.setTaskType("daily");
 
         ServiceException error = assertThrows(ServiceException.class,
-                () -> service.updateTask(movedUsingStaleQuarter, 8L));
+                () -> service.updateTask(movedUsingStaleQuarter, 9L));
 
         assertEquals("Month task period must belong to its quarterly milestone", error.getMessage());
     }
@@ -739,7 +743,7 @@ class LabTaskServiceTest {
         selfParent.setGoalId(1L); selfParent.setMilestoneId(2L);
 
         ServiceException error = assertThrows(ServiceException.class,
-                () -> service.updateTask(selfParent, 8L));
+                () -> service.updateTask(selfParent, 9L));
 
         assertEquals("Task cannot be its own parent", error.getMessage());
         assertEquals(0L, tasks.find(10L).getParentId());
@@ -787,9 +791,55 @@ class LabTaskServiceTest {
         tasks.lockedChildrenParentIds.clear();
         LabTask edit = task(10L, 0L, "month", "2026-08", 8L, "0", "0");
         edit.setGoalId(1L); edit.setMilestoneId(2L); edit.setTaskType("daily"); edit.setTitle("content-only edit");
-        service.updateTask(edit, 8L);
+        service.updateTask(edit, 9L);
         assertTrue(tasks.lockedTaskIds.contains(10L));
         assertTrue(tasks.lockedChildrenParentIds.contains(10L));
+    }
+
+    @Test
+    void activatedDefinitionChangesRequireAReasonAndAppendAnAuditEvent() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask stored = activeTask(10L, 8L);
+        stored.setGoalId(1L); stored.setMilestoneId(2L); stored.setTaskType("daily"); tasks.put(stored);
+        LabTask edit = activeTask(10L, 8L);
+        edit.setGoalId(1L); edit.setMilestoneId(2L); edit.setTaskType("daily"); edit.setTitle("clarified outcome");
+
+        assertThrows(ServiceException.class, () -> service.updateTask(edit, 9L));
+
+        edit.setRemark("scope clarified after the weekly review");
+        assertEquals(1, service.updateTask(edit, 9L));
+        org.mockito.Mockito.verify(workflowEvents).append(
+                org.mockito.ArgumentMatchers.eq(edit),
+                org.mockito.ArgumentMatchers.eq(LabConstants.WORKFLOW_ACTIVE),
+                org.mockito.ArgumentMatchers.eq(LabConstants.WORKFLOW_ACTIVE),
+                org.mockito.ArgumentMatchers.eq(9L),
+                org.mockito.ArgumentMatchers.eq("DEFINITION_CHANGE"),
+                org.mockito.ArgumentMatchers.eq("scope clarified after the weekly review"));
+    }
+
+    @Test
+    void activatedWeeklyDefinitionChangesUseTheAppendOnlyAuditLog() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask parent = activeTask(10L, 8L);
+        parent.setGoalId(1L); parent.setMilestoneId(2L); parent.setTaskType("daily"); tasks.put(parent);
+        LabTask stored = task(11L, 10L, "week", "2026-W32", 8L, "0", "0");
+        stored.setGoalId(1L); stored.setMilestoneId(2L); stored.setWorkflowStatus(LabConstants.WORKFLOW_ACTIVE);
+        stored.setResultStatus(LabConstants.RESULT_DOING); tasks.put(stored);
+        LabTask edit = task(11L, 10L, "week", "2026-W32", 8L, "0", "0");
+        edit.setGoalId(1L); edit.setMilestoneId(2L); edit.setWorkflowStatus(LabConstants.WORKFLOW_ACTIVE);
+        edit.setResultStatus(LabConstants.RESULT_DOING); edit.setTitle("clarified weekly outcome");
+        edit.setRemark("commitment scope clarified");
+
+        assertEquals(1, service.updateTask(edit, 8L));
+        org.mockito.Mockito.verify(workflowEvents).append(
+                org.mockito.ArgumentMatchers.eq(edit),
+                org.mockito.ArgumentMatchers.eq(LabConstants.WORKFLOW_ACTIVE),
+                org.mockito.ArgumentMatchers.eq(LabConstants.WORKFLOW_ACTIVE),
+                org.mockito.ArgumentMatchers.eq(8L),
+                org.mockito.ArgumentMatchers.eq("DEFINITION_CHANGE"),
+                org.mockito.ArgumentMatchers.eq("commitment scope clarified"));
     }
 
     private static LabGoal goal(Long id, Long parent, String level, int year, String period) {

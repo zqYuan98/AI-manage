@@ -26,6 +26,9 @@ public class LabProperties
     /** Allow members to write the self-close weekly execution workflow. */
     private boolean writeSelfClose;
 
+    /** Share finalized, non-sensitive ALL reports with every active lab role. */
+    private boolean shareAllFinalizedNonSensitive = true;
+
     public String getOutputDirectory()
     {
         return outputDirectory;
@@ -94,5 +97,15 @@ public class LabProperties
     public void setWriteSelfClose(boolean writeSelfClose)
     {
         this.writeSelfClose = writeSelfClose;
+    }
+
+    public boolean isShareAllFinalizedNonSensitive()
+    {
+        return shareAllFinalizedNonSensitive;
+    }
+
+    public void setShareAllFinalizedNonSensitive(boolean value)
+    {
+        this.shareAllFinalizedNonSensitive = value;
     }
 }

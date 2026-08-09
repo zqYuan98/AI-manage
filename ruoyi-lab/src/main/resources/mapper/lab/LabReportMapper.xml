@@ -108,8 +108,11 @@
     <select id="selectReportHistory" resultMap="ReportResult">
         select <include refid="reportHistoryColumns"/> from lab_report_instance where del_flag='0'
         <if test="period != null and period != ''">and period=#{period}</if><if test="bizLine != null and bizLine != ''">and biz_line=#{bizLine}</if>
-        <if test="!manager">and lifecycle_status in ('FINALIZED','SUPERSEDED')</if>
-        <if test="!sensitive">and sensitive_flag='0'</if>
+        <if test="!manager">
+            and lifecycle_status in ('FINALIZED','SUPERSEDED') and sensitive_flag='0'
+            and (biz_line=#{actorBizLine}<if test="shareAll"> or biz_line='ALL'</if>)
+        </if>
+        <if test="manager and !sensitive">and sensitive_flag='0'</if>
         order by period desc,template_code,revision_no desc,id desc
     </select>
     <update id="supersedeCurrentReport">update lab_report_instance set lifecycle_status='SUPERSEDED',current_flag='0',update_by=#{actor},update_time=sysdate(),version=version+1 where template_code=#{templateCode} and period=#{period} and biz_line=#{bizLine} and id&lt;&gt;#{excludeId} and lifecycle_status='FINALIZED' and current_flag='1' and del_flag='0'</update>

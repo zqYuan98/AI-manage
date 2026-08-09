@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,7 @@ import com.ailab.system.domain.LabReportJob;
 import com.ailab.system.domain.LabReportSummary;
 import com.ailab.system.controller.LabReportController;
 import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.dto.LabReportAccessScope;
 import com.ailab.system.dto.ReportStatusView;
 import com.ailab.system.dto.ReportSummarySectionView;
 import com.ailab.system.mapper.LabReportMapper;
@@ -84,6 +86,7 @@ class ReportGenerationOrchestratorTest {
                 Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"), ZoneOffset.UTC));
         LabAccessContext manager = new LabAccessContext(); manager.setUserId(1001L); manager.setMemberId(11L);
         manager.setRoleKey("lab_manager"); manager.setBizLine("manage"); when(access.context(1001L)).thenReturn(manager);
+        when(access.reportScope(1001L)).thenReturn(new LabReportAccessScope(true,"manage",false,true));
         doAnswer(call -> { ((LabReportInstance) call.getArgument(0)).setId(31L); return 1; })
                 .when(mapper).insertReportInstance(any(LabReportInstance.class));
     }
@@ -256,11 +259,21 @@ class ReportGenerationOrchestratorTest {
     void everySensitiveViewAndDownloadReauthorizesCurrentPermissionSnapshot() {
         LabReportInstance sensitive = draft(31L, 4); sensitive.setSensitiveFlag("1");
         when(mapper.selectReportById(31L)).thenReturn(sensitive);
-        when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.<String>emptySet());
+        doThrow(new ServiceException("需要敏感报告权限")).doNothing().when(access)
+                .requireReportRead("ALL",true,false,1001L);
         assertThrows(ServiceException.class, () -> orchestrator.authorizeView(31L, 1001L));
-        when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.singleton("lab:report:sensitive"));
         assertEquals(31L, orchestrator.authorizeView(31L, 1001L).getId());
-        verify(menus, org.mockito.Mockito.times(2)).selectMenuPermsByUserId(1001L);
+        verify(access, org.mockito.Mockito.times(2)).requireReportRead("ALL",true,false,1001L);
+    }
+
+    @Test
+    void reportViewDelegatesObjectScopeToTheTrustedAccessBoundary() {
+        LabReportInstance report=draft(31L,4);report.setBizLine("algorithm");report.setLifecycleStatus("FINALIZED");
+        when(mapper.selectReportById(31L)).thenReturn(report);
+
+        orchestrator.authorizeView(31L,1001L);
+
+        verify(access).requireReportRead("algorithm",false,true,1001L);
     }
 
     @Test
@@ -287,7 +300,7 @@ class ReportGenerationOrchestratorTest {
         assertTrue(!xml.contains("${"), "report lifecycle SQL must use bound parameters only");
         String history = xml.substring(xml.indexOf("<select id=\"selectReportHistory\""),
                 xml.indexOf("</select>", xml.indexOf("<select id=\"selectReportHistory\"")));
-        assertTrue(history.contains("</if>\n        <if test=\"!sensitive\">and sensitive_flag='0'</if>"),
+        assertTrue(history.contains("<if test=\"manager and !sensitive\">and sensitive_flag='0'</if>"),
                 "sensitive history filtering must apply even after a manager loses the sensitive permission");
     }
 
@@ -623,7 +636,7 @@ class ReportGenerationOrchestratorTest {
 
     @Test
     void reportHistoryDtoProjectionPreservesTheMapperPageTotal() {
-        com.github.pagehelper.Page<LabReportInstance> mapped=new com.github.pagehelper.Page<LabReportInstance>(2,10);mapped.setTotal(37L);mapped.add(draft(31L,0));when(mapper.selectReportHistory(null,null,true,false)).thenReturn(mapped);when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.<String>emptySet());LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));
+        com.github.pagehelper.Page<LabReportInstance> mapped=new com.github.pagehelper.Page<LabReportInstance>(2,10);mapped.setTotal(37L);mapped.add(draft(31L,0));when(mapper.selectReportHistory(null,null,true,"manage",true,false)).thenReturn(mapped);LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));
 
         java.util.List<com.ailab.system.dto.ReportStatusView> result=service.history(null,null,1001L);
 
@@ -633,9 +646,8 @@ class ReportGenerationOrchestratorTest {
     @Test
     void reportHistoryAccessLookupCannotConsumeTheRequestedPage() {
         LabAccessContext manager=new LabAccessContext();manager.setUserId(1001L);manager.setMemberId(11L);manager.setRoleKey("lab_manager");manager.setBizLine("manage");
-        when(access.context(1001L)).thenAnswer(call->{assertNull(PageHelper.getLocalPage(),"access lookup must run outside the requested history page");return manager;});
-        when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.<String>emptySet());
-        when(mapper.selectReportHistory("2026-08","ALL",true,false)).thenAnswer(call->{Page<?> requested=PageHelper.getLocalPage();assertNotNull(requested,"history query must receive the requested page");assertEquals(3,requested.getPageNum());assertEquals(7,requested.getPageSize());assertEquals("create_time desc",requested.getOrderBy());Page<LabReportInstance> mapped=new Page<LabReportInstance>(3,7);mapped.setTotal(15L);mapped.add(draft(31L,0));return mapped;});
+        when(access.reportScope(1001L)).thenAnswer(call->{assertNull(PageHelper.getLocalPage(),"access lookup must run outside the requested history page");return new LabReportAccessScope(true,"manage",false,true);});
+        when(mapper.selectReportHistory("2026-08","ALL",true,"manage",true,false)).thenAnswer(call->{Page<?> requested=PageHelper.getLocalPage();assertNotNull(requested,"history query must receive the requested page");assertEquals(3,requested.getPageNum());assertEquals(7,requested.getPageSize());assertNull(requested.getOrderBy(),"history must use its fixed SQL order");Page<LabReportInstance> mapped=new Page<LabReportInstance>(3,7);mapped.setTotal(15L);mapped.add(draft(31L,0));return mapped;});
         LabReportServiceImpl service=new LabReportServiceImpl(mapper,access,menus,orchestrator,mock(ReportJobDispatcher.class));
 
         PageHelper.startPage(3,7,"create_time desc").setReasonable(true);

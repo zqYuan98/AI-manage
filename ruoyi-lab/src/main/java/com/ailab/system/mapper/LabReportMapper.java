@@ -43,7 +43,8 @@ public interface LabReportMapper {
     List<LabReportInstance> lockReportFamily(@Param("templateCode") String templateCode, @Param("period") String period,
             @Param("bizLine") String bizLine);
     List<LabReportInstance> selectReportHistory(@Param("period") String period, @Param("bizLine") String bizLine,
-            @Param("manager") boolean manager, @Param("sensitive") boolean sensitive);
+            @Param("manager") boolean manager, @Param("actorBizLine") String actorBizLine,
+            @Param("shareAll") boolean shareAll, @Param("sensitive") boolean sensitive);
     int supersedeCurrentReport(@Param("templateCode") String templateCode, @Param("period") String period,
             @Param("bizLine") String bizLine, @Param("excludeId") Long excludeId, @Param("actor") String actor);
     int finalizeReport(@Param("id") Long id, @Param("version") Integer version, @Param("actor") String actor);

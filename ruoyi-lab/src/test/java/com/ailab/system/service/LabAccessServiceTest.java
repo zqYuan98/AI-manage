@@ -7,16 +7,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ailab.system.domain.LabGoal;
 import com.ailab.system.domain.LabTask;
+import com.ailab.system.config.LabProperties;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.mapper.LabAccessMapper;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ruoyi.common.exception.ServiceException;
+import com.ruoyi.system.service.ISysMenuService;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Collections;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -102,6 +107,48 @@ class LabAccessServiceTest {
                 .toLowerCase().replaceAll("\\s+", "");
         assertTrue(xml.contains("u.status='0'"), "disabled system users must not resolve to a trusted lab actor");
         assertTrue(xml.contains("u.del_flag='0'"), "deleted system users must not resolve to a trusted lab actor");
+    }
+
+    @Test
+    void actionAuthorizationSeparatesWeeklyExecutionFromMonthlyDefinition() {
+        LabTask ownWeek=task(13L,"algorithm");ownWeek.setTaskLevel("week");
+        LabTask teammateWeek=task(14L,"algorithm");teammateWeek.setTaskLevel("week");
+        LabTask month=task(13L,"algorithm");month.setTaskLevel("month");
+
+        assertDoesNotThrow(()->service.requireWeeklyWrite(ownWeek,3L));
+        assertThrows(ServiceException.class,()->service.requireWeeklyWrite(teammateWeek,3L));
+        assertThrows(ServiceException.class,()->service.requireWeeklyWrite(teammateWeek,2L));
+        LabTask leadOwnedWeek=task(12L,"algorithm");leadOwnedWeek.setTaskLevel("week");
+        assertDoesNotThrow(()->service.requireWeeklyWrite(leadOwnedWeek,2L));
+        assertDoesNotThrow(()->service.requireWeeklyWrite(teammateWeek,1L));
+        assertThrows(ServiceException.class,()->service.requireMonthlyDefinitionWrite(month,3L));
+        assertThrows(ServiceException.class,()->service.requireMonthlyDefinitionWrite(month,2L));
+        assertDoesNotThrow(()->service.requireMonthlyDefinitionWrite(month,1L));
+    }
+
+    @Test
+    void reportReadMatrixUsesLiveSensitivePermissionAndExplicitAllSharingPolicy() {
+        ISysMenuService menus=mock(ISysMenuService.class);LabProperties properties=new LabProperties();
+        properties.setShareAllFinalizedNonSensitive(true);
+        LabAccessService scoped=new LabAccessServiceImpl(mapper,menus,properties);
+
+        assertDoesNotThrow(()->scoped.requireReportRead("platform",false,false,1L));
+        assertThrows(ServiceException.class,()->scoped.requireReportRead("platform",true,true,1L));
+        when(menus.selectMenuPermsByUserId(1L)).thenReturn(Collections.singleton("lab:report:sensitive"));
+        assertDoesNotThrow(()->scoped.requireReportRead("platform",true,true,1L));
+
+        assertDoesNotThrow(()->scoped.requireReportRead("algorithm",false,true,2L));
+        assertDoesNotThrow(()->scoped.requireReportRead("ALL",false,true,2L));
+        assertThrows(ServiceException.class,()->scoped.requireReportRead("platform",false,true,2L));
+        assertThrows(ServiceException.class,()->scoped.requireReportRead("algorithm",false,false,2L));
+        assertThrows(ServiceException.class,()->scoped.requireReportRead("algorithm",true,true,2L));
+
+        assertDoesNotThrow(()->scoped.requireReportRead("algorithm",false,true,3L));
+        assertDoesNotThrow(()->scoped.requireReportRead("ALL",false,true,3L));
+        assertThrows(ServiceException.class,()->scoped.requireReportRead("platform",false,true,3L));
+
+        properties.setShareAllFinalizedNonSensitive(false);
+        assertThrows(ServiceException.class,()->scoped.requireReportRead("ALL",false,true,3L));
     }
 
     private static LabAccessContext context(Long userId, Long memberId, String roleKey, String bizLine, Long deptId) {

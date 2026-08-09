@@ -51,7 +51,7 @@ public class LabCommitmentServiceImpl implements LabCommitmentService {
                 || LabConstants.YES.equals(parent.getPeriodLockFlag())) {
             throw new ServiceException("周承诺必须关联进行中且未关期的月度结果");
         }
-        accessService.requireTaskWrite(parent, userId);
+        accessService.requireTaskRead(parent, userId);
         if (!context.getMemberId().equals(parent.getOwnerId())) {
             throw new ServiceException("成员只能在自己的月度结果下创建周承诺");
         }
@@ -100,7 +100,7 @@ public class LabCommitmentServiceImpl implements LabCommitmentService {
     @Override @Transactional
     public void correct(Long taskId, Integer version, WeeklyCommitmentCommand command, Long userId) {
         if (command == null || blank(command.getReason())) throw new ServiceException("纠正周承诺必须填写原因");
-        LabTask task=loadVersioned(taskId,version); requireOwner(task,userId);
+        LabTask task=loadVersioned(taskId,version); requireOwnerOrManager(task,userId);
         if (!LabConstants.EXECUTION_SELF_DONE.equals(task.getExecutionStatus())
                 && !LabConstants.EXECUTION_SELF_UNDONE.equals(task.getExecutionStatus())) {
             throw new ServiceException("只有已闭环周承诺可以纠正");
@@ -175,6 +175,8 @@ public class LabCommitmentServiceImpl implements LabCommitmentService {
         if(LabConstants.YES.equals(task.getPeriodLockFlag()))throw new ServiceException("已关期周承诺不可修改");return task;}
     private void requireOwner(LabTask task,Long userId){if(!context(userId).getMemberId().equals(task.getOwnerId()))
         throw new ServiceException("成员只能维护自己的周承诺");}
+    private void requireOwnerOrManager(LabTask task,Long userId){LabAccessContext actor=context(userId);
+        if(actor.getMemberId().equals(task.getOwnerId()))return;accessService.requireManager(userId);}
     private LabAccessContext context(Long userId){LabAccessContext context=accessService.context(userId);if(context==null||context.getMemberId()==null)
         throw new ServiceException("当前账号未关联在职成员");return context;}
     private void appendEvent(LabTask task,String from,String to,String result,Date finish,Long actorId,String type,String reason,int version){

@@ -132,6 +132,23 @@ class LabCommitmentServiceTest {
     }
 
     @Test
+    void managerMayCorrectAnotherMembersClosedResultOnlyWithReasonAndAudit() {
+        LabTask task = active(20L, 7L); task.setExecutionStatus(LabConstants.EXECUTION_SELF_UNDONE);
+        task.setResultStatus(LabConstants.RESULT_UNDONE); when(tasks.selectTaskForUpdate(20L)).thenReturn(task);
+        LabAccessContext manager = context(9L); manager.setUserId(200L); manager.setRoleKey("lab_manager");
+        when(access.context(200L)).thenReturn(manager);
+        WeeklyCommitmentCommand command = new WeeklyCommitmentCommand(); command.setReason("纠正误报");
+
+        service.correct(20L, 0, command, 200L);
+
+        verify(access).requireManager(200L);
+        ArgumentCaptor<LabTaskExecutionEvent> event = ArgumentCaptor.forClass(LabTaskExecutionEvent.class);
+        verify(commitments).insertExecutionEvent(event.capture());
+        assertEquals(9L, event.getValue().getActorId());
+        assertEquals("纠正误报", event.getValue().getReason());
+    }
+
+    @Test
     void carryCreatesExactlyOneNewCommitmentAndKeepsOriginalUndone() {
         LabTask old = active(20L, 7L); old.setExecutionStatus(LabConstants.EXECUTION_SELF_UNDONE);
         old.setResultStatus(LabConstants.RESULT_UNDONE); when(tasks.selectTaskForUpdate(20L)).thenReturn(old);
