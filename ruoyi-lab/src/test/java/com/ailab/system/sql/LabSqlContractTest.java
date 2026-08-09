@@ -31,7 +31,7 @@ class LabSqlContractTest {
     private static final Map<String, Set<String>> FIELDS = fields();
     private static final Set<String> LOOKUP_INDEXES = lookupIndexes();
     static { LOOKUP_INDEXES.remove("lab_member_skill|keyidx_lab_member_skill_member(member_id)"); LOOKUP_INDEXES.remove("lab_report_summary|keyidx_lab_report_summary_period(period,biz_line)"); }
-    static { FIELDS.get("lab_task_quality_gate").add("evidence_id"); FIELDS.get("lab_task_block_event").add("episode_no"); FIELDS.get("lab_reminder").addAll(set("business_type","business_id","episode_no","reminder_level","reminder_date","title","version")); }
+    static { FIELDS.get("lab_task_quality_gate").add("evidence_id"); FIELDS.get("lab_task_block_event").addAll(set("episode_no", "carried_from_event_id")); FIELDS.get("lab_reminder").addAll(set("business_type","business_id","episode_no","reminder_level","reminder_date","title","version")); }
     static {
         FIELDS.get("lab_task").addAll(set("execution_status", "carried_from_id", "execution_version"));
         FIELDS.put("lab_task_execution_event", set("task_id", "from_status", "to_status", "result_status", "actual_finish_time", "actor_id", "event_type", "reason", "task_version", "evidence_version", "idempotency_key", "event_time"));
@@ -110,7 +110,7 @@ class LabSqlContractTest {
     void lightweightCommitmentSchemaAndMigrationContractIsPresent() throws IOException {
         String compact = readSql().toLowerCase(Locale.ROOT).replace("`", "").replaceAll("\\s+", "");
         for (String token : Arrays.asList(
-                "execution_status", "carried_from_id", "execution_version",
+                "execution_status", "carried_from_id", "execution_version", "carried_from_event_id",
                 "createtableifnotexistslab_task_execution_event",
                 "createtableifnotexistslab_task_migration_issue",
                 "createtableifnotexistslab_task_workflow_event",
@@ -127,6 +127,8 @@ class LabSqlContractTest {
                 "legacy backfill must classify the full state combination including an open block");
         assertTrue(compact.contains("migrated_baseline") && compact.contains("migration_terminal_unresolved"),
                 "migration must create a baseline event and name terminal open-block resolution");
+        assertTrue(compact.contains("idx_lab_block_carried_from(carried_from_event_id)"),
+                "carried blocking episodes need a lookup index in fresh and upgraded schemas");
         String legacy = new String(Files.readAllBytes(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")), StandardCharsets.UTF_8)
                 .toLowerCase(Locale.ROOT);
         for (String fixture : Arrays.asList("legacy confirmed undone", "legacy confirmed done",

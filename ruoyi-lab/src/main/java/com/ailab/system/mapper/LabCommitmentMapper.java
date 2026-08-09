@@ -14,6 +14,7 @@ public interface LabCommitmentMapper {
     int countOpenMigrationIssues();
     int insertExecutionEvent(LabTaskExecutionEvent event);
     int insertMigrationIssue(LabTaskMigrationIssue issue);
+    int insertRepairIssue(LabTaskMigrationIssue issue);
     int updateExecutionStatus(@Param("taskId") Long taskId, @Param("expectedExecutionVersion") Integer expectedExecutionVersion,
             @Param("executionStatus") String executionStatus, @Param("updateBy") String updateBy);
     String selectCutoverValue(@Param("configKey") String configKey);

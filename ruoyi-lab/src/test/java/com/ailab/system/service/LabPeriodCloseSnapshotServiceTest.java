@@ -10,10 +10,12 @@ import com.ailab.system.domain.LabPeriodCloseSnapshot;
 import com.ailab.system.domain.LabCollaborationRecord;
 import com.ailab.system.domain.LabMember;
 import com.ailab.system.domain.LabTask;
+import com.ailab.system.domain.LabTaskBlockEvent;
 import com.ailab.system.domain.LabTaskExecutionEvent;
 import com.ailab.system.domain.LabTaskWorkflowEvent;
 import com.ailab.system.mapper.LabPeriodCloseSnapshotMapper;
 import com.ailab.system.service.impl.LabPeriodCloseSnapshotService;
+import com.ailab.system.service.impl.LabTaskStateRepairService;
 import com.ruoyi.common.exception.ServiceException;
 import java.time.Clock;
 import java.util.Arrays;
@@ -50,9 +52,11 @@ class LabPeriodCloseSnapshotServiceTest {
     @Test
     void closeRefusesTaskThatDiffersFromItsLastEvent() {
         LabPeriodCloseSnapshotMapper mapper=mock(LabPeriodCloseSnapshotMapper.class);when(mapper.taskMatchesLastEvent(9L)).thenReturn(false);
-        LabPeriodCloseSnapshotService service=new LabPeriodCloseSnapshotService(mapper,Clock.systemUTC());
+        LabTaskStateRepairService repair=mock(LabTaskStateRepairService.class);
+        LabPeriodCloseSnapshotService service=new LabPeriodCloseSnapshotService(mapper,repair,Clock.systemUTC());
         LabTask task=new LabTask();task.setId(9L);task.setTaskLevel("month");
         assertThrows(ServiceException.class,()->service.close("2026-08",1,null,1,8L,Collections.singletonList(task)));
+        verify(repair).queueCurrentEventMismatch(task,8L);
     }
 
     @Test
@@ -78,13 +82,25 @@ class LabPeriodCloseSnapshotServiceTest {
     }
 
     @Test
-    void terminalTaskWithOpenBlockCannotBeClosed() {
+    void closeSnapshotsAnUnresolvedActiveBlockThenClosesTheSourceEpisode() {
         LabPeriodCloseSnapshotMapper mapper=mock(LabPeriodCloseSnapshotMapper.class);
-        when(mapper.taskMatchesLastEvent(9L)).thenReturn(true);when(mapper.hasOpenBlock(9L)).thenReturn(true);
-        LabTask task=new LabTask();task.setId(9L);task.setTaskLevel("month");task.setWorkflowStatus("CONFIRMED");
+        when(mapper.taskMatchesLastEvent(9L)).thenReturn(true);
+        LabTaskBlockEvent block=new LabTaskBlockEvent();block.setId(71L);block.setTaskId(9L);block.setEpisodeNo(2);
+        block.setBlockStatus("OPEN");block.setBlockReason("external dependency");
+        when(mapper.selectOpenBlocksForTaskIdsForUpdate(Collections.singletonList(9L))).thenReturn(Collections.singletonList(block));
+        when(mapper.insertSnapshot(any())).thenAnswer(invocation->{LabPeriodCloseSnapshot row=invocation.getArgument(0);row.setId(51L);return 1;});
+        when(mapper.insertFact(any())).thenReturn(1);when(mapper.closeOpenBlockForPeriod(any(),any(),any(),any())).thenReturn(1);
+        when(mapper.clearTaskBlockForPeriod(any(),any())).thenReturn(1);
+        LabTask task=new LabTask();task.setId(9L);task.setTaskLevel("month");task.setWorkflowStatus("ACTIVE");task.setBlockFlag("1");
 
-        assertThrows(ServiceException.class,()->new LabPeriodCloseSnapshotService(mapper,Clock.systemUTC())
-                .close("2026-08",1,30L,2,8L,Collections.singletonList(task)));
+        new LabPeriodCloseSnapshotService(mapper,Clock.systemUTC())
+                .close("2026-08",1,30L,2,8L,Collections.singletonList(task));
+
+        ArgumentCaptor<com.ailab.system.domain.LabPeriodCloseFact> facts=ArgumentCaptor.forClass(com.ailab.system.domain.LabPeriodCloseFact.class);
+        verify(mapper,times(2)).insertFact(facts.capture());
+        assertEquals("OPEN_BLOCK_AT_CUTOFF",facts.getAllValues().get(1).getFactType());
+        verify(mapper).closeOpenBlockForPeriod(org.mockito.ArgumentMatchers.eq(71L),org.mockito.ArgumentMatchers.eq(8L),any(),org.mockito.ArgumentMatchers.eq("8"));
+        verify(mapper).clearTaskBlockForPeriod(9L,"8");
     }
 
     @Test

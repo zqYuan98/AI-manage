@@ -135,6 +135,8 @@ public class LabCommitmentServiceImpl implements LabCommitmentService {
         LabTask source=loadVersioned(taskId,version); requireOwner(source,userId);
         if (!LabConstants.EXECUTION_SELF_UNDONE.equals(source.getExecutionStatus())) throw new ServiceException("只有本周未完成承诺可以转期");
         LabTask existing=commitmentMapper.selectCarriedCommitment(taskId,command.getPeriod()); if(existing!=null)return existing;
+        java.util.List<LabTaskBlockEvent> sourceBlocks=taskMapper.selectBlockEvents(source.getId());
+        LabTaskBlockEvent sourceBlock=sourceBlocks==null||sourceBlocks.isEmpty()?null:sourceBlocks.get(0);
         LabTask carried=new LabTask(); carried.setParentId(source.getParentId()); carried.setGoalId(source.getGoalId());
         carried.setMilestoneId(source.getMilestoneId()); carried.setTaskLevel(LabConstants.TASK_LEVEL_WEEK);
         carried.setPeriod(command.getPeriod()); carried.setBizLine(source.getBizLine()); carried.setTaskType("daily");
@@ -144,11 +146,18 @@ public class LabCommitmentServiceImpl implements LabCommitmentService {
         carried.setPerfWeight(BigDecimal.ZERO); carried.setGoalWeight(BigDecimal.ZERO);
         carried.setWorkflowStatus(LabConstants.WORKFLOW_ACTIVE); carried.setResultStatus(LabConstants.RESULT_DOING);
         carried.setExecutionStatus(LabConstants.EXECUTION_ACTIVE); carried.setExecutionVersion(0); carried.setCarriedFromId(source.getId());
-        carried.setCurrentBlockFlag(LabConstants.NO); carried.setPeriodLockFlag(LabConstants.NO);
+        Date carriedTime=Date.from(clock.instant());
+        carried.setBlockFlag(sourceBlock==null?LabConstants.NO:LabConstants.YES);
+        carried.setBlockStartTime(sourceBlock==null?null:carriedTime); carried.setPeriodLockFlag(LabConstants.NO);
         carried.setCoordinationRequired(source.getCoordinationRequired()); carried.setCoordinationOwnerId(source.getCoordinationOwnerId());
         carried.setCoordinationDeptId(source.getCoordinationDeptId()); carried.setCoordinationContent(source.getCoordinationContent());
         carried.setCoordinationSupport(source.getCoordinationSupport()); carried.setVersion(0); carried.setDelFlag(LabConstants.NO);
         carried.setCreateBy(actor(userId)); if(taskMapper.insertTask(carried)!=1)throw new ServiceException("转期承诺创建失败");
+        if(sourceBlock!=null){LabTaskBlockEvent linked=new LabTaskBlockEvent();linked.setTaskId(carried.getId());
+            linked.setEpisodeNo(taskMapper.selectNextBlockEpisodeNo(carried.getId()));linked.setCarriedFromEventId(sourceBlock.getId());
+            linked.setBlockType(sourceBlock.getBlockType());linked.setBlockReason(sourceBlock.getBlockReason());
+            linked.setBlockStartTime(carriedTime);linked.setBlockStatus("OPEN");linked.setDelFlag(LabConstants.NO);
+            linked.setCreateBy(actor(userId));if(taskMapper.insertBlockEvent(linked)!=1)throw new ServiceException("转期阻塞 episode 创建失败");}
         appendEvent(carried,null,LabConstants.EXECUTION_ACTIVE,LabConstants.RESULT_DOING,null,context(userId).getMemberId(),
                 "CARRY_CREATE","由承诺 "+source.getId()+" 转期",0); cutover.recordPointOfNoReturn("CARRY_CREATE"); return carried;
     }

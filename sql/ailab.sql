@@ -76,8 +76,8 @@ CREATE TABLE IF NOT EXISTS `lab_task_quality_gate` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='task quality gate';
 
 CREATE TABLE IF NOT EXISTS `lab_task_block_event` (
- `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `task_id` bigint NOT NULL COMMENT 'task reference', `episode_no` int NOT NULL COMMENT 'monotonic task blocking episode number', `block_type` varchar(32) NOT NULL COMMENT 'block type', `block_reason` varchar(1000) NOT NULL COMMENT 'block reason', `block_start_time` datetime NOT NULL COMMENT 'episode start', `block_end_time` datetime DEFAULT NULL COMMENT 'episode end', `block_status` varchar(16) DEFAULT 'OPEN' COMMENT 'episode status', `resolver_id` bigint DEFAULT NULL COMMENT 'resolver member', `resolution` varchar(1000) DEFAULT NULL COMMENT 'resolution', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
- PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_block_task_episode` (`task_id`,`episode_no`), KEY `idx_lab_block_task_open` (`task_id`,`block_status`,`block_start_time`), KEY `idx_lab_block_status_start` (`block_status`,`block_start_time`,`task_id`,`episode_no`), KEY `idx_lab_block_start` (`block_start_time`)
+ `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `task_id` bigint NOT NULL COMMENT 'task reference', `episode_no` int NOT NULL COMMENT 'monotonic task blocking episode number', `carried_from_event_id` bigint DEFAULT NULL COMMENT 'source block episode when carried to a new commitment', `block_type` varchar(32) NOT NULL COMMENT 'block type', `block_reason` varchar(1000) NOT NULL COMMENT 'block reason', `block_start_time` datetime NOT NULL COMMENT 'episode start', `block_end_time` datetime DEFAULT NULL COMMENT 'episode end', `block_status` varchar(16) DEFAULT 'OPEN' COMMENT 'episode status', `resolver_id` bigint DEFAULT NULL COMMENT 'resolver member', `resolution` varchar(1000) DEFAULT NULL COMMENT 'resolution', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
+ PRIMARY KEY (`id`), UNIQUE KEY `uk_lab_block_task_episode` (`task_id`,`episode_no`), KEY `idx_lab_block_task_open` (`task_id`,`block_status`,`block_start_time`), KEY `idx_lab_block_status_start` (`block_status`,`block_start_time`,`task_id`,`episode_no`), KEY `idx_lab_block_carried_from` (`carried_from_event_id`), KEY `idx_lab_block_start` (`block_start_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='task blocking episode';
 
 -- Upgrade the immediately preceding task-review schema without relying on
@@ -102,6 +102,22 @@ SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
  'ALTER TABLE `lab_task_block_event` ADD COLUMN `episode_no` int NULL COMMENT ''monotonic task blocking episode number'' AFTER `task_id`',
  'SELECT 1') FROM information_schema.columns
  WHERE table_schema = DATABASE() AND table_name = 'lab_task_block_event' AND column_name = 'episode_no');
+PREPARE ailab_ddl FROM @ailab_ddl;
+EXECUTE ailab_ddl;
+DEALLOCATE PREPARE ailab_ddl;
+
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
+ 'ALTER TABLE `lab_task_block_event` ADD COLUMN `carried_from_event_id` bigint NULL COMMENT ''source block episode when carried to a new commitment'' AFTER `episode_no`',
+ 'SELECT 1') FROM information_schema.columns
+ WHERE table_schema = DATABASE() AND table_name = 'lab_task_block_event' AND column_name = 'carried_from_event_id');
+PREPARE ailab_ddl FROM @ailab_ddl;
+EXECUTE ailab_ddl;
+DEALLOCATE PREPARE ailab_ddl;
+
+SET @ailab_ddl = (SELECT IF(COUNT(*) = 0,
+ 'ALTER TABLE `lab_task_block_event` ADD INDEX `idx_lab_block_carried_from` (`carried_from_event_id`)',
+ 'SELECT 1') FROM information_schema.statistics
+ WHERE table_schema = DATABASE() AND table_name = 'lab_task_block_event' AND index_name = 'idx_lab_block_carried_from');
 PREPARE ailab_ddl FROM @ailab_ddl;
 EXECUTE ailab_ddl;
 DEALLOCATE PREPARE ailab_ddl;

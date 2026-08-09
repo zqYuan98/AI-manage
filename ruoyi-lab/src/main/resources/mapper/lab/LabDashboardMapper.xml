@@ -95,7 +95,10 @@
         from lab_task_block_event e join lab_task t on t.id=e.task_id and t.del_flag='0' and t.current_block_flag='1'
         join lab_member owner on owner.id=t.owner_id and owner.member_status='ACTIVE' and owner.del_flag='0'
         join sys_user owner_user on owner_user.user_id=owner.user_id and owner_user.status='0' and owner_user.del_flag='0'
-        where e.block_status='OPEN' and e.del_flag='0'
+        where e.block_status='OPEN' and e.del_flag='0' and t.period_lock_flag='0'
+        and not exists(select 1 from lab_period_close pc where pc.period=coalesce(
+            (select parent.period from lab_task parent where parent.id=t.parent_id and parent.task_level='month' and parent.del_flag='0'),t.period)
+            and pc.close_status='CLOSED' and pc.del_flag='0')
         union all
         select e.task_id,t.title,e.episode_no,e.block_start_time,manager_member.id,'MANAGER',null,t.period
         from lab_task_block_event e join lab_task t on t.id=e.task_id and t.del_flag='0' and t.current_block_flag='1'
@@ -103,7 +106,10 @@
         join sys_user_role manager_link on manager_link.role_id=manager_role.role_id
         join sys_user manager_user on manager_user.user_id=manager_link.user_id and manager_user.status='0' and manager_user.del_flag='0'
         join lab_member manager_member on manager_member.user_id=manager_user.user_id and manager_member.member_status='ACTIVE' and manager_member.del_flag='0'
-        where e.block_status='OPEN' and e.del_flag='0'
+        where e.block_status='OPEN' and e.del_flag='0' and t.period_lock_flag='0'
+        and not exists(select 1 from lab_period_close pc where pc.period=coalesce(
+            (select parent.period from lab_task parent where parent.id=t.parent_id and parent.task_level='month' and parent.del_flag='0'),t.period)
+            and pc.close_status='CLOSED' and pc.del_flag='0')
         order by task_id,episode_no,recipient_id,audience
     </select>
 

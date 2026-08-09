@@ -89,6 +89,9 @@ public class LabPerformanceServiceImpl implements LabPerformanceService {
         List<LabTask> tasks=safe(mapper.selectPeriodTasksForUpdate(period)); List<LabMember> members=safe(mapper.selectActiveMembersForUpdate());
         assertStable(tasks,members); List<Long> taskIds=new ArrayList<Long>();for(LabTask task:tasks)taskIds.add(task.getId());
         List<LabTaskEvidence> evidence=safe(mapper.selectEvidenceForTaskIds(taskIds)); List<LabTaskQualityGate> gates=safe(mapper.selectQualityGatesForTaskIds(taskIds));validateQualityGateContract(null,tasks,gates);
+        List<com.ailab.system.domain.LabTaskBlockEvent> openBlocks=closeSnapshots==null
+                ? Collections.<com.ailab.system.domain.LabTaskBlockEvent>emptyList()
+                : safe(closeSnapshots.lockOpenBlocks(tasks,actor.getMemberId()));
         String[] quarter=quarterRange(period);List<LabCollaborationRecord> quarterCollaboration=safe(mapper.selectQuarterCollaborationFactsForUpdate(quarter[0],period));
         List<LabCollaborationRecord> collaboration=new ArrayList<LabCollaborationRecord>(safe(mapper.selectCollaborationsForPeriodForUpdate(period)));
         List<PerformanceAssetFact> assetFacts=safe(mapper.selectCriticalAssetFactsForUpdate(quarter[0],period)); Date cutoff=Date.from(clock.instant());
@@ -106,7 +109,7 @@ public class LabPerformanceServiceImpl implements LabPerformanceService {
             int performanceRevision=0;for(LabPerfScore score:scores)performanceRevision=Math.max(performanceRevision,score.getRevisionNo());
             closeSnapshots.close(period,close.getPeriodVersion()==null?0:close.getPeriodVersion(),
                     closeSnapshots.latestFormalRevisionId(period),performanceRevision,actor.getMemberId(),tasks,
-                    collaboration,members);
+                    openBlocks,collaboration,members);
         }
         int locked=mapper.lockTasksForPeriod(period,LabConstants.YES);if(locked!=tasks.size())throw new ServiceException("Period task lock changed concurrently");
         requireAffected(mapper.closePeriod(close.getId(),close.getVersion(),actor(actorUserId),cutoff,reason.trim()),"Period close changed concurrently"); return scores;

@@ -30,6 +30,14 @@
         <result property="evidenceVersion" column="evidence_version"/><result property="idempotencyKey" column="idempotency_key"/>
         <result property="eventTime" column="event_time"/><result property="delFlag" column="del_flag"/>
     </resultMap>
+    <resultMap id="BlockResult" type="com.ailab.system.domain.LabTaskBlockEvent">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/>
+        <result property="episodeNo" column="episode_no"/><result property="carriedFromEventId" column="carried_from_event_id"/>
+        <result property="blockType" column="block_type"/><result property="blockReason" column="block_reason"/>
+        <result property="blockStartTime" column="block_start_time"/><result property="blockEndTime" column="block_end_time"/>
+        <result property="blockStatus" column="block_status"/><result property="resolverId" column="resolver_id"/>
+        <result property="resolution" column="resolution"/><result property="delFlag" column="del_flag"/>
+    </resultMap>
     <select id="selectMaxRevision" parameterType="string" resultType="int">
         select coalesce(max(revision_no),0) from lab_period_close_snapshot where period=#{period} and del_flag='0'
     </select>
@@ -45,9 +53,24 @@
                 order by e.event_time desc,e.id desc limit 1),'')=coalesce(t.execution_status,'') end
         from lab_task t where t.id=#{taskId} and t.del_flag='0'
     </select>
-    <select id="hasOpenBlock" parameterType="long" resultType="boolean">
-        select exists(select 1 from lab_task_block_event where task_id=#{taskId} and block_status='OPEN' and del_flag='0')
+    <select id="selectOpenBlocksForTaskIdsForUpdate" resultMap="BlockResult">
+        select id,task_id,episode_no,carried_from_event_id,block_type,block_reason,block_start_time,block_end_time,
+               block_status,resolver_id,resolution,del_flag
+        from lab_task_block_event where block_status='OPEN' and del_flag='0'
+        <choose><when test="taskIds != null and !taskIds.isEmpty()">and task_id in
+            <foreach collection="taskIds" item="taskId" open="(" separator="," close=")">#{taskId}</foreach>
+        </when><otherwise>and 1=0</otherwise></choose>
+        order by task_id,episode_no,id for update
     </select>
+    <update id="closeOpenBlockForPeriod">
+        update lab_task_block_event set block_end_time=#{endTime},block_status='CLOSED',resolver_id=#{resolverId},
+            resolution='PERIOD_CLOSED_UNRESOLVED',update_by=#{updateBy},update_time=sysdate()
+        where id=#{id} and block_status='OPEN' and del_flag='0'
+    </update>
+    <update id="clearTaskBlockForPeriod">
+        update lab_task set current_block_flag='0',current_block_start=null,update_by=#{updateBy},update_time=sysdate(),version=version+1
+        where id=#{taskId} and current_block_flag='1' and period_lock_flag='0' and del_flag='0'
+    </update>
     <select id="selectWorkflowEvents" parameterType="long" resultMap="WorkflowEventResult">
         select id,task_id,from_status,to_status,result_status,actor_id,event_type,reason,task_version,event_time,idempotency_key,del_flag
         from lab_task_workflow_event where task_id=#{taskId} and del_flag='0' order by event_time,id

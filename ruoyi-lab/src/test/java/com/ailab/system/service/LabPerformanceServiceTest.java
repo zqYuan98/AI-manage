@@ -399,13 +399,20 @@ class LabPerformanceServiceTest {
         assertEquals("APPROVED", overdue.getValue().getReviewStatus());
         verify(mapper).markCurrentScoresHistorical("2026-08", 7L, "100");
         verify(closeSnapshots).close(eq("2026-08"), eq(0), eq(30L), eq(3), eq(900L),
-                eq(Collections.singletonList(unsubmitted)), anyList(), anyList());
+                eq(Collections.singletonList(unsubmitted)), anyList(), anyList(), anyList());
         verify(mapper, never()).selectCollaborationForPeriod("2026-08");
-        InOrder lockOrder = inOrder(mapper);
+        InOrder lockOrder = inOrder(mapper, closeSnapshots);
         lockOrder.verify(mapper).selectPeriodForUpdate("2026-08");
+        lockOrder.verify(mapper).selectPeriodTasksForUpdate("2026-08");
+        lockOrder.verify(mapper).selectEvidenceForTaskIds(Collections.singletonList(1L));
+        lockOrder.verify(mapper).selectQualityGatesForTaskIds(Collections.singletonList(1L));
+        lockOrder.verify(closeSnapshots).lockOpenBlocks(Collections.singletonList(unsubmitted), 900L);
         lockOrder.verify(mapper).selectQuarterCollaborationFactsForUpdate("2026-07", "2026-08");
         lockOrder.verify(mapper).selectCollaborationsForPeriodForUpdate("2026-08");
         lockOrder.verify(mapper).selectCriticalAssetFactsForUpdate("2026-07", "2026-08");
+        lockOrder.verify(mapper).insertPerfScore(any(LabPerfScore.class));
+        lockOrder.verify(closeSnapshots).close(eq("2026-08"), eq(0), eq(30L), eq(3), eq(900L),
+                eq(Collections.singletonList(unsubmitted)), anyList(), anyList(), anyList());
     }
 
     @Test

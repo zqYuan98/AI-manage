@@ -36,6 +36,9 @@ class LabDashboardSqlContractTest {
         String compact = compact(xml);
         assertFalse(xml.contains("${"), "dashboard mapper must never interpolate client SQL fragments");
         assertTrue(compact.contains("e.block_status='open'ande.del_flag='0'") && compact.contains("t.current_block_flag='1'"));
+        assertTrue(compact.contains("t.period_lock_flag='0'")
+                        && compact.contains("pc.close_status='closed'"),
+                "closed source episodes must stop producing block reminders");
         assertTrue(compact.contains("t.workflow_statusin('draft','active')") && compact.contains("pc.close_status='closed'"));
         assertTrue(compact.contains("groupbyg.id,g.title,g.year") && compact.contains("groupbym.id,u.nick_name,m.biz_line"));
         assertTrue(compact.contains("p.current_flag='1'") && compact.contains("coalesce(ri.sensitive_flag,'0')='0'"));

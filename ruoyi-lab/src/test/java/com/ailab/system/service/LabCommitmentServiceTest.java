@@ -28,6 +28,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
+import java.util.Collections;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -161,6 +162,26 @@ class LabCommitmentServiceTest {
         assertEquals(LabConstants.EXECUTION_ACTIVE, carried.getExecutionStatus());
         assertEquals(LabConstants.EXECUTION_SELF_UNDONE, old.getExecutionStatus());
         verify(tasks).insertTask(carried);
+    }
+
+    @Test
+    void carryReopensTheLatestSourceBlockAsALinkedNewEpisode() {
+        LabTask old = active(20L, 7L); old.setExecutionStatus(LabConstants.EXECUTION_SELF_UNDONE);
+        old.setResultStatus(LabConstants.RESULT_UNDONE); when(tasks.selectTaskForUpdate(20L)).thenReturn(old);
+        LabTaskBlockEvent sourceBlock=new LabTaskBlockEvent();sourceBlock.setId(77L);sourceBlock.setTaskId(20L);
+        sourceBlock.setBlockType("DEPENDENCY");sourceBlock.setBlockReason("upstream not ready");sourceBlock.setBlockStatus("CLOSED");
+        when(tasks.selectBlockEvents(20L)).thenReturn(Collections.singletonList(sourceBlock));
+        when(tasks.selectNextBlockEpisodeNo(900L)).thenReturn(1);
+        when(tasks.insertBlockEvent(any(LabTaskBlockEvent.class))).thenReturn(1);
+        WeeklyCommitmentCommand command = command(); command.setPeriod("2026-W33");
+
+        LabTask carried=service.carry(20L,0,command,100L);
+
+        ArgumentCaptor<LabTaskBlockEvent> block=ArgumentCaptor.forClass(LabTaskBlockEvent.class);
+        verify(tasks).insertBlockEvent(block.capture());
+        assertEquals(77L,block.getValue().getCarriedFromEventId());
+        assertEquals("OPEN",block.getValue().getBlockStatus());
+        assertEquals(LabConstants.YES,carried.getBlockFlag());
     }
 
     @Test
