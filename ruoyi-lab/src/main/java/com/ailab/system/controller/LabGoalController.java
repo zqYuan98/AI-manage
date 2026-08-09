@@ -9,6 +9,8 @@ import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.SecurityUtils;
 import java.util.List;
+import java.util.Date;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -49,6 +51,16 @@ public class LabGoalController extends BaseController {
         Long actorId = SecurityUtils.getUserId();
         if ("YEAR".equals(level)) return success(goalService.calculateAnnualProgress(id, actorId));
         if ("QUARTER".equals(level)) return success(goalService.calculateMilestoneProgress(id, actorId));
+        throw new com.ruoyi.common.exception.ServiceException("Goal progress level must be YEAR or QUARTER");
+    }
+
+    @PreAuthorize("@ss.hasPermi('lab:goal:list')")
+    @GetMapping("/{id}/progress-comparison")
+    public AjaxResult progressComparison(@PathVariable Long id, @RequestParam String level,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Date asOf) {
+        Long actorId = SecurityUtils.getUserId();
+        if ("YEAR".equals(level)) return success(goalService.compareAnnualProgress(id, asOf, actorId));
+        if ("QUARTER".equals(level)) return success(goalService.compareMilestoneProgress(id, asOf, actorId));
         throw new com.ruoyi.common.exception.ServiceException("Goal progress level must be YEAR or QUARTER");
     }
 

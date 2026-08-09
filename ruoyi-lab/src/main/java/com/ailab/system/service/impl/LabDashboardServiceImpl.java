@@ -7,6 +7,8 @@ import com.ailab.system.dto.DashboardMetric;
 import com.ailab.system.dto.DashboardOverview;
 import com.ailab.system.dto.GoalHealth;
 import com.ailab.system.dto.GoalHealthFact;
+import com.ailab.system.dto.CommitmentProgress;
+import com.ailab.system.dto.ProgressComparison;
 import com.ailab.system.dto.GoalTrendPoint;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.MemberLoad;
@@ -130,6 +132,12 @@ public class LabDashboardServiceImpl implements LabDashboardService {
         value.setPeriod(String.valueOf(fact.getYear())); value.setDefinition(HEALTH_DEFINITION); value.setLastUpdated(Date.from(clock.instant()));
         value.getDrillDownFilters().put("goalId", fact.getGoalId()); value.getDrillDownFilters().put("year", fact.getYear());
         return value;
+    }
+
+    @Override
+    public ProgressComparison compareProgress(GoalHealthFact legacyFact, CommitmentProgress namedProgress) {
+        if (legacyFact == null || namedProgress == null) throw new ServiceException("进展对比缺少必要事实");
+        return ProgressComparison.legacyActive(legacyFact.getActualProgress(), namedProgress);
     }
 
     private List<DashboardMetric> kpis(String period, List<GoalHealth> health, DashboardKpiFact fact, Date now,

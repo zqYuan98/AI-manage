@@ -5,6 +5,7 @@ import com.ailab.system.domain.LabFormalAcceptanceFact;
 import com.ailab.system.domain.LabFormalAcceptanceRevision;
 import com.ailab.system.domain.LabTask;
 import com.ailab.system.mapper.LabFormalAcceptanceMapper;
+import com.ailab.system.service.LabCommitmentCalculationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ruoyi.common.exception.ServiceException;
@@ -17,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** 固化月度任务的正式验收修订。 */
 @Service
 public class LabFormalAcceptanceService {
-    private static final String CALCULATION_VERSION = "FORMAL_ACCEPTANCE_V1";
+    private static final String CALCULATION_VERSION = LabCommitmentCalculationService.CALCULATION_VERSION;
     private static final ObjectMapper JSON = new ObjectMapper();
     private final LabFormalAcceptanceMapper mapper;
     private final Clock clock;

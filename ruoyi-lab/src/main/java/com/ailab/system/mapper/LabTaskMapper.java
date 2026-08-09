@@ -15,6 +15,7 @@ public interface LabTaskMapper {
     LabTask selectTaskForUpdate(Long id);
     LabTask selectCarriedTask(@Param("carriedFromId") Long carriedFromId, @Param("period") String period);
     List<LabTask> selectTasksByParentId(Long parentId);
+    List<LabTask> selectCommitmentsForCalculation(@Param("parentId") Long parentId, @Param("asOf") Date asOf);
     List<LabTask> selectTasksByParentIdForUpdate(Long parentId);
     List<LabTask> selectKeyMonthTasksByMilestoneId(Long milestoneId);
     List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long milestoneId);

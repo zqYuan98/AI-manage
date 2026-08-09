@@ -45,4 +45,12 @@
         select id,formal_revision_id,task_id,fact_json,evidence_version,reviewer_id,review_time,del_flag
         from lab_formal_acceptance_fact where formal_revision_id=#{formalRevisionId} and del_flag='0' order by id
     </select>
+    <select id="selectLatestFactForTask" parameterType="long" resultMap="FactResult">
+        select f.id,f.formal_revision_id,f.task_id,f.fact_json,f.evidence_version,f.reviewer_id,
+               f.review_time,f.del_flag
+        from lab_formal_acceptance_fact f
+        join lab_formal_acceptance_revision r on r.id=f.formal_revision_id and r.del_flag='0'
+        where f.task_id=#{taskId} and f.del_flag='0'
+        order by r.accepted_time desc,r.id desc,f.id desc limit 1
+    </select>
 </mapper>

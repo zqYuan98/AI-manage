@@ -36,6 +36,11 @@ public class LabTask extends BaseEntity {
     private List<String> workflowStatuses = new ArrayList<String>();
     private String resultStatus;
     private String executionStatus;
+    /** Query-only first ACTIVE event at or before a trusted calculation cutoff. */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date executionActivatedAt;
+    /** Query-only blocking state at the same trusted calculation cutoff. */
+    private Boolean blockedAtAsOf;
     private Long carriedFromId;
     private Integer executionVersion;
     private String resultDesc;
@@ -110,6 +115,10 @@ public class LabTask extends BaseEntity {
     public void setResultStatus(String resultStatus) { this.resultStatus = resultStatus; }
     public String getExecutionStatus() { return executionStatus; }
     public void setExecutionStatus(String executionStatus) { this.executionStatus = executionStatus; }
+    public Date getExecutionActivatedAt() { return copyDate(executionActivatedAt); }
+    public void setExecutionActivatedAt(Date executionActivatedAt) { this.executionActivatedAt = copyDate(executionActivatedAt); }
+    public Boolean getBlockedAtAsOf() { return blockedAtAsOf; }
+    public void setBlockedAtAsOf(Boolean blockedAtAsOf) { this.blockedAtAsOf = blockedAtAsOf; }
     public Long getCarriedFromId() { return carriedFromId; }
     public void setCarriedFromId(Long carriedFromId) { this.carriedFromId = carriedFromId; }
     public Integer getExecutionVersion() { return executionVersion; }

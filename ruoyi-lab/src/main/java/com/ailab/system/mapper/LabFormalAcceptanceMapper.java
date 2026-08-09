@@ -14,4 +14,5 @@ public interface LabFormalAcceptanceMapper {
     int insertFact(LabFormalAcceptanceFact fact);
     LabFormalAcceptanceRevision selectRevision(Long id);
     List<LabFormalAcceptanceFact> selectFactsByRevision(Long formalRevisionId);
+    LabFormalAcceptanceFact selectLatestFactForTask(Long taskId);
 }

@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** Pure deterministic formula; persistence and clocks are deliberately outside this type. */
 @Component
@@ -32,6 +33,10 @@ public class LabPerformanceCalculator {
     private static final BigDecimal DELIVERY_FACTOR=new BigDecimal("0.6");
     private static final BigDecimal QUALITY_TOTAL=new BigDecimal("25");
     private static final BigDecimal HUNDRED=new BigDecimal("100");
+    private final LabCommitmentCalculationService commitmentCalculations;
+
+    public LabPerformanceCalculator(){this(new LabCommitmentCalculationService());}
+    @Autowired public LabPerformanceCalculator(LabCommitmentCalculationService commitmentCalculations){this.commitmentCalculations=commitmentCalculations;}
 
     public PerformanceCalculationResult calculate(PerformanceCalculationInput input) {
         requireInput(input);
@@ -146,7 +151,7 @@ public class LabPerformanceCalculator {
         Collections.sort(result,Comparator.comparing(LabTask::getId,Comparator.nullsLast(Comparator.naturalOrder()))); return result;
     }
     private String effectiveResult(LabTask task,boolean closeMode){return LabConstants.WORKFLOW_CONFIRMED.equals(task.getWorkflowStatus())?task.getResultStatus():(closeMode?LabConstants.RESULT_UNDONE:null);}
-    private BigDecimal coefficient(String result){if(LabConstants.RESULT_EXCEEDED.equals(result))return new BigDecimal("1.2"); if(LabConstants.RESULT_ONTIME.equals(result))return BigDecimal.ONE; if(LabConstants.RESULT_DELAYED.equals(result))return new BigDecimal("0.7"); return BigDecimal.ZERO;}
+    private BigDecimal coefficient(String result){return commitmentCalculations.performanceCoefficient(result);}
     private Set<Long> approvedEvidenceIds(List<LabTaskEvidence> evidence){Set<Long> ids=new LinkedHashSet<Long>(); for(LabTaskEvidence item:evidence)if(LabConstants.EVIDENCE_AUDIT_APPROVED.equals(item.getAuditStatus())&&hasText(item.getEvidenceUrl())&&item.getId()!=null)ids.add(item.getId()); return ids;}
     private List<Map<String,Object>> evidenceDetail(List<LabTaskEvidence> evidence){List<Map<String,Object>> result=new ArrayList<Map<String,Object>>();for(LabTaskEvidence item:evidence){boolean approved=LabConstants.EVIDENCE_AUDIT_APPROVED.equals(item.getAuditStatus());boolean included=approved&&hasText(item.getEvidenceUrl());Map<String,Object> detail=new LinkedHashMap<String,Object>();detail.put("id",item.getId());detail.put("evidenceId",item.getId());detail.put("type",item.getEvidenceType());detail.put("title",item.getEvidenceTitle());detail.put("url",item.getEvidenceUrl());detail.put("submitterId",item.getSubmitterId());detail.put("submitTime",iso(item.getSubmitTime()));detail.put("auditStatus",item.getAuditStatus());detail.put("auditorId",item.getAuditorId());detail.put("auditTime",iso(item.getAuditTime()));detail.put("auditComment",item.getAuditComment());detail.put("included",included);detail.put("exclusionReason",included?null:(!approved?"AUDIT_NOT_APPROVED":"MISSING_EVIDENCE_URL"));result.add(detail);}return result;}
     private String gateExclusion(LabTaskQualityGate gate,boolean approvedEvidence){if(!"PASSED".equals(gate.getGateStatus()))return "GATE_NOT_PASSED";if(gate.getEvidenceId()==null)return "NO_BOUND_EVIDENCE";if(!approvedEvidence)return "BOUND_EVIDENCE_NOT_APPROVED";return null;}

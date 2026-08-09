@@ -1,7 +1,9 @@
 package com.ailab.system.service;
 
 import com.ailab.system.domain.LabGoal;
+import com.ailab.system.dto.ProgressComparison;
 import java.math.BigDecimal;
+import java.util.Date;
 import java.util.List;
 
 public interface LabGoalService {
@@ -14,4 +16,6 @@ public interface LabGoalService {
     void activateGoal(Long id, Integer version, Long actorId);
     BigDecimal calculateMilestoneProgress(Long milestoneId, Long actorId);
     BigDecimal calculateAnnualProgress(Long annualGoalId, Long actorId);
+    ProgressComparison compareMilestoneProgress(Long milestoneId, Date asOf, Long actorId);
+    ProgressComparison compareAnnualProgress(Long annualGoalId, Date asOf, Long actorId);
 }

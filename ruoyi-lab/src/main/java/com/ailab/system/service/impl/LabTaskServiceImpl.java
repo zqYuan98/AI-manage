@@ -9,12 +9,14 @@ import com.ailab.system.domain.LabTaskQualityGate;
 import com.ailab.system.dto.FieldValidationError;
 import com.ailab.system.dto.TaskSubmitCommand;
 import com.ailab.system.dto.MonthlyCarryCommand;
+import com.ailab.system.dto.ProgressComparison;
 import com.ailab.system.exception.LabValidationException;
 import com.ailab.system.mapper.LabGoalMapper;
 import com.ailab.system.mapper.LabTaskEvidenceMapper;
 import com.ailab.system.mapper.LabTaskMapper;
 import com.ailab.system.service.LabTaskService;
 import com.ailab.system.service.LabAccessService;
+import com.ailab.system.service.LabCommitmentCalculationService;
 import com.ailab.system.service.TaskWorkflowService;
 import com.ailab.system.util.LabPeriodUtils;
 import com.ruoyi.common.exception.ServiceException;
@@ -52,32 +54,50 @@ public class LabTaskServiceImpl implements LabTaskService {
     private final LabAccessService accessService;
     private final LabTaskWorkflowEventService workflowEventService;
     private final LabFormalAcceptanceService formalAcceptanceService;
+    private final LabCommitmentCalculationService commitmentCalculations;
+    private final LabCommitmentProjectionService commitmentProjection;
     private final Clock clock;
 
-    @Autowired
     public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
             LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService,
             LabTaskWorkflowEventService workflowEventService, LabFormalAcceptanceService formalAcceptanceService) {
         this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService,
-                workflowEventService, formalAcceptanceService, Clock.systemDefaultZone());
+                workflowEventService, formalAcceptanceService, null, Clock.systemDefaultZone());
+    }
+
+    @Autowired
+    public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
+            LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService,
+            LabTaskWorkflowEventService workflowEventService, LabFormalAcceptanceService formalAcceptanceService,
+            LabCommitmentProjectionService commitmentProjection) {
+        this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService,
+                workflowEventService, formalAcceptanceService, commitmentProjection, Clock.systemDefaultZone());
     }
 
     /** 兼容聚焦旧任务合同的测试构造入口。 */
     public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
             LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService) {
         this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService, null, null,
-                Clock.systemDefaultZone());
+                null, Clock.systemDefaultZone());
     }
 
     public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
             LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService, Clock clock) {
-        this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService, null, null, clock);
+        this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService, null, null, null, clock);
     }
 
     public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
             LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService,
             LabTaskWorkflowEventService workflowEventService, LabFormalAcceptanceService formalAcceptanceService,
             Clock clock) {
+        this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService, workflowEventService,
+                formalAcceptanceService, null, clock);
+    }
+
+    private LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
+            LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService,
+            LabTaskWorkflowEventService workflowEventService, LabFormalAcceptanceService formalAcceptanceService,
+            LabCommitmentProjectionService commitmentProjection, Clock clock) {
         this.taskMapper = taskMapper;
         this.evidenceMapper = evidenceMapper;
         this.goalMapper = goalMapper;
@@ -85,6 +105,8 @@ public class LabTaskServiceImpl implements LabTaskService {
         this.accessService = accessService;
         this.workflowEventService = workflowEventService;
         this.formalAcceptanceService = formalAcceptanceService;
+        this.commitmentCalculations = new LabCommitmentCalculationService();
+        this.commitmentProjection = commitmentProjection;
         this.clock = clock;
     }
 
@@ -425,7 +447,24 @@ public class LabTaskServiceImpl implements LabTaskService {
             throw new ServiceException("Monthly progress requires a month task");
         }
         accessService.requireTaskRead(month, actorId);
-        List<LabTask> weeks = taskMapper.selectTasksByParentId(monthTaskId);
+        return legacyMonthProgress(taskMapper.selectTasksByParentId(monthTaskId));
+    }
+
+    @Override
+    public ProgressComparison compareMonthProgress(Long monthTaskId, Date asOf, Long actorId) {
+        LabTask month = taskMapper.selectTaskById(monthTaskId);
+        if (month == null || !LabConstants.TASK_LEVEL_MONTH.equals(month.getTaskLevel())) {
+            throw new ServiceException("Monthly progress requires a month task");
+        }
+        accessService.requireTaskRead(month, actorId);
+        BigDecimal legacy = legacyMonthProgress(taskMapper.selectTasksByParentId(monthTaskId));
+        return ProgressComparison.legacyActive(legacy, commitmentProjection == null
+                ? commitmentCalculations.calculateMonth(month,
+                    taskMapper.selectCommitmentsForCalculation(monthTaskId, asOf), asOf, null, null, false)
+                : commitmentProjection.projectMonth(month, asOf));
+    }
+
+    private BigDecimal legacyMonthProgress(List<LabTask> weeks) {
         if (weeks.isEmpty()) return BigDecimal.ZERO.setScale(2);
         int confirmed = 0, completed = 0;
         for (LabTask week : weeks) {

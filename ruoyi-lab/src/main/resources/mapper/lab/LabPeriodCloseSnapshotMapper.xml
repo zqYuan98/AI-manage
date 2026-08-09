@@ -98,4 +98,18 @@
         select id,close_snapshot_id,fact_type,business_id,fact_json,del_flag
         from lab_period_close_fact where close_snapshot_id=#{closeSnapshotId} and del_flag='0' order by fact_type,business_id
     </select>
+    <select id="selectLatestSnapshotForPeriod" parameterType="string" resultMap="SnapshotResult">
+        select id,period,revision_no,period_version,formal_revision_id,performance_revision,closed_by,closed_time,
+               calculation_version,del_flag
+        from lab_period_close_snapshot
+        where period=#{period} and del_flag='0'
+        order by revision_no desc,id desc limit 1
+    </select>
+    <select id="selectFactByTypeAndBusinessId" resultMap="FactResult">
+        select id,close_snapshot_id,fact_type,business_id,fact_json,del_flag
+        from lab_period_close_fact
+        where close_snapshot_id=#{closeSnapshotId} and fact_type=#{factType}
+          and business_id=#{businessId} and del_flag='0'
+        order by id desc limit 1
+    </select>
 </mapper>

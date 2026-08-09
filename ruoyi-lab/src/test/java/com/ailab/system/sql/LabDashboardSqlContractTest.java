@@ -189,6 +189,25 @@ class LabDashboardSqlContractTest {
     }
 
     @Test
+    void namedCommitmentProjectionUsesCutoffEventsAndExactImmutableRevisions() throws Exception {
+        String task = compact(read("ruoyi-lab/src/main/resources/mapper/lab/LabTaskMapper.xml"));
+        assertTrue(task.contains("id=\"selectcommitmentsforcalculation\"")
+                && occurrences(task, "event_time&lt;=#{asof}") >= 2
+                && task.contains("execution_status_as_of")
+                && task.contains("block_start_time&lt;=#{asof}"));
+        String formal = compact(read("ruoyi-lab/src/main/resources/mapper/lab/LabFormalAcceptanceMapper.xml"));
+        assertTrue(formal.contains("id=\"selectlatestfactfortask\"")
+                && formal.contains("orderbyr.accepted_timedesc,r.iddesc,f.iddesclimit1"));
+        String close = compact(read("ruoyi-lab/src/main/resources/mapper/lab/LabPeriodCloseSnapshotMapper.xml"));
+        assertTrue(close.contains("id=\"selectlatestsnapshotforperiod\"")
+                && close.contains("id=\"selectfactbytypeandbusinessid\"")
+                && close.contains("close_snapshot_id=#{closesnapshotid}")
+                && close.contains("fact_type=#{facttype}")
+                && close.contains("business_id=#{businessid}"));
+        assertFalse(task.contains("${") || formal.contains("${") || close.contains("${"));
+    }
+
+    @Test
     void pendingTaskScanTargetsOnlyActuallyMissingRequiredFieldsForTheCurrentWorkflowPath() throws Exception {
         String compact = compact(read("ruoyi-lab/src/main/resources/mapper/lab/LabDashboardMapper.xml"));
         assertFalse(compact.contains("and(t.workflow_status='draft'or"),

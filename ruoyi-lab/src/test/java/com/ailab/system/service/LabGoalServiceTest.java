@@ -11,6 +11,7 @@ import com.ailab.system.controller.LabGoalController;
 import com.ailab.system.domain.LabGoal;
 import com.ailab.system.domain.LabTask;
 import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.dto.ProgressComparison;
 import com.ailab.system.mapper.LabAccessMapper;
 import com.ailab.system.mapper.LabGoalMapper;
 import com.ailab.system.mapper.LabTaskMapper;
@@ -131,6 +132,23 @@ class LabGoalServiceTest {
     }
 
     @Test
+    void goalComparisonEndpointIsReadOnlyAndRequiresAnExplicitAsOf() throws Exception {
+        java.lang.reflect.Method method = LabGoalController.class
+                .getMethod("progressComparison", Long.class, String.class, java.util.Date.class);
+        assertEquals("@ss.hasPermi('lab:goal:list')", method.getAnnotation(PreAuthorize.class).value());
+        assertEquals("/{id}/progress-comparison",
+                method.getAnnotation(org.springframework.web.bind.annotation.GetMapping.class).value()[0]);
+        boolean hasDateTime = false;
+        for (java.lang.annotation.Annotation annotation : method.getParameterAnnotations()[2]) {
+            if (annotation instanceof org.springframework.format.annotation.DateTimeFormat) {
+                hasDateTime = ((org.springframework.format.annotation.DateTimeFormat) annotation).iso()
+                        == org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME;
+            }
+        }
+        assertTrue(hasDateTime);
+    }
+
+    @Test
     void milestoneAndAnnualProgressUseGoalWeightAndConfirmedResultsOnly() {
         LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 10L, "100");
         LabGoal q1 = goal(2L, 1L, "QUARTER", 2026, "2026Q1", 10L, "40");
@@ -159,6 +177,33 @@ class LabGoalServiceTest {
 
         assertEquals(new BigDecimal("100.00"), service.calculateMilestoneProgress(2L, 99L));
         assertEquals(new BigDecimal("100.00"), service.calculateAnnualProgress(1L, 99L));
+    }
+
+    @Test
+    void goalComparisonNamesOperationalAndFormalProgressWithoutChangingLegacyDefault() {
+        LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 10L, "100");
+        LabGoal quarter = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100");
+        goals.put(annual); goals.put(quarter);
+        LabTask month = month(11L, 2L, "2026-08", "100", "100", LabConstants.WORKFLOW_ACTIVE, LabConstants.RESULT_DOING);
+        month.setPlanDate(java.util.Date.from(java.time.Instant.parse("2026-08-31T00:00:00Z"))); tasks.put(month);
+        LabTask done = month(12L, 2L, "2026-W32", "0", "0", LabConstants.WORKFLOW_CONFIRMED, LabConstants.RESULT_ONTIME);
+        done.setTaskLevel("week"); done.setTaskType("daily"); done.setParentId(11L);
+        done.setExecutionStatus(LabConstants.EXECUTION_SELF_DONE); done.setExecutionActivatedAt(java.util.Date.from(java.time.Instant.parse("2026-08-01T00:00:00Z")));
+        done.setPlanDate(java.util.Date.from(java.time.Instant.parse("2026-08-05T00:00:00Z"))); tasks.put(done);
+        LabTask active = month(13L, 2L, "2026-W33", "0", "0", LabConstants.WORKFLOW_PENDING_REVIEW, LabConstants.RESULT_DOING);
+        active.setTaskLevel("week"); active.setTaskType("daily"); active.setParentId(11L);
+        active.setExecutionStatus(LabConstants.EXECUTION_ACTIVE); active.setExecutionActivatedAt(java.util.Date.from(java.time.Instant.parse("2026-08-01T00:00:00Z")));
+        active.setPlanDate(java.util.Date.from(java.time.Instant.parse("2026-08-10T00:00:00Z"))); tasks.put(active);
+        java.util.Date asOf = java.util.Date.from(java.time.Instant.parse("2026-08-15T23:59:59Z"));
+
+        ProgressComparison milestone = service.compareMilestoneProgress(2L, asOf, 99L);
+        ProgressComparison year = service.compareAnnualProgress(1L, asOf, 99L);
+
+        assertEquals("LEGACY", milestone.getActiveProjection());
+        assertEquals(new BigDecimal("100.00"), milestone.getLegacyProgress());
+        assertEquals(new BigDecimal("50.00"), milestone.getNamedProgress().getOperationalProgress());
+        assertEquals(new BigDecimal("0.00"), milestone.getNamedProgress().getFormalProgress());
+        assertEquals(new BigDecimal("50.00"), year.getNamedProgress().getOperationalProgress());
     }
 
     @Test
@@ -503,6 +548,7 @@ class LabGoalServiceTest {
         @Override public LabTask selectTaskForUpdate(Long id) { return selectTaskById(id); }
         @Override public LabTask selectCarriedTask(Long carriedFromId, String period) { return null; }
         @Override public List<LabTask> selectTasksByParentId(Long parentId) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if (parentId.equals(task.getParentId()) && !"2".equals(task.getDelFlag())) result.add(task); return result; }
+        @Override public List<LabTask> selectCommitmentsForCalculation(Long parentId, java.util.Date asOf) { return selectTasksByParentId(parentId); }
         @Override public List<LabTask> selectTasksByParentIdForUpdate(Long parentId) { return selectTasksByParentId(parentId); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneId(Long milestoneId) {
             List<LabTask> result = new ArrayList<LabTask>();

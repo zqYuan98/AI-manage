@@ -17,6 +17,8 @@ import com.ailab.system.dto.GoalHealth;
 import com.ailab.system.dto.GoalHealthFact;
 import com.ailab.system.dto.GoalTrendPoint;
 import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.dto.CommitmentProgress;
+import com.ailab.system.dto.ProgressComparison;
 import com.ailab.system.mapper.LabDashboardMapper;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ailab.system.service.impl.LabDashboardServiceImpl;
@@ -58,6 +60,20 @@ class LabDashboardServiceTest {
         assertEquals("YELLOW", service.calculateHealth(fact("60", "45", 0, false, false)).getStatus());
         assertEquals("RED", service.calculateHealth(fact("60.01", "45", 0, false, false)).getStatus());
         assertEquals("RED", service.calculateHealth(fact("45", "45", 0, false, true)).getStatus());
+    }
+
+    @Test
+    void dashboardComparisonNamesLegacyAndOperationalProgressWithoutSilentCutover() {
+        GoalHealthFact legacy = fact("50", "45", 0, false, false);
+        CommitmentProgress named = new CommitmentProgress(); named.setExecutionAsOf(Date.from(CLOCK.instant()));
+        named.setOperationalProgress(new BigDecimal("62.50")); named.setFormalProgress(new BigDecimal("40.00"));
+        named.setCalculationVersion("COMMITMENT_PROGRESS_V1");
+
+        ProgressComparison comparison = service.compareProgress(legacy, named);
+
+        assertEquals("LEGACY", comparison.getActiveProjection());
+        assertEquals(new BigDecimal("45"), comparison.getLegacyProgress());
+        assertEquals(new BigDecimal("62.50"), comparison.getNamedProgress().getOperationalProgress());
     }
 
     @Test

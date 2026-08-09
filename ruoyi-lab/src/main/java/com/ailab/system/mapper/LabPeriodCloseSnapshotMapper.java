@@ -24,4 +24,7 @@ public interface LabPeriodCloseSnapshotMapper {
     int insertFact(LabPeriodCloseFact fact);
     LabPeriodCloseSnapshot selectSnapshot(Long id);
     List<LabPeriodCloseFact> selectFactsBySnapshot(Long closeSnapshotId);
+    LabPeriodCloseSnapshot selectLatestSnapshotForPeriod(String period);
+    LabPeriodCloseFact selectFactByTypeAndBusinessId(@Param("closeSnapshotId") Long closeSnapshotId,
+            @Param("factType") String factType, @Param("businessId") Long businessId);
 }

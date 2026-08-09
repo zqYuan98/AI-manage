@@ -8,6 +8,7 @@ import com.ailab.system.domain.LabTaskBlockEvent;
 import com.ailab.system.domain.LabCollaborationRecord;
 import com.ailab.system.domain.LabMember;
 import com.ailab.system.mapper.LabPeriodCloseSnapshotMapper;
+import com.ailab.system.service.LabCommitmentCalculationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ruoyi.common.exception.ServiceException;
@@ -27,7 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** 创建不可变月结修订与类型化事实。 */
 @Service
 public class LabPeriodCloseSnapshotService {
-    private static final String CALCULATION_VERSION = "PERIOD_CLOSE_V1";
+    private static final String CALCULATION_VERSION = LabCommitmentCalculationService.CALCULATION_VERSION;
     private static final ObjectMapper JSON = new ObjectMapper();
     private final LabPeriodCloseSnapshotMapper mapper;
     private final LabTaskStateRepairService repairQueue;

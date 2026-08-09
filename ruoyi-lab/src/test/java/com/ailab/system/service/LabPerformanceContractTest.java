@@ -39,6 +39,13 @@ class LabPerformanceContractTest {
     }
 
     @Test
+    void performanceUsesTheNamedPerformanceCoefficientAndNeverWeeklyExecutionStatus() throws Exception {
+        String source = text(root().resolve("ruoyi-lab/src/main/java/com/ailab/system/service/LabPerformanceCalculator.java"));
+        assertTrue(source.contains("performanceCoefficient"));
+        assertFalse(source.contains("getExecutionStatus"), "weekly execution facts must never enter performance scoring");
+    }
+
+    @Test
     void calibrationCommandIgnoresLegacyJsonResultStatus() throws Exception {
         CalibrationCommand command = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
                 "{\"score\":88,\"comment\":\"review\",\"resultStatus\":\"RED_LINE\"}", CalibrationCommand.class);

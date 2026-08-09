@@ -17,6 +17,7 @@ import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.domain.LabTaskQualityGate;
 import com.ailab.system.dto.TaskSubmitCommand;
 import com.ailab.system.dto.LabAccessContext;
+import com.ailab.system.dto.ProgressComparison;
 import com.ailab.system.exception.LabValidationException;
 import com.ailab.system.mapper.LabAccessMapper;
 import com.ailab.system.mapper.LabGoalMapper;
@@ -183,6 +184,23 @@ class LabTaskServiceTest {
     }
 
     @Test
+    void taskComparisonEndpointIsReadOnlyAndRequiresAnExplicitAsOf() throws Exception {
+        java.lang.reflect.Method method = LabTaskController.class
+                .getMethod("progressComparison", Long.class, Date.class);
+        assertEquals("@ss.hasPermi('lab:task:list')", method.getAnnotation(PreAuthorize.class).value());
+        assertEquals("/{id}/progress-comparison",
+                method.getAnnotation(org.springframework.web.bind.annotation.GetMapping.class).value()[0]);
+        org.springframework.format.annotation.DateTimeFormat format = null;
+        for (java.lang.annotation.Annotation annotation : method.getParameterAnnotations()[1]) {
+            if (annotation instanceof org.springframework.format.annotation.DateTimeFormat) {
+                format = (org.springframework.format.annotation.DateTimeFormat) annotation;
+            }
+        }
+        assertNotNull(format);
+        assertEquals(org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME, format.iso());
+    }
+
+    @Test
     void monthlyProgressUsesOnlyConfirmedWeeklyChildren() {
         LabTask month = task(1L, 0L, "month", "2026-08", 8L, "100", "100"); tasks.put(month);
         LabTask confirmed = task(2L, 1L, "week", "2026-W32", 8L, "0", "0");
@@ -194,6 +212,27 @@ class LabTaskServiceTest {
         tasks.put(confirmed); tasks.put(undone); tasks.put(pending);
 
         assertEquals(new BigDecimal("50.00"), service.calculateMonthProgress(1L, 9L));
+    }
+
+    @Test
+    void monthComparisonKeepsLegacyDefaultWhileExposingNamedExecutionProjection() {
+        LabTask month = task(1L, 0L, "month", "2026-08", 8L, "100", "100"); tasks.put(month);
+        LabTask done = task(2L, 1L, "week", "2026-W32", 8L, "0", "0");
+        done.setWorkflowStatus(LabConstants.WORKFLOW_CONFIRMED); done.setResultStatus(LabConstants.RESULT_ONTIME);
+        done.setExecutionStatus(LabConstants.EXECUTION_SELF_DONE); done.setExecutionActivatedAt(Date.from(Instant.parse("2026-08-01T00:00:00Z")));
+        done.setPlanDate(Date.from(Instant.parse("2026-08-05T00:00:00Z"))); tasks.put(done);
+        LabTask active = task(3L, 1L, "week", "2026-W33", 8L, "0", "0");
+        active.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW); active.setResultStatus(LabConstants.RESULT_DOING);
+        active.setExecutionStatus(LabConstants.EXECUTION_ACTIVE); active.setExecutionActivatedAt(Date.from(Instant.parse("2026-08-01T00:00:00Z")));
+        active.setPlanDate(Date.from(Instant.parse("2026-08-10T00:00:00Z"))); tasks.put(active);
+
+        ProgressComparison comparison = service.compareMonthProgress(1L,
+                Date.from(Instant.parse("2026-08-15T23:59:59Z")), 9L);
+
+        assertEquals("LEGACY", comparison.getActiveProjection());
+        assertEquals(new BigDecimal("100.00"), comparison.getLegacyProgress());
+        assertEquals(new BigDecimal("50.00"), comparison.getNamedProgress().getExecutionRate());
+        assertFalse(comparison.isMatching());
     }
 
     @Test
@@ -939,6 +978,7 @@ class LabTaskServiceTest {
         @Override public LabTask selectTaskForUpdate(Long id) { lockedTaskIds.add(id); LabTask current = lockedOverrides.get(id); return current == null ? selectTaskById(id) : current; }
         @Override public LabTask selectCarriedTask(Long carriedFromId, String period) { for (LabTask row : data.values()) if (carriedFromId.equals(row.getCarriedFromId()) && period.equals(row.getPeriod()) && !"2".equals(row.getDelFlag())) return row; return null; }
         @Override public List<LabTask> selectTasksByParentId(Long parentId) { List<LabTask> r = new ArrayList<LabTask>(); for (LabTask t : data.values()) if (parentId.equals(t.getParentId()) && !"2".equals(t.getDelFlag())) r.add(t); return r; }
+        @Override public List<LabTask> selectCommitmentsForCalculation(Long parentId, Date asOf) { return selectTasksByParentId(parentId); }
         @Override public List<LabTask> selectTasksByParentIdForUpdate(Long parentId) { lockedChildrenParentIds.add(parentId); return selectTasksByParentId(parentId); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneId(Long id) { return new ArrayList<LabTask>(); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneIdForUpdate(Long id) { return selectKeyMonthTasksByMilestoneId(id); }

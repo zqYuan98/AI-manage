@@ -3,10 +3,13 @@ package com.ailab.system.service.impl;
 import com.ailab.system.constant.LabConstants;
 import com.ailab.system.domain.LabGoal;
 import com.ailab.system.domain.LabTask;
+import com.ailab.system.dto.CommitmentProgress;
+import com.ailab.system.dto.ProgressComparison;
 import com.ailab.system.mapper.LabGoalMapper;
 import com.ailab.system.mapper.LabTaskMapper;
 import com.ailab.system.service.LabGoalService;
 import com.ailab.system.service.LabAccessService;
+import com.ailab.system.service.LabCommitmentCalculationService;
 import com.ruoyi.common.exception.ServiceException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -15,7 +18,9 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Date;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -24,11 +29,21 @@ public class LabGoalServiceImpl implements LabGoalService {
     private final LabGoalMapper goalMapper;
     private final LabTaskMapper taskMapper;
     private final LabAccessService accessService;
+    private final LabCommitmentCalculationService commitmentCalculations;
+    private final LabCommitmentProjectionService commitmentProjection;
 
     public LabGoalServiceImpl(LabGoalMapper goalMapper, LabTaskMapper taskMapper, LabAccessService accessService) {
+        this(goalMapper, taskMapper, accessService, null);
+    }
+
+    @Autowired
+    public LabGoalServiceImpl(LabGoalMapper goalMapper, LabTaskMapper taskMapper, LabAccessService accessService,
+            LabCommitmentProjectionService commitmentProjection) {
         this.goalMapper = goalMapper;
         this.taskMapper = taskMapper;
         this.accessService = accessService;
+        this.commitmentCalculations = new LabCommitmentCalculationService();
+        this.commitmentProjection = commitmentProjection;
     }
 
     @Override
@@ -196,6 +211,37 @@ public class LabGoalServiceImpl implements LabGoalService {
                     .divide(ONE_HUNDRED, 6, RoundingMode.HALF_UP));
         }
         return percent(total);
+    }
+
+    @Override
+    public ProgressComparison compareMilestoneProgress(Long milestoneId, Date asOf, Long actorId) {
+        BigDecimal legacy = calculateMilestoneProgress(milestoneId, actorId);
+        return ProgressComparison.legacyActive(legacy, namedMilestoneProgress(milestoneId, asOf));
+    }
+
+    @Override
+    public ProgressComparison compareAnnualProgress(Long annualGoalId, Date asOf, Long actorId) {
+        BigDecimal legacy = calculateAnnualProgress(annualGoalId, actorId);
+        LabGoal annual = loadGoal(annualGoalId);
+        if (!"YEAR".equals(annual.getGoalLevel())) throw new ServiceException("Annual progress requires a YEAR goal");
+        List<LabCommitmentCalculationService.WeightedProgress> quarters = new ArrayList<LabCommitmentCalculationService.WeightedProgress>();
+        for (LabGoal quarter : goalMapper.selectChildrenByParentId(annualGoalId)) {
+            quarters.add(LabCommitmentCalculationService.weighted(namedMilestoneProgress(quarter.getId(), asOf), zero(quarter.getWeight())));
+        }
+        return ProgressComparison.legacyActive(legacy,
+                commitmentCalculations.aggregateWeighted(quarters, asOf, null, null));
+    }
+
+    private CommitmentProgress namedMilestoneProgress(Long milestoneId, Date asOf) {
+        List<LabCommitmentCalculationService.WeightedProgress> months = new ArrayList<LabCommitmentCalculationService.WeightedProgress>();
+        for (LabTask month : taskMapper.selectKeyMonthTasksByMilestoneId(milestoneId)) {
+            CommitmentProgress progress = commitmentProjection == null
+                    ? commitmentCalculations.calculateMonth(month,
+                        taskMapper.selectCommitmentsForCalculation(month.getId(), asOf), asOf, null, null, false)
+                    : commitmentProjection.projectMonth(month, asOf);
+            months.add(LabCommitmentCalculationService.weighted(progress));
+        }
+        return commitmentCalculations.aggregateWeighted(months, asOf, null, null);
     }
 
     private BigDecimal calculateMonthProgress(Long monthId) {

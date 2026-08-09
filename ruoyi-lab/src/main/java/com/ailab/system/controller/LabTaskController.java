@@ -14,6 +14,8 @@ import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.SecurityUtils;
+import java.util.Date;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -99,6 +101,13 @@ public class LabTaskController extends BaseController {
     @PreAuthorize("@ss.hasPermi('lab:task:list')")
     @GetMapping("/{id}/progress")
     public AjaxResult progress(@PathVariable Long id) { return success(taskService.calculateMonthProgress(id, SecurityUtils.getUserId())); }
+
+    @PreAuthorize("@ss.hasPermi('lab:task:list')")
+    @GetMapping("/{id}/progress-comparison")
+    public AjaxResult progressComparison(@PathVariable Long id,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Date asOf) {
+        return success(taskService.compareMonthProgress(id, asOf, SecurityUtils.getUserId()));
+    }
 
     @PreAuthorize("@ss.hasPermi('lab:task:add')")
     @Log(title = "AI lab task", businessType = BusinessType.INSERT)

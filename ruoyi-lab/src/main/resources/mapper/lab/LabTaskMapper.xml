@@ -24,6 +24,12 @@
         <result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
         <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
     </resultMap>
+    <resultMap id="CalculationTaskResult" type="com.ailab.system.domain.LabTask" extends="LabTaskResult">
+        <result property="executionStatus" column="execution_status_as_of"/>
+        <result property="executionActivatedAt" column="execution_activated_at"/>
+        <result property="blockedAtAsOf" column="blocked_at_as_of"/>
+        <result property="blockStartTime" column="block_start_at_as_of"/>
+    </resultMap>
     <resultMap id="GateResult" type="com.ailab.system.domain.LabTaskQualityGate">
         <id property="id" column="id"/><result property="taskId" column="task_id"/><result property="gateNo" column="gate_no"/>
         <result property="gateName" column="gate_name"/><result property="gateStatus" column="gate_status"/><result property="evidenceId" column="evidence_id"/><result property="checkerId" column="checker_id"/>
@@ -106,6 +112,21 @@
     <select id="selectTaskForUpdate" parameterType="long" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.id=#{id} and t.del_flag='0' for update</select>
     <select id="selectCarriedTask" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.carried_from_id=#{carriedFromId} and t.period=#{period} and t.del_flag='0' limit 1</select>
     <select id="selectTasksByParentId" parameterType="long" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.parent_id=#{parentId} and t.del_flag='0' order by t.period,t.plan_date,t.id</select>
+    <select id="selectCommitmentsForCalculation" resultMap="CalculationTaskResult">
+        select <include refid="taskColumns"/>,
+          coalesce((select e.to_status from lab_task_execution_event e
+                    where e.task_id=t.id and e.event_time&lt;=#{asOf} and e.del_flag='0'
+                    order by e.event_time desc,e.id desc limit 1),
+                   case when t.create_time&lt;=#{asOf} then t.execution_status else null end) execution_status_as_of,
+          (select min(e.event_time) from lab_task_execution_event e
+           where e.task_id=t.id and e.to_status='ACTIVE' and e.event_time&lt;=#{asOf} and e.del_flag='0') execution_activated_at,
+          exists(select 1 from lab_task_block_event b where b.task_id=t.id and b.block_start_time&lt;=#{asOf}
+                 and (b.block_end_time is null or b.block_end_time&gt;#{asOf}) and b.del_flag='0') blocked_at_as_of,
+          (select min(b.block_start_time) from lab_task_block_event b where b.task_id=t.id
+           and b.block_start_time&lt;=#{asOf} and (b.block_end_time is null or b.block_end_time&gt;#{asOf})
+           and b.del_flag='0') block_start_at_as_of
+        from lab_task t where t.parent_id=#{parentId} and t.task_level='week' and t.del_flag='0' order by t.id
+    </select>
     <select id="selectTasksByParentIdForUpdate" parameterType="long" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.parent_id=#{parentId} and t.del_flag='0' order by t.id for update</select>
     <select id="selectKeyMonthTasksByMilestoneId" parameterType="long" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.milestone_id=#{milestoneId} and t.task_level='month' and t.task_type='key' and t.del_flag='0' order by t.period,t.id</select>
     <select id="selectKeyMonthTasksByMilestoneIdForUpdate" parameterType="long" resultMap="LabTaskResult">select <include refid="taskColumns"/> from lab_task t where t.milestone_id=#{milestoneId} and t.task_level='month' and t.task_type='key' and t.del_flag='0' order by t.id for update</select>
