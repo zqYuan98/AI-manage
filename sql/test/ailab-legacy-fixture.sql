@@ -1,10 +1,16 @@
 -- Immediately preceding Task 4 schema, used only by the real MySQL upgrade IT.
 DROP TABLE IF EXISTS `lab_task_quality_gate`;
 DROP TABLE IF EXISTS `lab_task_block_event`;
+DROP TABLE IF EXISTS `lab_task`;
 DROP TABLE IF EXISTS `lab_one2one`;
 DROP TABLE IF EXISTS `lab_ipr`;
 DROP TABLE IF EXISTS `lab_asset`;
 DROP TABLE IF EXISTS `lab_skill`;
+
+CREATE TABLE `lab_task` (
+ `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key', `parent_id` bigint DEFAULT 0 COMMENT 'parent task', `goal_id` bigint DEFAULT NULL COMMENT 'goal reference', `milestone_id` bigint DEFAULT NULL COMMENT 'milestone reference', `task_level` varchar(16) NOT NULL COMMENT 'month or week', `period` varchar(16) NOT NULL COMMENT 'business period', `biz_line` varchar(32) NOT NULL COMMENT 'business line', `task_type` varchar(16) NOT NULL COMMENT 'key or daily', `title` varchar(200) NOT NULL COMMENT 'task title', `owner_id` bigint NOT NULL COMMENT 'member owner', `dept_id` bigint DEFAULT NULL COMMENT 'department', `plan_date` date DEFAULT NULL COMMENT 'planned finish date', `actual_finish_time` datetime DEFAULT NULL COMMENT 'actual finish time', `deliverable` varchar(1000) DEFAULT NULL COMMENT 'deliverable', `perf_weight` decimal(8,2) DEFAULT 0 COMMENT 'performance weight', `goal_weight` decimal(8,2) DEFAULT 0 COMMENT 'goal contribution weight', `workflow_status` varchar(32) DEFAULT 'DRAFT' COMMENT 'workflow status', `result_status` varchar(32) DEFAULT 'DOING' COMMENT 'result status', `result_desc` varchar(1000) DEFAULT NULL COMMENT 'result description', `fail_reason` varchar(1000) DEFAULT NULL COMMENT 'failure reason', `next_action` varchar(1000) DEFAULT NULL COMMENT 'next action', `asset_id` bigint DEFAULT NULL COMMENT 'related asset', `coordination_required` char(1) DEFAULT '0' COMMENT 'requires coordination', `coordination_owner_id` bigint DEFAULT NULL COMMENT 'coordination owner', `coordination_dept_id` bigint DEFAULT NULL COMMENT 'coordination department', `coordination_content` varchar(1000) DEFAULT NULL COMMENT 'coordination content', `coordination_support` varchar(1000) DEFAULT NULL COMMENT 'requested support', `coordination_desc` varchar(1000) DEFAULT NULL COMMENT 'coordination description', `current_block_flag` char(1) DEFAULT '0' COMMENT 'currently blocked', `current_block_start` datetime DEFAULT NULL COMMENT 'current block start', `period_lock_flag` char(1) DEFAULT '0' COMMENT 'period locked', `version` int DEFAULT 0 COMMENT 'optimistic version', `del_flag` char(1) DEFAULT '0' COMMENT 'delete flag', `create_by` varchar(64) DEFAULT '' COMMENT 'creator', `create_time` datetime DEFAULT NULL COMMENT 'created time', `update_by` varchar(64) DEFAULT '' COMMENT 'updater', `update_time` datetime DEFAULT NULL COMMENT 'updated time', `remark` varchar(500) DEFAULT NULL COMMENT 'remark',
+ PRIMARY KEY (`id`), KEY `idx_lab_task_parent` (`parent_id`), KEY `idx_lab_task_owner_period_workflow` (`owner_id`,`period`,`workflow_status`), KEY `idx_lab_task_period_workflow` (`period`,`workflow_status`,`period_lock_flag`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='legacy laboratory task';
 
 CREATE TABLE `lab_task_quality_gate` (
  `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'primary key',
@@ -143,9 +149,23 @@ INSERT INTO `lab_task_quality_gate`
  (`id`,`task_id`,`gate_no`,`gate_name`,`gate_status`,`create_by`,`create_time`)
 VALUES (39991,39990,'LEGACY-QG-01','Legacy acceptance','PENDING','it',NOW());
 
+INSERT INTO `lab_task`
+ (`id`,`parent_id`,`goal_id`,`milestone_id`,`task_level`,`period`,`biz_line`,`task_type`,`title`,`owner_id`,`dept_id`,`plan_date`,`actual_finish_time`,`deliverable`,`workflow_status`,`result_status`,`result_desc`,`fail_reason`,`next_action`,`current_block_flag`,`current_block_start`,`period_lock_flag`,`version`,`create_by`,`create_time`)
+VALUES
+ (39879,0,30001,30002,'month','2026-08','algorithm','key','Legacy August parent',39203,101,'2026-08-31',NULL,'Legacy parent','ACTIVE','DOING',NULL,NULL,NULL,'0',NULL,'0',0,'it',NOW()),
+ (39880,39879,30001,30002,'week','2026-W31','algorithm','daily','Legacy confirmed undone',39203,101,'2026-08-02',NULL,'Legacy outcome','CONFIRMED','UNDONE',NULL,'Not completed','Carry forward','0',NULL,'0',0,'it',NOW()),
+ (39881,39879,30001,30002,'week','2026-W32','algorithm','daily','Legacy confirmed done',39203,101,'2026-08-09','2026-08-09 12:00:00','Legacy outcome','CONFIRMED','ONTIME','Completed',NULL,NULL,'0',NULL,'0',0,'it',NOW()),
+ (39882,39879,30001,30002,'week','2026-W32','algorithm','daily','Legacy pending delayed',39203,101,'2026-08-09','2026-08-10 12:00:00','Legacy outcome','PENDING_REVIEW','DELAYED','Completed late',NULL,NULL,'0',NULL,'0',0,'it',NOW()),
+ (39883,39879,30001,30002,'week','2026-W32','algorithm','daily','Legacy pending terminal blocked',39203,101,'2026-08-09','2026-08-08 12:00:00','Legacy outcome','PENDING_REVIEW','EXCEEDED','Completed early',NULL,NULL,'1','2026-08-08 09:00:00','0',0,'it',NOW()),
+ (39884,39879,30001,30002,'week','2026-W32','algorithm','daily','Legacy active terminal anomaly',39203,101,'2026-08-09',NULL,'Legacy outcome','ACTIVE','DELAYED','Stale result',NULL,NULL,'0',NULL,'0',0,'it',NOW()),
+ (39885,39879,30001,30002,'week','2026-W32','algorithm','daily','Legacy active blocked',39203,101,'2026-08-09',NULL,'Legacy outcome','ACTIVE','DOING',NULL,NULL,NULL,'1','2026-08-08 09:00:00','0',0,'it',NOW()),
+ (39886,39879,30001,30002,'week','2026-W31','algorithm','daily','Legacy locked cross month',39203,101,'2026-08-02','2026-08-02 12:00:00','Legacy outcome','CONFIRMED','ONTIME','Completed',NULL,NULL,'0',NULL,'1',0,'it',NOW());
+
 INSERT INTO `lab_task_block_event`
  (`id`,`task_id`,`block_type`,`block_reason`,`block_start_time`,`block_status`,`create_by`,`create_time`)
 VALUES
+ (39883,39883,'DEPENDENCY','Legacy terminal block','2026-08-08 09:00:00','OPEN','it','2026-08-08 09:00:00'),
+ (39885,39885,'DEPENDENCY','Legacy active block','2026-08-08 09:00:00','OPEN','it','2026-08-08 09:00:00'),
  (39991,39990,'DEPENDENCY','Legacy first episode','2026-07-01 09:00:00','CLOSED','it','2026-07-01 09:00:00'),
  (39992,39990,'DEPENDENCY','Legacy second episode','2026-07-02 09:00:00','OPEN','it','2026-07-02 09:00:00');
 

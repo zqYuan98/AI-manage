@@ -116,6 +116,23 @@ class LabMapperMySqlIT {
     @Autowired private org.apache.ibatis.session.SqlSessionFactory sqlSessionFactory;
 
     @Test
+    void legacyWeeklyExecutionMigrationUsesFullStateAndBaselineEvents() {
+        assertEquals(Arrays.asList("SELF_UNDONE", "SELF_DONE", "SELF_DONE", "ACTIVE", "SELF_DONE"),
+                jdbcTemplate.queryForList(
+                        "select execution_status from lab_task where id in (39880,39881,39882,39885,39886) order by id",
+                        String.class));
+        assertEquals(Arrays.asList("TERMINAL_WITH_OPEN_BLOCK", "AMBIGUOUS_LEGACY_COMBINATION"),
+                jdbcTemplate.queryForList(
+                        "select issue_code from lab_task_migration_issue where task_id in (39883,39884) order by task_id",
+                        String.class));
+        assertEquals(5, jdbcTemplate.queryForObject(
+                "select count(1) from lab_task_execution_event where task_id in (39880,39881,39882,39885,39886) and event_type='MIGRATED_BASELINE'",
+                Integer.class));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "select count(1) from lab_task_execution_event where task_id in (39883,39884)", Integer.class));
+    }
+
+    @Test
     void legacyReportNumbersRemainUniqueAfterBootstrap() {
         assertEquals(2, jdbcTemplate.queryForObject(
                 "select count(1) from information_schema.statistics where table_schema=database() and table_name='lab_report_instance' and index_name='uk_lab_report_instance_no' and non_unique=0",

@@ -95,6 +95,36 @@ class LabSqlContractTest {
     }
 
     @Test
+    void lightweightCommitmentSchemaAndMigrationContractIsPresent() throws IOException {
+        String compact = readSql().toLowerCase(Locale.ROOT).replace("`", "").replaceAll("\\s+", "");
+        for (String token : Arrays.asList(
+                "execution_status", "carried_from_id", "execution_version",
+                "createtableifnotexistslab_task_execution_event",
+                "createtableifnotexistslab_task_migration_issue",
+                "createtableifnotexistslab_task_workflow_event",
+                "createtableifnotexistslab_formal_acceptance_revision",
+                "createtableifnotexistslab_formal_acceptance_fact",
+                "createtableifnotexistslab_period_close_snapshot",
+                "createtableifnotexistslab_period_close_fact",
+                "createtableifnotexistslab_management_decision")) {
+            assertTrue(compact.contains(token), "missing lightweight management schema token: " + token);
+        }
+        assertTrue(compact.contains("workflow_status") && compact.contains("result_status")
+                        && compact.contains("actual_finish_time") && compact.contains("period_lock_flag")
+                        && compact.contains("block_status='open'"),
+                "legacy backfill must classify the full state combination including an open block");
+        assertTrue(compact.contains("migrated_baseline") && compact.contains("migration_terminal_unresolved"),
+                "migration must create a baseline event and name terminal open-block resolution");
+        String legacy = new String(Files.readAllBytes(findRoot().resolve("sql/test/ailab-legacy-fixture.sql")), StandardCharsets.UTF_8)
+                .toLowerCase(Locale.ROOT);
+        for (String fixture : Arrays.asList("legacy confirmed undone", "legacy confirmed done",
+                "legacy pending delayed", "legacy pending terminal blocked", "legacy active terminal anomaly",
+                "legacy active blocked", "legacy locked cross month")) {
+            assertTrue(legacy.contains(fixture), "missing legacy execution fixture: " + fixture);
+        }
+    }
+
+    @Test
     void reportLifecycleSchemaUsesTheDurableQueueAndVersionUniquenessVocabulary() throws IOException {
         String sql = readSql(); Map<String, String> blocks = tableBlocks(sql);
         Map<String, String> jobColumns = columns(blocks.get("lab_report_job"));
