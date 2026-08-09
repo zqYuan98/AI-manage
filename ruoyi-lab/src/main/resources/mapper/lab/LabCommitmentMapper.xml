@@ -55,4 +55,16 @@
         update sys_config set config_value=#{newValue},update_by='commitment-cutover',update_time=sysdate()
         where config_key=#{configKey} and config_value=#{expectedValue}
     </update>
+    <select id="selectCarriedCommitment" resultMap="com.ailab.system.mapper.LabTaskMapper.LabTaskResult">
+        select <include refid="com.ailab.system.mapper.LabTaskMapper.taskColumns"/>
+        from lab_task t where t.carried_from_id=#{carriedFromId} and t.period=#{period} and t.del_flag='0' limit 1
+    </select>
+    <update id="updateExecutionFact">
+        update lab_task set execution_status=#{toStatus},result_status=#{resultStatus},
+            actual_finish_time=#{actualFinishTime},result_desc=#{resultDesc},fail_reason=#{failReason},
+            next_action=#{nextAction},execution_version=execution_version+1,version=version+1,
+            update_by=#{updateBy},update_time=sysdate()
+        where id=#{taskId} and execution_version=#{expectedExecutionVersion}
+          and execution_status=#{fromStatus} and period_lock_flag='0' and del_flag='0'
+    </update>
 </mapper>

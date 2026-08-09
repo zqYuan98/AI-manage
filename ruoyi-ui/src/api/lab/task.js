@@ -16,6 +16,30 @@ export function addTask(data) {
   return request({ url: '/lab/task', method: 'post', data })
 }
 
+export function addWeeklyCommitment(data) {
+  return request({ url: '/lab/task/commitment', method: 'post', data })
+}
+
+export function completeWeeklyCommitment(id, version, data) {
+  return request({ url: `/lab/task/${id}/commitment/complete`, method: 'put', params: { version }, data })
+}
+
+export function markWeeklyCommitmentUndone(id, version, data) {
+  return request({ url: `/lab/task/${id}/commitment/undone`, method: 'put', params: { version }, data })
+}
+
+export function correctWeeklyCommitment(id, version, data) {
+  return request({ url: `/lab/task/${id}/commitment/correct`, method: 'put', params: { version }, data })
+}
+
+export function cancelWeeklyCommitment(id, version, data) {
+  return request({ url: `/lab/task/${id}/commitment/cancel`, method: 'put', params: { version }, data })
+}
+
+export function carryWeeklyCommitment(id, version, data) {
+  return request({ url: `/lab/task/${id}/commitment/carry`, method: 'post', params: { version }, data })
+}
+
 export function updateTask(data) {
   return request({ url: '/lab/task', method: 'put', data })
 }

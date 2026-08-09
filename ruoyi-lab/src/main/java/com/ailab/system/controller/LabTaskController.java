@@ -4,6 +4,8 @@ import com.ailab.system.domain.LabTask;
 import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.domain.LabTaskQualityGate;
 import com.ailab.system.dto.TaskSubmitCommand;
+import com.ailab.system.dto.WeeklyCommitmentCommand;
+import com.ailab.system.service.LabCommitmentService;
 import com.ailab.system.service.LabTaskService;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
@@ -12,6 +14,7 @@ import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.SecurityUtils;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,7 +29,63 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/lab/task")
 public class LabTaskController extends BaseController {
     private final LabTaskService taskService;
-    public LabTaskController(LabTaskService taskService) { this.taskService = taskService; }
+    private final LabCommitmentService commitmentService;
+    public LabTaskController(LabTaskService taskService) { this(taskService, null); }
+    @Autowired
+    public LabTaskController(LabTaskService taskService, LabCommitmentService commitmentService) {
+        this.taskService = taskService; this.commitmentService = commitmentService;
+    }
+
+    @PreAuthorize("@ss.hasPermi('lab:task:add')")
+    @Log(title = "新增本周承诺", businessType = BusinessType.INSERT)
+    @PostMapping("/commitment")
+    public AjaxResult createCommitment(@RequestBody WeeklyCommitmentCommand command) {
+        return success(requireCommitmentService().create(command, SecurityUtils.getUserId()));
+    }
+
+    @PreAuthorize("@ss.hasPermi('lab:task:edit')")
+    @Log(title = "完成本周承诺", businessType = BusinessType.UPDATE)
+    @PutMapping("/{id}/commitment/complete")
+    public AjaxResult completeCommitment(@PathVariable Long id, @RequestParam Integer version,
+            @RequestBody WeeklyCommitmentCommand command) {
+        requireCommitmentService().complete(id, version, command, SecurityUtils.getUserId()); return success();
+    }
+
+    @PreAuthorize("@ss.hasPermi('lab:task:edit')")
+    @Log(title = "标记本周未完成", businessType = BusinessType.UPDATE)
+    @PutMapping("/{id}/commitment/undone")
+    public AjaxResult undoneCommitment(@PathVariable Long id, @RequestParam Integer version,
+            @RequestBody WeeklyCommitmentCommand command) {
+        requireCommitmentService().markUndone(id, version, command, SecurityUtils.getUserId()); return success();
+    }
+
+    @PreAuthorize("@ss.hasPermi('lab:task:edit')")
+    @Log(title = "纠正本周承诺", businessType = BusinessType.UPDATE)
+    @PutMapping("/{id}/commitment/correct")
+    public AjaxResult correctCommitment(@PathVariable Long id, @RequestParam Integer version,
+            @RequestBody WeeklyCommitmentCommand command) {
+        requireCommitmentService().correct(id, version, command, SecurityUtils.getUserId()); return success();
+    }
+
+    @PreAuthorize("@ss.hasPermi('lab:task:review')")
+    @Log(title = "取消本周承诺", businessType = BusinessType.UPDATE)
+    @PutMapping("/{id}/commitment/cancel")
+    public AjaxResult cancelCommitment(@PathVariable Long id, @RequestParam Integer version,
+            @RequestBody WeeklyCommitmentCommand command) {
+        requireCommitmentService().cancel(id, version, command, SecurityUtils.getUserId()); return success();
+    }
+
+    @PreAuthorize("@ss.hasPermi('lab:task:edit')")
+    @Log(title = "转期本周承诺", businessType = BusinessType.INSERT)
+    @PostMapping("/{id}/commitment/carry")
+    public AjaxResult carryCommitment(@PathVariable Long id, @RequestParam Integer version,
+            @RequestBody WeeklyCommitmentCommand command) {
+        return success(requireCommitmentService().carry(id, version, command, SecurityUtils.getUserId()));
+    }
+
+    private LabCommitmentService requireCommitmentService() {
+        if (commitmentService == null) throw new IllegalStateException("周承诺服务未配置"); return commitmentService;
+    }
 
     @PreAuthorize("@ss.hasPermi('lab:task:list')")
     @GetMapping("/list")

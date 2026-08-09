@@ -19,4 +19,11 @@ public interface LabCommitmentMapper {
     String selectCutoverValue(@Param("configKey") String configKey);
     int updateCutoverValue(@Param("configKey") String configKey, @Param("expectedValue") String expectedValue,
             @Param("newValue") String newValue);
+    LabTask selectCarriedCommitment(@Param("carriedFromId") Long carriedFromId, @Param("period") String period);
+    int updateExecutionFact(@Param("taskId") Long taskId,
+            @Param("expectedExecutionVersion") Integer expectedExecutionVersion,
+            @Param("fromStatus") String fromStatus, @Param("toStatus") String toStatus,
+            @Param("resultStatus") String resultStatus, @Param("actualFinishTime") java.util.Date actualFinishTime,
+            @Param("resultDesc") String resultDesc, @Param("failReason") String failReason,
+            @Param("nextAction") String nextAction, @Param("updateBy") String updateBy);
 }

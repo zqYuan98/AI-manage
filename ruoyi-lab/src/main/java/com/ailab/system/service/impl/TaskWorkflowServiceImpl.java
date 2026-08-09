@@ -55,6 +55,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
     @Override
     public List<FieldValidationError> submitResult(LabTask task, TaskSubmitCommand command, Long actorId) {
         requireTask(task);
+        requireMonthlyTask(task);
         requireWorkflow(task, LabConstants.WORKFLOW_ACTIVE);
         if (command == null) {
             return single("command", "提交内容不能为空");
@@ -92,6 +93,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
     @Override
     public void withdraw(LabTask task) {
         requireTask(task);
+        requireMonthlyTask(task);
         requireWorkflow(task, LabConstants.WORKFLOW_PENDING_REVIEW);
         task.setWorkflowStatus(LabConstants.WORKFLOW_ACTIVE);
     }
@@ -99,6 +101,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
     @Override
     public List<FieldValidationError> reviewPass(LabTask task, TaskSubmitCommand command, Long actorId) {
         requireTask(task);
+        requireMonthlyTask(task);
         requireWorkflow(task, LabConstants.WORKFLOW_PENDING_REVIEW);
         if (command == null) {
             return single("command", "审核内容不能为空");
@@ -121,6 +124,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
     @Override
     public void reviewReturn(LabTask task, TaskSubmitCommand command, Long actorId) {
         requireTask(task);
+        requireMonthlyTask(task);
         requireWorkflow(task, LabConstants.WORKFLOW_PENDING_REVIEW);
         if (command == null || actorId == null) {
             throw new ServiceException("退回审核需要指定审核人");
@@ -134,6 +138,7 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
     @Override
     public void managerReopen(LabTask task, Long managerId, String reason) {
         requireTask(task);
+        requireMonthlyTask(task);
         requireWorkflow(task, LabConstants.WORKFLOW_CONFIRMED);
         if (managerId == null || isBlank(reason)) {
             throw new ServiceException("管理者重新打开任务需要填写原因");
@@ -173,6 +178,12 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         }
         validateCoordination(task, errors);
         return errors;
+    }
+
+    private void requireMonthlyTask(LabTask task) {
+        if (!LabConstants.TASK_LEVEL_MONTH.equals(task.getTaskLevel())) {
+            throw new ServiceException("周承诺请使用成员自主闭环操作，不能进入月度审核流程");
+        }
     }
 
     private void validatePeriod(LabTask task, List<FieldValidationError> errors) {
