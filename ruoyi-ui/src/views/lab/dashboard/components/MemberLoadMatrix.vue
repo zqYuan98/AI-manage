@@ -2,7 +2,7 @@
   <section class="load-matrix lab-panel" aria-labelledby="load-matrix-title">
     <header class="load-matrix__header">
       <div>
-        <span class="lab-eyebrow">Capacity ledger</span>
+        <span class="lab-eyebrow">团队负载</span>
         <h2 id="load-matrix-title">成员负载矩阵</h2>
       </div>
       <el-tooltip content="重点任务权重、在途任务与风险事件的同期快照" placement="top">
@@ -43,7 +43,7 @@
           >
             <th scope="row">
               <strong>{{ member.memberName }}</strong>
-              <small>{{ member.bizLine || '未配置业务线' }}</small>
+              <small>{{ member.bizLine ? bizLineLabel(member.bizLine) : '未配置业务线' }}</small>
             </th>
             <td><span :class="heatClass(member, 'weight')">{{ formatWeight(member.keyTaskWeight) }}</span></td>
             <td><span :class="heatClass(member, 'active')">{{ value(member.activeTaskCount) }}</span></td>
@@ -59,6 +59,8 @@
 </template>
 
 <script>
+import { bizLineLabel } from '@/utils/lab-status'
+
 export default {
   name: 'MemberLoadMatrix',
   props: {
@@ -76,6 +78,7 @@ export default {
     }
   },
   methods: {
+    bizLineLabel,
     value(value) {
       const number = Number(value)
       return Number.isFinite(number) ? number : 0

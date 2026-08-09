@@ -2,7 +2,7 @@
   <section class="goal-tree lab-panel" aria-labelledby="goal-tree-title">
     <header class="goal-tree__header">
       <div>
-        <span class="lab-eyebrow">Goal map</span>
+        <span class="lab-eyebrow">目标地图</span>
         <h2 id="goal-tree-title">年度目标树</h2>
       </div>
       <span>{{ count }} 项</span>

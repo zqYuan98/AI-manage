@@ -40,7 +40,7 @@
             <span>{{ meta(item) }}</span>
           </div>
           <span v-if="item.status || item.reminderLevel" class="action-queue__status">
-            {{ item.status || item.reminderLevel }}
+            {{ itemStatus(item) }}
           </span>
         </div>
         <button
@@ -59,6 +59,8 @@
 </template>
 
 <script>
+import { statusLabel } from '@/utils/lab-status'
+
 export default {
   name: 'ActionQueue',
   props: {
@@ -68,7 +70,7 @@ export default {
     },
     eyebrow: {
       type: String,
-      default: 'Action queue'
+      default: '行动队列'
     },
     items: {
       type: Array,
@@ -104,6 +106,14 @@ export default {
     }
   },
   methods: {
+    itemStatus(item) {
+      if (item.reminderLevel) return statusLabel('REMINDER', item.reminderLevel)
+      const status = String(item.status || '').toUpperCase()
+      if (/FINALIZED|SUPERSEDED|GENERATING|QUEUED/.test(status)) return statusLabel('REPORT', status)
+      if (/RED_LINE|NORMAL/.test(status)) return statusLabel('PERFORMANCE', status)
+      if (/DRAFT|ACTIVE|PENDING_REVIEW|CONFIRMED/.test(status)) return statusLabel('TASK_WORKFLOW', status)
+      return status ? '待处理' : '—'
+    },
     isUnread(item) {
       return String(item.readFlag) === '0'
     },

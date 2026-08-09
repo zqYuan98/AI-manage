@@ -98,10 +98,10 @@ try {
         $json = [System.IO.File]::ReadAllBytes($base + '.json'); $null = ([Text.Encoding]::UTF8.GetString($json) | ConvertFrom-Json)
         $markdown = [Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($base + '.md'))
         $markdownMarkers = @(
-            'Algorithm Lead',
+            '算法负责人',
             '92\.50',
-            'July performance calibration completed',
-            'Improve model quality'
+            '七月绩效校准已完成',
+            '提升模型质量'
         )
         $missingMarkdownMarkers = $markdownMarkers | Where-Object { -not $markdown.Contains($_) }
         if ($missingMarkdownMarkers) { throw "Markdown demo content is missing: $($missingMarkdownMarkers -join ', ')" }

@@ -2,7 +2,7 @@
   <section class="score-breakdown">
     <div v-if="!score" class="empty"><i class="el-icon-data-analysis" /><span>选择一条反馈查看计分事实链</span></div>
     <template v-else>
-      <header><div><span>Evidence-based feedback</span><h3>{{ title }}</h3><p>修订 {{ score.revisionNo || '预览' }} · 截止 {{ score.cutoffTime || detail.cutoff || '当前' }}</p></div><div class="score-orb" :class="{ 'is-red': activeRedLine }"><strong>{{ number(total.total != null ? total.total : score.score) }}</strong><small>/ 100</small></div></header>
+      <header><div><span>基于证据的反馈</span><h3>{{ title }}</h3><p>修订 {{ score.revisionNo || '预览' }} · 截止 {{ score.cutoffTime || detail.cutoff || '当前' }}</p></div><div class="score-orb" :class="{ 'is-red': activeRedLine }"><strong>{{ number(total.total != null ? total.total : score.score) }}</strong><small>/ 100</small></div></header>
       <div class="component-grid"><article><span>交付</span><strong>{{ number(total.delivery != null ? total.delivery : score.deliveryScore) }}</strong><small>最高 60</small></article><article><span>质量</span><strong>{{ number(total.quality != null ? total.quality : score.qualityScore) }}</strong><small>最高 25</small></article><article><span>协同</span><strong>{{ number(total.collaboration != null ? total.collaboration : score.collaborationScore) }}</strong><small>最高 15</small></article></div>
       <div v-if="activeRedLine" class="redline"><i class="el-icon-warning" /><div><strong>当前存在红线事实</strong><p>{{ score.redLineReason || triggerSummary }}</p></div></div><div v-else-if="score.redLineFlag === '1' && score.revokedFlag === '1'" class="revoked"><i class="el-icon-circle-check" /> 红线已凭整改证据撤销，原触发事实仍保留在修订快照中。</div>
 

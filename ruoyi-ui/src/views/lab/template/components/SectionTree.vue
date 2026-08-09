@@ -1,6 +1,6 @@
 <template>
   <section class="section-tree" aria-labelledby="section-tree-title">
-    <header><div><span class="lab-eyebrow">Document anatomy</span><h2 id="section-tree-title">章节结构</h2></div><el-button v-hasPermi="['lab:template:config']" type="text" icon="el-icon-plus" @click="$emit('add')">新增</el-button></header>
+    <header><div><span class="lab-eyebrow">文档结构</span><h2 id="section-tree-title">章节结构</h2></div><el-button v-hasPermi="['lab:template:config']" type="text" icon="el-icon-plus" @click="$emit('add')">新增</el-button></header>
     <el-tree :data="treeSections" node-key="_key" draggable :allow-drop="allowDrop" :expand-on-click-node="false" @node-drop="drop" @node-click="select">
       <div slot-scope="{ data }" role="button" tabindex="0" :class="['section-node',{active:data.sectionCode===selectedCode}]" @keydown.enter.prevent="select(data)" @keydown.space.prevent="select(data)">
         <i class="el-icon-rank drag" role="button" tabindex="0" aria-label="拖动排序；使用上下方向键移动" @click.stop @keydown.up.stop.prevent="move(data,-1)" @keydown.down.stop.prevent="move(data,1)" />

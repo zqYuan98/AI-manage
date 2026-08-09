@@ -18,7 +18,7 @@
       <report-history :items="history" :total="total" :selected-id="selected.id" :loading="historyLoading" :loading-more="loadingMore" :error="historyError" @select="selectReport" @retry="reloadHistory" @more="loadMore" />
       <section class="report-workspace">
         <div class="report-workspace__toolbar lab-panel">
-          <div v-if="selected.id"><strong>{{ selected.reportNo || selected.templateCode }}</strong><span>{{ selected.period }} · {{ selected.bizLine }} · 实例修订 {{ selected.revisionNo }}</span></div>
+          <div v-if="selected.id"><strong>{{ selected.reportNo || selected.templateCode }}</strong><span>{{ selected.period }} · {{ bizLineLabel(selected.bizLine) }} · 实例修订 {{ selected.revisionNo }}</span></div>
           <div v-else><strong>尚未选择报告</strong><span>从左侧历史打开，或在上方生成新版本</span></div>
           <div class="report-workspace__actions">
             <input ref="markdown" class="sr-only" type="file" accept=".md,text/markdown,text/plain" @change="uploadMarkdown">
@@ -28,7 +28,7 @@
         </div>
         <artifact-status :report="selected" :jobs="jobs" @retry="retryArtifact" @download="downloadArtifact" @finalize="finalizeSelected" />
         <section class="report-body lab-panel">
-          <header><div><span class="lab-eyebrow">Markdown evidence</span><h2>内容预览</h2></div><span v-if="polling" class="report-body__poll"><i /> {{ pollCaption }}</span></header>
+          <header><div><span class="lab-eyebrow">报告内容依据</span><h2>内容预览</h2></div><span v-if="polling" class="report-body__poll"><i /> {{ pollCaption }}</span></header>
           <div v-if="detailLoading && !body.contentMarkdown" class="report-body__skeleton lab-skeleton" />
           <div v-else-if="detailError" class="report-body__state" role="alert"><span>内容加载失败，状态与制品仍可独立操作。</span><button type="button" @click="refreshSelected">重试</button></div>
           <pre v-else-if="body.contentMarkdown">{{ body.contentMarkdown }}</pre>
@@ -46,6 +46,7 @@ import { saveAs } from 'file-saver'
 import { downloadReportArtifact, finalizeReport, generateReport, getReportBody, getReportStatus, getReportSummarySections, importReportMarkdown, listReportBizLines, listReportHistory, listReportJobs, retryReportArtifact } from '@/api/lab/report'
 import { getTemplateConfig, listTemplateTree } from '@/api/lab/template'
 import { blobValidate } from '@/utils/ruoyi'
+import { bizLineLabel } from '@/utils/lab-status'
 import ArtifactStatus from './components/ArtifactStatus'
 import ReportHistory from './components/ReportHistory'
 import ReportSummaryEditor from './components/ReportSummaryEditor'
@@ -68,6 +69,7 @@ export default {
   created() { this.reloadHistory(); this.loadBizLines(); this.loadTemplates() },
   beforeDestroy() { this.stopPolling(); this.detailToken++ },
   methods: {
+    bizLineLabel,
     initialPeriod() { if (/^\d{4}-\d{2}$/.test(this.$route.query.period || '')) return this.$route.query.period; const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` },
     loadTemplates() { if (!this.canGenerate) return Promise.resolve(); return listTemplateTree().then(response => { const data = Array.isArray(response.data) ? response.data : []; this.templates = this.flattenTemplates(data); const routeTemplate = Number(this.$route.query.templateId); this.generation.templateId = this.enabledTemplates.some(item => Number(item.id) === routeTemplate) ? routeTemplate : (this.enabledTemplates[0] || {}).id || null }) },
     loadBizLines() { return listReportBizLines().then(response => { this.bizLines = Array.isArray(response.data) ? response.data : []; if (!this.bizLines.includes(this.query.bizLine)) { this.query.bizLine = this.bizLines[0] || ''; return this.reloadHistory() } }).catch(() => { this.bizLines = [] }) },

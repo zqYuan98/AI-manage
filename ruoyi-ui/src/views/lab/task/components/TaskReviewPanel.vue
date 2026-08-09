@@ -10,15 +10,15 @@
     <div class="task-review__shell">
       <header class="task-review__header">
         <button type="button" aria-label="关闭" @click="$emit('close')"><i class="el-icon-close" /></button>
-        <span class="lab-eyebrow">{{ mode === 'submit' ? 'Result submission' : 'Independent review' }}</span>
+        <span class="lab-eyebrow">{{ mode === 'submit' ? '结果提交' : '独立验收' }}</span>
         <h2>{{ mode === 'submit' ? '提交任务结果' : '审核任务结果' }}</h2>
         <p>{{ task ? task.title : '任务' }}</p>
       </header>
 
       <section v-if="task" class="task-review__summary">
         <div><span>计划日期</span><strong>{{ task.planDate || '—' }}</strong></div>
-        <div><span>当前状态</span><strong>{{ task.workflowStatus }}</strong></div>
-        <div><span>结果</span><strong>{{ task.resultStatus || 'DOING' }}</strong></div>
+        <div><span>当前状态</span><strong>{{ taskStatusLabel(task.workflowStatus) }}</strong></div>
+        <div><span>结果</span><strong>{{ resultStatusLabel(task.resultStatus || 'DOING') }}</strong></div>
       </section>
 
       <el-form v-if="mode === 'submit'" ref="submitForm" class="task-review__form" :model="submitForm" label-position="top">
@@ -95,6 +95,7 @@
 
 <script>
 import { listTaskEvidence } from '@/api/lab/task'
+import { statusLabel } from '@/utils/lab-status'
 
 const newSubmit = () => ({
   requestedResultStatus: '',
@@ -153,6 +154,8 @@ export default {
     window.removeEventListener('resize', this.updateWidth)
   },
   methods: {
+    taskStatusLabel(value) { return statusLabel('TASK_WORKFLOW', value) },
+    resultStatusLabel(value) { return statusLabel('RESULT', value) },
     loadEvidence() {
       if (!this.task || !this.task.id) return
       listTaskEvidence(this.task.id).then(response => { this.evidence = response.data || [] })

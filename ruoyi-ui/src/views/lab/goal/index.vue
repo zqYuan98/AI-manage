@@ -2,7 +2,7 @@
   <main class="goal-page lab-dashboard">
     <header class="goal-page__header">
       <div>
-        <span class="lab-eyebrow">Strategy ledger</span>
+        <span class="lab-eyebrow">战略目标台账</span>
         <h1>目标与里程碑</h1>
         <p>年度目标 → 季度里程碑 → 月度重点任务 → 周度执行事实</p>
       </div>
@@ -31,7 +31,7 @@
       <section class="goal-page__canvas lab-panel">
         <div class="goal-page__blueprint">
           <span class="goal-page__ordinal">01</span>
-          <div><span class="lab-eyebrow">Choose a goal</span><h2>在左侧目标树中保持战略上下文</h2></div>
+          <div><span class="lab-eyebrow">选择目标</span><h2>在左侧目标树中保持战略上下文</h2></div>
         </div>
         <div class="goal-page__levels">
           <div><b>年</b><strong>年度目标</strong><span>明确结果与验收标准</span></div>

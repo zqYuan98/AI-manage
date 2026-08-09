@@ -2,7 +2,7 @@
   <main class="task-page lab-dashboard">
     <header class="task-page__header">
       <div>
-        <span class="lab-eyebrow">Execution ledger</span>
+        <span class="lab-eyebrow">执行台账</span>
         <h1>任务事实台账</h1>
         <p>计划、结果、证据、质量门禁与阻塞事件在同一条事实链上推进</p>
       </div>
@@ -54,7 +54,7 @@
 
     <section class="task-readiness lab-panel">
       <div class="task-readiness__title">
-        <div><span class="lab-eyebrow">Weight readiness</span><h2>月度双权重就绪度</h2></div>
+        <div><span class="lab-eyebrow">权重就绪度</span><h2>月度双权重就绪度</h2></div>
         <el-button
           v-hasPermi="['lab:task:edit']"
           type="primary"
@@ -82,7 +82,7 @@
 
     <section class="task-table lab-panel">
       <header class="task-table__header">
-        <div><span class="lab-eyebrow">Fact register</span><h2>任务列表</h2></div>
+        <div><span class="lab-eyebrow">事实登记</span><h2>任务列表</h2></div>
         <span>共 {{ total }} 条 · 风险色仅标记阻塞或逾期事实</span>
       </header>
       <el-table v-loading="loading" :data="rows" row-key="id" class="task-table__body" @row-dblclick="handleRowDoubleClick">
@@ -100,7 +100,7 @@
           <template slot-scope="scope"><div class="task-table__weights"><span>绩 {{ number(scope.row.perfWeight) }}</span><span>目 {{ number(scope.row.goalWeight) }}</span></div></template>
         </el-table-column>
         <el-table-column label="状态" width="150">
-          <template slot-scope="scope"><span class="task-table__status" :class="statusClass(scope.row.workflowStatus)">{{ statusLabel(scope.row.workflowStatus) }}</span><small v-if="scope.row.resultStatus" class="task-table__result">{{ scope.row.resultStatus }}</small></template>
+          <template slot-scope="scope"><span class="task-table__status" :class="statusClass(scope.row.workflowStatus)">{{ statusLabel(scope.row.workflowStatus) }}</span><small v-if="scope.row.resultStatus" class="task-table__result">{{ resultStatusLabel(scope.row.resultStatus) }}</small></template>
         </el-table-column>
         <el-table-column label="风险" width="95" align="center">
           <template slot-scope="scope"><span v-if="riskLabel(scope.row)" class="task-table__risk"><i class="el-icon-warning" /> {{ riskLabel(scope.row) }}</span><span v-else>—</span></template>
@@ -699,7 +699,10 @@ export default {
     },
     statusLabel(status) {
       const option = this.workflowOptions.find(item => item.value === status)
-      return option ? option.label : status
+      return option ? option.label : '未定义状态'
+    },
+    resultStatusLabel(status) {
+      return ({ DOING: '进行中', EXCEEDED: '超额完成', ONTIME: '按时完成', DELAYED: '延期完成', UNDONE: '未完成' })[status] || '未定义状态'
     },
     statusClass(status) {
       return `is-${String(status || '').toLowerCase().replace('_', '-')}`

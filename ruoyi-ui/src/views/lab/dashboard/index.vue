@@ -2,7 +2,7 @@
   <main class="lab-dashboard">
     <section class="dashboard-hero">
       <div class="dashboard-hero__title">
-        <span class="dashboard-hero__sequence">LAB / OPS / {{ selectedPeriod }}</span>
+        <span class="dashboard-hero__sequence">实验室 / 管理态势 / {{ selectedPeriod }}</span>
         <h1>实验室管理态势</h1>
         <p>以目标、任务和人才事实为底稿的月度管理作战日志</p>
       </div>
@@ -71,7 +71,7 @@
         <section class="status-ledger lab-panel" aria-labelledby="status-ledger-title">
           <header class="status-ledger__header">
             <div>
-              <span class="lab-eyebrow">Task composition</span>
+              <span class="lab-eyebrow">任务全景</span>
               <h2 id="status-ledger-title">任务状态分布</h2>
             </div>
             <strong>{{ taskTotal }}</strong>
@@ -87,7 +87,7 @@
               <button type="button" @click="openDrill(item, 'task')">
                 <span class="status-ledger__label">
                   <i :class="statusTone(item.code)" />
-                  {{ item.name }}
+                  {{ statusLabel('TASK_WORKFLOW', item.code) }}
                 </span>
                 <strong>{{ item.count }}</strong>
                 <span class="status-ledger__track">
@@ -104,7 +104,7 @@
               type="button"
               @click="openDrill(item, 'perf')"
             >
-              {{ item.name }} <strong>{{ item.count }}</strong>
+              {{ statusLabel('PERFORMANCE', item.code) }} <strong>{{ item.count }}</strong>
             </button>
           </div>
         </section>
@@ -120,7 +120,7 @@
         />
         <action-queue
           title="我的提醒"
-          eyebrow="Personal inbox"
+          eyebrow="我的待办"
           :items="reminders"
           :loading="reminderLoading"
           :error="reminderError"
@@ -137,7 +137,7 @@
       <section class="dashboard-actions" aria-label="近期管理行动">
         <action-queue
           title="协同待办"
-          eyebrow="Coordination"
+          eyebrow="协同事项"
           :items="overview.coordinationItems"
           :loading="overviewLoading"
           :error="overviewError"
@@ -147,7 +147,7 @@
         />
         <action-queue
           title="近期 IPR"
-          eyebrow="Intellectual property"
+          eyebrow="知识产权"
           :items="overview.recentIpr"
           :loading="overviewLoading"
           :error="overviewError"
@@ -157,7 +157,7 @@
         />
         <action-queue
           title="已定稿报告"
-          eyebrow="Report archive"
+          eyebrow="报告归档"
           :items="overview.recentReports"
           :loading="overviewLoading"
           :error="overviewError"
@@ -181,6 +181,7 @@ import MetricCard from './components/MetricCard'
 import GoalHealthChart from './components/GoalHealthChart'
 import MemberLoadMatrix from './components/MemberLoadMatrix'
 import ActionQueue from './components/ActionQueue'
+import { statusLabel } from '@/utils/lab-status'
 
 const emptyOverview = () => ({
   kpis: [],
@@ -240,6 +241,7 @@ export default {
     this.reload()
   },
   methods: {
+    statusLabel,
     currentPeriod() {
       const date = new Date()
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`

@@ -1,6 +1,6 @@
 <template>
   <aside class="history lab-panel" aria-labelledby="history-title">
-    <header><div><span class="lab-eyebrow">Immutable archive</span><h2 id="history-title">版本历史</h2></div><strong>{{ total }}</strong></header>
+    <header><div><span class="lab-eyebrow">不可变归档</span><h2 id="history-title">版本历史</h2></div><strong>{{ total }}</strong></header>
     <div v-if="loading" class="history__loading lab-skeleton" />
     <div v-else-if="error" class="history__state" role="alert"><span>历史加载失败</span><button type="button" @click="$emit('retry')">重试</button></div>
     <div v-else-if="!items.length" class="lab-empty">该范围暂无报告版本</div>
@@ -8,7 +8,7 @@
       <li v-for="item in items" :key="item.id">
         <button type="button" :class="{ active: item.id === selectedId }" @click="$emit('select', item)">
           <span class="history__rail" />
-          <span class="history__main"><strong>{{ item.reportNo || `${item.templateCode} #${item.revisionNo}` }}</strong><small>{{ item.period }} · {{ item.bizLine }} · 模板 r{{ item.templateRevision }}</small></span>
+          <span class="history__main"><strong>{{ item.reportNo || `${item.templateCode} #${item.revisionNo}` }}</strong><small>{{ item.period }} · {{ bizLineLabel(item.bizLine) }} · 模板 r{{ item.templateRevision }}</small></span>
           <span class="history__flags"><i v-if="item.sensitiveFlag === '1'" class="el-icon-lock" title="含敏感章节" /><b :class="tone(item.lifecycleStatus)">{{ label(item) }}</b></span>
         </button>
       </li>
@@ -17,9 +17,11 @@
   </aside>
 </template>
 <script>
+import { bizLineLabel, statusLabel } from '@/utils/lab-status'
+
 export default {
   name: 'ReportHistory', props: { items: { type: Array, default: () => [] }, total: { type: Number, default: 0 }, selectedId: { type: [Number, String], default: null }, loading: Boolean, loadingMore: Boolean, error: Boolean },
-  methods: { label(item) { if (item.currentFlag === '1') return '当前'; if (item.lifecycleStatus === 'SUPERSEDED') return '已取代'; if (item.finalFlag === '1') return '已定稿'; return item.lifecycleStatus || '草稿' }, tone(value) { return value === 'SUPERSEDED' ? 'muted' : /FINAL|READY/.test(value || '') ? 'success' : /FAIL/.test(value || '') ? 'danger' : 'active' } }
+  methods: { bizLineLabel, label(item) { if (item.currentFlag === '1') return '当前'; if (item.finalFlag === '1') return '已定稿'; return statusLabel('REPORT', item.lifecycleStatus || 'DRAFT') }, tone(value) { return value === 'SUPERSEDED' ? 'muted' : /FINAL|READY/.test(value || '') ? 'success' : /FAIL/.test(value || '') ? 'danger' : 'active' } }
 }
 </script>
 <style lang="scss" scoped>

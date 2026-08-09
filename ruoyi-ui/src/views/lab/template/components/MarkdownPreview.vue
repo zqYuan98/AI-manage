@@ -1,6 +1,6 @@
 <template>
   <section class="markdown-preview" aria-labelledby="preview-title">
-    <header><div><span class="lab-eyebrow">Debounced preview</span><h2 id="preview-title">Markdown 预览</h2></div><span :class="{dirty}">{{ dirty ? '未保存草稿' : '服务端快照' }}</span></header>
+    <header><div><span class="lab-eyebrow">实时预览</span><h2 id="preview-title">内容预览</h2></div><span :class="{dirty}">{{ dirty ? '未保存草稿' : '服务端快照' }}</span></header>
     <div v-if="loading" class="markdown-preview__loading lab-skeleton" />
     <pre v-else-if="markdown">{{ markdown }}</pre>
     <div v-else class="lab-empty">配置章节后，将生成不执行任意代码的结构预览。</div>

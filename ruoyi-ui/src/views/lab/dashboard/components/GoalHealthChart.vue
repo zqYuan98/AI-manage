@@ -2,7 +2,7 @@
   <section class="goal-health lab-panel" aria-labelledby="goal-health-title">
     <header class="goal-health__header">
       <div>
-        <span class="lab-eyebrow">Goal trajectory</span>
+        <span class="lab-eyebrow">目标进度趋势</span>
         <h2 id="goal-health-title">年度目标进度轨迹</h2>
       </div>
       <span v-if="activeGoal" class="goal-health__active">{{ activeGoal.title }}</span>

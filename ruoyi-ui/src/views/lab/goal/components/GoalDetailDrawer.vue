@@ -14,7 +14,7 @@
         <h2>{{ goal.title }}</h2>
         <div class="goal-detail__badges">
           <span>{{ goal.goalLevel === 'YEAR' ? '年度目标' : '季度里程碑' }}</span>
-          <span :class="statusClass">{{ goal.status }}</span>
+          <span :class="statusClass">{{ goalStatusLabel(goal.status) }}</span>
         </div>
       </header>
 
@@ -29,7 +29,7 @@
 
         <section class="goal-detail__readiness">
           <div class="goal-detail__section-title">
-            <div><span class="lab-eyebrow">Activation contract</span><h3>{{ readinessLabel }}</h3></div>
+            <div><span class="lab-eyebrow">激活条件</span><h3>{{ readinessLabel }}</h3></div>
             <strong :class="{ 'is-ready': readiness.ready }">{{ number(readiness.total) }} / 100</strong>
           </div>
           <el-progress
@@ -57,7 +57,7 @@
               <li v-for="month in taskHierarchy" :key="month.id">
                 <button type="button" class="goal-detail__task-row" @click="openTask(month)">
                   <span :class="`is-${month.taskLevel}`">{{ month.taskLevel === 'week' ? '周' : '月' }}</span>
-                  <span><strong>{{ month.title }}</strong><small>{{ month.period }} · {{ month.workflowStatus }}</small></span>
+                  <span><strong>{{ month.title }}</strong><small>{{ month.period }} · {{ taskStatusLabel(month.workflowStatus) }}</small></span>
                   <b>{{ number(month.goalWeight) }}%</b>
                   <i class="el-icon-right" />
                 </button>
@@ -65,8 +65,8 @@
                   <li v-for="week in month.children" :key="week.id">
                     <button type="button" class="goal-detail__task-row is-week-row" @click="openTask(week)">
                       <span class="is-week">周</span>
-                      <span><strong>{{ week.title }}</strong><small>{{ week.period }} · {{ week.workflowStatus }}</small></span>
-                      <b>{{ week.resultStatus || 'DOING' }}</b>
+                      <span><strong>{{ week.title }}</strong><small>{{ week.period }} · {{ taskStatusLabel(week.workflowStatus) }}</small></span>
+                      <b>{{ resultStatusLabel(week.resultStatus || 'DOING') }}</b>
                       <i class="el-icon-right" />
                     </button>
                   </li>
@@ -96,6 +96,8 @@
 </template>
 
 <script>
+import { statusLabel } from '@/utils/lab-status'
+
 export default {
   name: 'GoalDetailDrawer',
   props: {
@@ -164,6 +166,9 @@ export default {
     window.removeEventListener('resize', this.updateWidth)
   },
   methods: {
+    taskStatusLabel(value) { return statusLabel('TASK_WORKFLOW', value) },
+    resultStatusLabel(value) { return statusLabel('RESULT', value) },
+    goalStatusLabel(value) { return ({ ACTIVE: '进行中', COMPLETED: '已完成', TERMINATED: '已终止' })[value] || '未定义状态' },
     updateWidth() {
       this.viewportWidth = window.innerWidth
     },

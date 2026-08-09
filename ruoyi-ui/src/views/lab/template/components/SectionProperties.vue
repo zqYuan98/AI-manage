@@ -2,7 +2,7 @@
   <section class="section-properties">
     <div v-if="!section" class="lab-empty">选择一个章节后编辑安全属性。</div>
     <template v-else>
-      <header><div><span class="lab-eyebrow">Typed configuration</span><h2>章节属性</h2></div><el-button v-hasPermi="['lab:template:config']" type="text" class="danger" @click="$emit('remove')">删除</el-button></header>
+      <header><div><span class="lab-eyebrow">强类型配置</span><h2>章节属性</h2></div><el-button v-hasPermi="['lab:template:config']" type="text" class="danger" @click="$emit('remove')">删除</el-button></header>
       <el-form label-position="top" size="small">
         <div class="form-grid"><el-form-item label="章节标识"><el-input :value="section.sectionCode" maxlength="64" @input="change('sectionCode',$event)" /></el-form-item><el-form-item label="显示名称"><el-input :value="section.sectionName" maxlength="200" @input="change('sectionName',$event)" /></el-form-item></div>
         <div class="form-grid"><el-form-item label="章节类型"><el-select :value="section.sectionType" @change="$emit('type-change',$event)"><el-option v-for="item in metadata.sectionTypes" :key="item" :label="item" :value="item" /></el-select></el-form-item><el-form-item label="数据源"><el-select :value="section.dataSource" clearable :disabled="section.sectionType==='MANUAL'" @change="$emit('source-change',$event)"><el-option v-for="item in sources" :key="item" :label="item" :value="item" /></el-select></el-form-item></div>

@@ -4,7 +4,7 @@
       <header v-if="member.id" class="member-hero">
         <div class="member-hero__avatar">{{ initials(member) }}</div>
         <div class="member-hero__identity">
-          <span>{{ member.bizLine || '实验室成员' }} · {{ member.memberNo || '受限档案' }}</span>
+          <span>{{ member.bizLine ? bizLineLabel(member.bizLine) : '实验室成员' }} · {{ member.memberNo || '受限档案' }}</span>
           <h2>{{ member.nickName || member.userName || `成员 #${member.id}` }}</h2>
           <p>{{ member.position || '岗位未填写' }} · {{ roleLabel(member.roleType) }} · 负责人 {{ member.leaderName || '未配置' }}</p>
         </div>
@@ -14,11 +14,11 @@
       <el-tabs v-if="member.id" v-model="tab" class="member-tabs">
         <el-tab-pane label="成员档案" name="profile">
           <div class="profile-grid">
-            <section class="profile-card"><span>Primary responsibilities</span><h3>主要职责</h3><p>{{ member.primaryResponsibilities || '暂未填写' }}</p></section>
-            <section class="profile-card"><span>Backup responsibilities</span><h3>备份职责</h3><p>{{ member.backupResponsibilities || '暂未填写' }}</p></section>
+            <section class="profile-card"><span>主要职责</span><h3>主要职责</h3><p>{{ member.primaryResponsibilities || '暂未填写' }}</p></section>
+            <section class="profile-card"><span>备份职责</span><h3>备份职责</h3><p>{{ member.backupResponsibilities || '暂未填写' }}</p></section>
           </div>
-          <section class="detail-section"><header><div><span>Current work</span><h3>当前任务</h3></div></header><el-table :data="detail.recentTasks || []" size="small" empty-text="暂无当前任务"><el-table-column prop="title" label="任务" min-width="210" /><el-table-column prop="period" label="周期" width="95" /><el-table-column prop="workflowStatus" label="状态" width="130" /><el-table-column prop="planDate" label="计划日期" width="115" /></el-table></section>
-          <section class="detail-section"><header><div><span>Ownership</span><h3>资产主备关系</h3></div></header><el-table :data="detail.assets || []" size="small" empty-text="暂无资产关系"><el-table-column prop="assetName" label="资产" min-width="200" /><el-table-column prop="assetStage" label="阶段" width="110" /><el-table-column label="角色" width="100"><template slot-scope="scope">{{ Number(scope.row.primaryOwnerId) === Number(member.id) ? '主负责人' : '备份人' }}</template></el-table-column><el-table-column label="风险" width="110"><template slot-scope="scope"><span v-if="scope.row.singlePointRisk" class="risk"><i class="el-icon-warning" /> 单点风险</span><span v-else>—</span></template></el-table-column></el-table></section>
+          <section class="detail-section"><header><div><span>当前工作</span><h3>当前任务</h3></div></header><el-table :data="detail.recentTasks || []" size="small" empty-text="暂无当前任务"><el-table-column prop="title" label="任务" min-width="210" /><el-table-column prop="period" label="周期" width="95" /><el-table-column label="状态" width="130"><template slot-scope="scope">{{ taskStatusLabel(scope.row.workflowStatus) }}</template></el-table-column><el-table-column prop="planDate" label="计划日期" width="115" /></el-table></section>
+          <section class="detail-section"><header><div><span>主备关系</span><h3>资产主备关系</h3></div></header><el-table :data="detail.assets || []" size="small" empty-text="暂无资产关系"><el-table-column prop="assetName" label="资产" min-width="200" /><el-table-column prop="assetStage" label="阶段" width="110" /><el-table-column label="角色" width="100"><template slot-scope="scope">{{ Number(scope.row.primaryOwnerId) === Number(member.id) ? '主负责人' : '备份人' }}</template></el-table-column><el-table-column label="风险" width="110"><template slot-scope="scope"><span v-if="scope.row.singlePointRisk" class="risk"><i class="el-icon-warning" /> 单点风险</span><span v-else>—</span></template></el-table-column></el-table></section>
         </el-tab-pane>
         <el-tab-pane label="技能矩阵" name="skills"><skill-matrix-editor :key="skillKey" :member-id="member.id" :value="detail.skillMatrix || []" :editable="member.memberStatus === 'ACTIVE' && canEditSkills" @saved="reload" /></el-tab-pane>
         <el-tab-pane label="一对一沟通" name="one2one"><one-to-one-timeline :records="detail.oneToOnes || []" :member="member" @saved="reload" /></el-tab-pane>
@@ -28,6 +28,7 @@
 </template>
 
 <script>
+import { bizLineLabel, statusLabel } from '@/utils/lab-status'
 import { getMember } from '@/api/lab/member'
 import SkillMatrixEditor from './SkillMatrixEditor'
 import OneToOneTimeline from './OneToOneTimeline'
@@ -52,6 +53,8 @@ export default {
     memberId(value, previous) { if (this.visible && value && Number(value) !== Number(previous)) { this.tab = 'profile'; this.reload() } }
   },
   methods: {
+    bizLineLabel,
+    taskStatusLabel(status) { return statusLabel('TASK_WORKFLOW', status) },
     reload() {
       const token = ++this.requestToken
       const memberId = this.memberId

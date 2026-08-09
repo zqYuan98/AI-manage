@@ -192,9 +192,9 @@ class LabSqlContractTest {
         String compact = sql.toLowerCase(Locale.ROOT).replace("`", "").replaceAll("\\s+", "");
         assertTrue(compact.contains("set@ailab_seed_month_default_flag=(selectcasewhencount(*)=0then'1'else'0'endfromlab_report_templatewhereperiod_type='month'andlatest_flag='1'anddefault_flag='1'andstatus='enabled'anddel_flag='0')"),
                 "the demo seed must only become MONTH default when migration left no enabled default");
-        assertTrue(compact.contains("30001,'standard_month','standardmonthlylaboratoryreport','month',1,'1',@ailab_seed_month_default_flag,'enabled'"),
+        assertTrue(compact.contains("30001,'standard_month','实验室标准月报','month',1,'1',@ailab_seed_month_default_flag,'enabled'"),
                 "the seeded template must consume the post-cleanup default decision instead of unconditionally claiming default");
-        assertTrue(Pattern.compile("'manual_note','[^']+','manual',40,null,json_object\\('filters',json_array\\(\\)\\),json_object\\('placeholder','entermanagementnote','required',true\\)")
+        assertTrue(Pattern.compile("'manual_note','[^']+','manual',40,null,json_object\\('filters',json_array\\(\\)\\),json_object\\('placeholder','填写本月管理小结','required',true\\)")
                         .matcher(compact).find(),
                 "the seeded manual management note must be explicitly required so create/finalize completeness is immutable");
     }

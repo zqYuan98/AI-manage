@@ -1,6 +1,6 @@
 <template>
   <section class="artifact-board lab-panel" aria-labelledby="artifact-title">
-    <header><div><span class="lab-eyebrow">Artifact pipeline</span><h2 id="artifact-title">制品生命周期</h2></div><span class="lifecycle" :class="tone(report.lifecycleStatus)">{{ lifecycleLabel }}</span></header>
+    <header><div><span class="lab-eyebrow">制品生成流程</span><h2 id="artifact-title">制品生命周期</h2></div><span class="lifecycle" :class="tone(report.lifecycleStatus)">{{ lifecycleLabel }}</span></header>
     <div v-if="!report.id" class="lab-empty">请从历史列表选择报告</div>
     <div v-else class="artifact-grid">
       <article v-for="item in artifacts" :key="item.code" :class="['artifact-card', tone(item.status)]">
@@ -20,6 +20,8 @@
 </template>
 
 <script>
+import { statusLabel } from '@/utils/lab-status'
+
 export default {
   name: 'ArtifactStatus',
   props: { report: { type: Object, default: () => ({}) }, jobs: { type: Array, default: () => [] }},
@@ -33,10 +35,10 @@ export default {
       ]
     },
     canFinalize() { return this.artifacts.every(item => item.status === 'SUCCESS') && this.report.finalFlag !== '1' && this.report.lifecycleStatus !== 'FINALIZED' },
-    lifecycleLabel() { return ({ DRAFT: '草稿', GENERATING: '生成中', READY: '待定稿', FINALIZED: '已定稿', SUPERSEDED: '已被新版取代', FAILED: '部分失败' })[this.report.lifecycleStatus] || this.report.lifecycleStatus || '未创建' }
+    lifecycleLabel() { return this.report.lifecycleStatus ? statusLabel('REPORT', this.report.lifecycleStatus) : '未创建' }
   },
   methods: {
-    label(value) { return ({ PENDING: '等待', QUEUED: '排队中', RUNNING: '生成中', SUCCESS: '已就绪', FAILED: '失败', SKIPPED: '未需生成', NOT_REQUESTED: '未请求' })[value] || value || '未开始' },
+    label(value) { return value ? statusLabel('ARTIFACT', value) : '未开始' },
     tone(value) { const status = String(value || '').toUpperCase(); if (/FAIL/.test(status)) return 'is-danger'; if (/RUNNING|QUEUED|GENERATING/.test(status)) return 'is-active'; if (/SUCCESS|FINAL|READY/.test(status)) return 'is-success'; return 'is-muted' },
     jobCaption(code) { const jobType = ['JSON', 'MARKDOWN'].includes(code) ? 'DATA' : code; const job = this.jobs.filter(item => String(item.jobType || '').toUpperCase() === jobType).sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0]; if (!job) return '尚无任务'; if (job.jobStatus === 'FAILED') return job.errorSummary || `第 ${job.attemptCount || 1} 次尝试失败`; return `${job.progressRate || 0}% · 第 ${job.attemptCount || 1} 次尝试` }
   }

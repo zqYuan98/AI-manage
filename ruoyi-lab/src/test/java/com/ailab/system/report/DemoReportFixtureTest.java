@@ -50,12 +50,12 @@ class DemoReportFixtureTest {
         assertFalse(tasks.contains("'2026-07'"), "July task section must render the seeded empty state");
         assertTrue(sql.contains("'2026-07',1,'1',92.50") && sql.contains("'2026-07',1,'1',88.00")
                 && sql.contains("'2026-07',1,'1',76.00"));
-        assertTrue(sql.contains("'Improve model quality'") && sql.contains("'Expand serving capability'")
-                && sql.contains("'Accept accelerator cluster'"));
+        assertTrue(sql.contains("'提升模型质量'") && sql.contains("'扩展模型服务能力'")
+                && sql.contains("'完成加速器集群验收'"));
         assertTrue(sql.contains("'2026-07','ALL','MANUAL_NOTE'")
-                && sql.contains("'July performance calibration completed'")
-                && sql.contains("'Delivery evidence and cross-line reviews were closed'")
-                && sql.contains("'Prepare Q3 milestone execution'"));
+                && sql.contains("'七月绩效校准已完成'")
+                && sql.contains("'交付证据和跨业务线评审已闭环'")
+                && sql.contains("'推进三季度里程碑执行'"));
         ReportData report = demoReport();
         assertTrue(report.getSections().get(0).getRows().isEmpty());
         assertEquals(3, report.getSections().get(1).getRows().size());
@@ -75,7 +75,7 @@ class DemoReportFixtureTest {
         assertTrue(json.length > 100 && json[0] == '{');
         String text = new String(markdown, StandardCharsets.UTF_8);
         assertTrue(text.contains("人工智能实验室月报"));
-        assertTrue(text.contains("Algorithm Lead") && text.contains("92\\.50"));
+        assertTrue(text.contains("算法负责人") && text.contains("92\\.50"));
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(word))) {
             StringBuilder content = new StringBuilder();
             document.getParagraphs().forEach(value -> content.append(value.getText()).append('\n'));
@@ -136,25 +136,25 @@ class DemoReportFixtureTest {
                         Arrays.asList("left", "left", "left"))));
         sections.add(new ReportSectionData("SCORE_STAT", "STAT", "绩效概览",
                 Arrays.asList(
-                        row("member", "Algorithm Lead", "score", new BigDecimal("92.50"), "status", "CALIBRATED"),
-                        row("member", "Platform Lead", "score", new BigDecimal("88.00"), "status", "CALIBRATED"),
-                        row("member", "Platform Engineer", "score", new BigDecimal("76.00"), "status", "PENDING")),
+                        row("member", "算法负责人", "score", new BigDecimal("92.50"), "status", "已校准"),
+                        row("member", "平台负责人", "score", new BigDecimal("88.00"), "status", "已校准"),
+                        row("member", "平台工程师", "score", new BigDecimal("76.00"), "status", "待确认")),
                 tableSummary(Arrays.asList("成员", "得分", "校准状态"),
                         Arrays.asList("member", "score", "status"),
                         Arrays.asList("left", "right", "center"))));
         sections.add(new ReportSectionData("MANAGER_TEXT", "TEXT", "目标进展",
                 Collections.<Map<String,Object>>emptyList(),
-                map("text", "Build dependable AI platform · 62% · Platform and model work in progress")));
+                map("text", "建设稳定可靠的人工智能平台 · 62% · 平台与模型能力持续建设中")));
         sections.add(new ReportSectionData("MANUAL_NOTE", "MANUAL", "管理小结",
                 Collections.<Map<String,Object>>emptyList(),
-                map("text", "July performance calibration completed\n\nDelivery evidence and cross-line reviews were closed\n\nPrepare Q3 milestone execution")));
+                map("text", "七月绩效校准已完成\n\n交付证据和跨业务线评审已闭环\n\n推进三季度里程碑执行")));
         List<Map<String,Object>> groups = Collections.emptyList();
         sections.add(new ReportSectionData("LINE_GROUP", "GROUP_TEXT", "业务线进展",
                 Collections.<Map<String,Object>>emptyList(), map("groups", groups)));
         sections.add(renderChart(context));
         Map<String,Object> metadata = map("header", map("title", "人工智能实验室月报", "logo", "ai-lab"),
                 "style", map("theme", "blue", "font", "Microsoft YaHei"),
-                "source", "sql/ailab.sql deterministic demo rows", "sensitivePermission", "lab:report:sensitive");
+                "source", "sql/ailab.sql 确定性演示数据", "sensitivePermission", "lab:report:sensitive");
         return new ReportData(context, "standard_month", 1, sections, metadata);
     }
 
@@ -171,9 +171,9 @@ class DemoReportFixtureTest {
         definition.setManualFlag("0"); definition.setVisibleFlag("1"); definition.setSensitiveFlag("0");
         definition.setVersion(1); definition.setDelFlag("0");
         List<Map<String,Object>> rows = Arrays.asList(
-                row("goalTitle", "Improve model quality", "progressRate", 75),
-                row("goalTitle", "Expand serving capability", "progressRate", 58),
-                row("goalTitle", "Accept accelerator cluster", "progressRate", 90));
+                row("goalTitle", "提升模型质量", "progressRate", 75),
+                row("goalTitle", "扩展模型服务能力", "progressRate", 58),
+                row("goalTitle", "完成加速器集群验收", "progressRate", 90));
         ReportSectionData source = new ReportSectionData("PROGRESS_CHART", "CHART", "三季度目标进度",
                 rows, Collections.<String,Object>emptyMap());
         return new ChartSectionRenderer().render(context, new ReportSectionConfig(definition), source);

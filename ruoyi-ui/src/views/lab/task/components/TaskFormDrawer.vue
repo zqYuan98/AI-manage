@@ -10,7 +10,7 @@
     <div class="task-form__shell">
       <header class="task-form__header">
         <button type="button" aria-label="关闭" @click="$emit('close')"><i class="el-icon-close" /></button>
-        <span class="lab-eyebrow">Task fact sheet</span>
+        <span class="lab-eyebrow">任务事实卡</span>
         <h2>{{ form.id ? '编辑任务事实' : '新增任务' }}</h2>
         <p>先维护计划字段，再按实际发生逐步补充协同、结果、证据和阻塞事实。</p>
       </header>

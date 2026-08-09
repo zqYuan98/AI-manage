@@ -1,6 +1,6 @@
 <template>
   <main class="member-page">
-    <header class="page-hero"><div><span>Team directory</span><h1>成员与能力台账</h1><p>以职责、技能、资产主备和近期工作还原团队能力，不展示排名。</p></div><el-button v-hasPermi="['lab:member:add']" type="primary" icon="el-icon-plus" @click="openCreate">新增成员档案</el-button></header>
+    <header class="page-hero"><div><span>团队成员名册</span><h1>成员与能力台账</h1><p>以职责、技能、资产主备和近期工作还原团队能力，不展示排名。</p></div><el-button v-hasPermi="['lab:member:add']" type="primary" icon="el-icon-plus" @click="openCreate">新增成员档案</el-button></header>
     <section class="member-summary">
       <article><strong>{{ total }}</strong><span>授权范围成员</span></article><article><strong>{{ activeCount }}</strong><span>当前在岗</span></article><article><strong>{{ bizLines }}</strong><span>业务方向</span></article><article><strong>{{ leadCount }}</strong><span>方向负责人</span></article>
     </section>

@@ -1,7 +1,7 @@
 <template>
   <section class="skill-matrix">
     <header>
-      <div><span>Capability matrix</span><h3>技能矩阵</h3></div>
+      <div><span>能力矩阵</span><h3>技能矩阵</h3></div>
       <el-button v-if="editable" v-hasPermi="['lab:skill:list']" size="small" type="primary" :loading="saving" @click="save">批量保存</el-button>
     </header>
     <el-table :data="rows" size="small" empty-text="暂无技能记录">

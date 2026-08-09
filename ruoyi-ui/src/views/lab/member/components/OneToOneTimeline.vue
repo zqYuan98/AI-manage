@@ -1,10 +1,10 @@
 <template>
   <section class="one-timeline">
-    <header><div><span>Conversation history</span><h3>一对一沟通</h3></div><el-button v-hasPermi="['lab:one2one:add']" size="small" type="primary" @click="openCreate">记录沟通</el-button></header>
+    <header><div><span>沟通记录</span><h3>一对一沟通</h3></div><el-button v-hasPermi="['lab:one2one:add']" size="small" type="primary" @click="openCreate">记录沟通</el-button></header>
     <el-timeline v-if="records.length">
       <el-timeline-item v-for="item in records" :key="item.id" :timestamp="item.meetingDate" placement="top" color="#0a7b74">
         <article>
-          <div class="one-timeline__title"><strong>{{ item.topic }}</strong><el-tag size="mini" effect="plain">{{ item.status || 'OPEN' }}</el-tag></div>
+          <div class="one-timeline__title"><strong>{{ item.topic }}</strong><el-tag size="mini" effect="plain">{{ item.status === 'CLOSED' ? '已完成' : '进行中' }}</el-tag></div>
           <dl><dt>事实与证据</dt><dd>{{ item.factsEvidence || '—' }}</dd><dt>困难</dt><dd>{{ item.difficulties || '—' }}</dd><dt>下一步</dt><dd>{{ item.nextAction || '—' }}</dd></dl>
           <p v-if="item.managerComment"><i class="el-icon-chat-dot-round" /> {{ item.managerComment }}</p>
           <el-button v-hasPermi="['lab:one2one:edit']" type="text" @click="openEdit(item)">编辑记录</el-button>

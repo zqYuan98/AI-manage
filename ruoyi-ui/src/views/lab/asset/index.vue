@@ -1,6 +1,6 @@
 <template>
   <main class="asset-page">
-    <header class="asset-hero"><div><span>Reusable capability ledger</span><h1>资产与主备覆盖</h1><p>资产价值由复用、交付阶段与可持续主备覆盖共同构成。</p></div><el-button v-hasPermi="['lab:asset:add']" type="primary" icon="el-icon-plus" @click="openCreate">登记资产</el-button></header>
+    <header class="asset-hero"><div><span>可复用能力台账</span><h1>资产与主备覆盖</h1><p>资产价值由复用、交付阶段与可持续主备覆盖共同构成。</p></div><el-button v-hasPermi="['lab:asset:add']" type="primary" icon="el-icon-plus" @click="openCreate">登记资产</el-button></header>
     <section class="asset-insight">
       <article><span>资产总数</span><strong>{{ total }}</strong><small>当前授权列表</small></article><article class="risk"><span>单点风险</span><strong>{{ riskCount }}</strong><small>关键或在用资产缺少活跃备份</small></article><article><span>本页部署 / 验收</span><strong>{{ inUseCount }}</strong><small>当前页进入稳定使用阶段</small></article><article><span>本页累计复用</span><strong>{{ reuseTotal }}</strong><small>当前页可量化复用次数</small></article>
     </section>

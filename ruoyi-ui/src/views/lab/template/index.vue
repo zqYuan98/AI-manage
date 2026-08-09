@@ -1,7 +1,7 @@
 <template>
   <main class="template-designer">
     <section class="designer-header">
-      <div><span>TEMPLATE / IMMUTABLE REVISION</span><h1>报告模板设计器</h1><p>对数据源、过滤、列与渲染进行强类型编排，发布后只创建新修订</p></div>
+      <div><span>模板 / 不可变修订</span><h1>报告模板设计器</h1><p>对数据源、过滤、列与渲染进行强类型编排，发布后只创建新修订</p></div>
       <div class="designer-header__meta"><i class="el-icon-lock" /> <span>不执行任意 Java 访问</span><b>{{ metadata.queryFields.length }} 个安全字段</b></div>
     </section>
 
@@ -9,7 +9,7 @@
       <el-select v-model="activeTemplateId" filterable placeholder="选择模板修订" @change="requestTemplateChange">
         <el-option v-for="item in templates" :key="item.id" :label="templateLabel(item)" :value="item.id"><span>{{ item.templateName }} · r{{ item.revisionNo }}</span><b v-if="item.defaultFlag==='1'">默认</b></el-option>
       </el-select>
-      <div v-if="template.id" class="designer-toolbar__identity"><strong>{{ template.templateCode }}</strong><span>{{ template.periodType }} · {{ template.status }} · version {{ template.version }}</span></div>
+      <div v-if="template.id" class="designer-toolbar__identity"><strong>{{ template.templateCode }}</strong><span>{{ statusLabel('PERIOD', template.periodType) }} · {{ statusLabel('TEMPLATE', template.status) }} · 版本 {{ template.version }}</span></div>
       <div class="designer-toolbar__actions">
         <el-button size="small" icon="el-icon-setting" @click="settingsVisible=true">模板属性</el-button>
         <el-button v-hasPermi="['lab:template:config']" size="small" icon="el-icon-document-copy" :disabled="!template.id" @click="openSaveAs">另存为</el-button>
@@ -43,7 +43,7 @@
     </section>
 
     <el-dialog :visible.sync="settingsVisible" title="模板属性" width="720px" append-to-body>
-      <el-form label-position="top" size="small"><el-row :gutter="12"><el-col :span="12"><el-form-item label="模板名称"><el-input v-model.trim="template.templateName" maxlength="200" @input="markDirty" /></el-form-item></el-col><el-col :span="6"><el-form-item label="周期类型"><el-select v-model="template.periodType" disabled><el-option v-for="item in metadata.reportTypes" :key="item" :label="item" :value="item" /></el-select></el-form-item></el-col><el-col :span="6"><el-form-item label="状态"><el-select v-model="template.status" @change="markDirty"><el-option v-for="item in metadata.templateStatuses" :key="item" :label="item" :value="item" /></el-select></el-form-item></el-col></el-row>
+      <el-form label-position="top" size="small"><el-row :gutter="12"><el-col :span="12"><el-form-item label="模板名称"><el-input v-model.trim="template.templateName" maxlength="200" @input="markDirty" /></el-form-item></el-col><el-col :span="6"><el-form-item label="周期类型"><el-select v-model="template.periodType" disabled><el-option v-for="item in metadata.reportTypes" :key="item" :label="statusLabel('PERIOD', item)" :value="item" /></el-select></el-form-item></el-col><el-col :span="6"><el-form-item label="状态"><el-select v-model="template.status" @change="markDirty"><el-option v-for="item in metadata.templateStatuses" :key="item" :label="statusLabel('TEMPLATE', item)" :value="item" /></el-select></el-form-item></el-col></el-row>
         <el-divider content-position="left">页眉与版式</el-divider><el-row :gutter="12"><el-col :span="12"><el-form-item label="报告标题"><el-input v-model.trim="header.title" maxlength="200" @input="markDirty" /></el-form-item></el-col><el-col :span="12"><el-form-item label="副标题"><el-input v-model.trim="header.subtitle" maxlength="200" @input="markDirty" /></el-form-item></el-col><el-col :span="8"><el-form-item label="主题"><el-input v-model.trim="style.theme" maxlength="64" @input="markDirty" /></el-form-item></el-col><el-col :span="8"><el-form-item label="字体"><el-input v-model.trim="style.font" maxlength="100" @input="markDirty" /></el-form-item></el-col><el-col :span="8"><el-form-item label="主色"><el-color-picker v-model="style.primaryColor" @change="markDirty" /></el-form-item></el-col></el-row>
       </el-form><span slot="footer"><el-button type="primary" @click="settingsVisible=false">完成</el-button></span>
     </el-dialog>
@@ -53,6 +53,7 @@
 
 <script>
 import { saveAs as saveBlob } from 'file-saver'
+import { statusLabel } from '@/utils/lab-status'
 import { exportTemplate, getTemplateConfig, getTemplateMetadata, getTemplatePreview, importTemplate, listTemplateTree, publishTemplateDefault, saveTemplateAs, saveTemplateRevision } from '@/api/lab/template'
 import SectionTree from './components/SectionTree'; import SectionProperties from './components/SectionProperties'; import MarkdownPreview from './components/MarkdownPreview'
 const emptyMetadata = () => ({ sectionTypes: [], providers: [], operators: [], queryFields: [], reportTypes: [], templateStatuses: [], compatibleProviders: {}, providerPeriods: {}, providerFields: {}, providerMetrics: {}, freemarkerVariables: [] })
@@ -69,6 +70,7 @@ export default {
   },
   created() { this.bootstrap() }, beforeDestroy() { clearTimeout(this.previewTimer); this.loadToken++ },
   methods: {
+    statusLabel,
     bootstrap() { this.loadError = false; this.loading = true; return Promise.all([getTemplateMetadata(), listTemplateTree()]).then(([metadata, tree]) => { this.metadata = Object.assign(emptyMetadata(), metadata.data || {}); this.templates = Array.isArray(tree.data) ? tree.data : []; const routeId = Number(this.$route.query.id); this.activeTemplateId = this.templates.some(item => Number(item.id) === routeId) ? routeId : (this.templates.find(item => item.latestFlag === '1' && item.defaultFlag === '1') || this.templates[0] || {}).id || null; if (this.activeTemplateId) return this.loadConfig(this.activeTemplateId) }).catch(() => { this.loadError = true }).finally(() => { this.loading = false }) },
     loadConfig(id) { const token = ++this.loadToken; this.loading = true; this.loadError = false; return Promise.all([getTemplateConfig(id), getTemplatePreview(id)]).then(([config, preview]) => { if (token !== this.loadToken) return; this.template = Object.assign({}, config.data.template || {}); this.sections = (config.data.sections || []).map(item => Object.assign({}, item, { _key: item.id || ++this.localKey })).sort((a, b) => Number(a.sortNo) - Number(b.sortNo)); this.header = this.parse(this.template.headerJson); this.style = this.parse(this.template.styleJson); this.selectedCode = (this.sections[0] || {}).sectionCode || ''; this.preview = preview.data || ''; this.dirty = false }).catch(() => { if (token === this.loadToken) this.loadError = true }).finally(() => { if (token === this.loadToken) this.loading = false }) },
     requestTemplateChange(id) { const previous = this.template.id; if (!this.dirty || !previous || Number(previous) === Number(id)) return this.loadConfig(id); return this.$confirm('当前模板有未保存修改。切换修订将丢弃这些修改，是否继续？', '切换模板修订').then(() => this.loadConfig(id)).catch(() => { this.activeTemplateId = previous }) },
