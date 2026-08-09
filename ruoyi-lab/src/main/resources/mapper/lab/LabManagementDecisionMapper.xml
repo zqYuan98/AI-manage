@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabManagementDecisionMapper">
+    <resultMap id="DecisionResult" type="com.ailab.system.domain.LabManagementDecision">
+        <id property="id" column="id"/><result property="period" column="period"/><result property="bizLine" column="biz_line"/>
+        <result property="problem" column="problem"/><result property="decisionContent" column="decision_content"/>
+        <result property="ownerId" column="owner_id"/><result property="dueDate" column="due_date"/>
+        <result property="relatedGoalId" column="related_goal_id"/><result property="relatedTaskId" column="related_task_id"/>
+        <result property="decisionStatus" column="decision_status"/><result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/><result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
+    </resultMap>
+    <sql id="columns">id,period,biz_line,problem,decision_content,owner_id,due_date,related_goal_id,related_task_id,decision_status,version,del_flag,create_by,create_time,update_by,update_time,remark</sql>
+    <sql id="scope">
+        <choose>
+            <when test="scope.roleKey == 'lab_manager'"></when>
+            <when test="scope.roleKey == 'lab_lead'">and biz_line=#{scope.bizLine}</when>
+            <otherwise>and owner_id=#{scope.memberId}</otherwise>
+        </choose>
+    </sql>
+    <select id="selectDecisionList" resultMap="DecisionResult">
+        select <include refid="columns"/> from lab_management_decision
+        where del_flag='0' and period=#{period}
+        <if test="status != null and status != ''">and decision_status=#{status}</if>
+        <include refid="scope"/> order by due_date,id limit 201
+    </select>
+    <select id="selectDecisionForUpdate" parameterType="long" resultMap="DecisionResult">
+        select <include refid="columns"/> from lab_management_decision where id=#{id} and del_flag='0' for update
+    </select>
+    <insert id="insertDecision" parameterType="com.ailab.system.domain.LabManagementDecision" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_management_decision(period,biz_line,problem,decision_content,owner_id,due_date,related_goal_id,
+          related_task_id,decision_status,version,del_flag,create_by,create_time,remark)
+        values(#{period},#{bizLine},#{problem},#{decisionContent},#{ownerId},#{dueDate},#{relatedGoalId},
+          #{relatedTaskId},#{decisionStatus},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="completeDecision">
+        update lab_management_decision set decision_status='DONE',version=version+1,update_by=#{actor},update_time=sysdate()
+        where id=#{id} and version=#{version} and decision_status='OPEN' and del_flag='0'
+    </update>
+    <select id="selectActiveMemberBizLine" parameterType="long" resultType="string">
+        select biz_line from lab_member where id=#{memberId} and member_status='ACTIVE' and del_flag='0' limit 1
+    </select>
+    <select id="selectTaskBizLine" parameterType="long" resultType="string">
+        select biz_line from lab_task where id=#{taskId} and del_flag='0' limit 1
+    </select>
+    <select id="selectGoalOwnerBizLine" parameterType="long" resultType="string">
+        select m.biz_line from lab_goal g join lab_member m on m.id=g.owner_id and m.member_status='ACTIVE' and m.del_flag='0'
+        where g.id=#{goalId} and g.del_flag='0' limit 1
+    </select>
+</mapper>

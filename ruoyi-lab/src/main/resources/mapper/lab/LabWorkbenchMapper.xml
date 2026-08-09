@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabWorkbenchMapper">
+    <resultMap id="ActionResult" type="com.ailab.system.dto.DashboardActionItem">
+        <id property="id" column="id"/><result property="type" column="type"/><result property="title" column="title"/>
+        <result property="status" column="status"/><result property="dueDate" column="due_date"/><result property="period" column="period"/>
+        <result property="definition" column="definition"/><result property="lastUpdated" column="last_updated"/>
+    </resultMap>
+    <resultMap id="LoadResult" type="com.ailab.system.dto.MemberLoad">
+        <id property="memberId" column="member_id"/><result property="memberName" column="member_name"/>
+        <result property="bizLine" column="biz_line"/><result property="activeTaskCount" column="active_task_count"/>
+        <result property="recentWeekTaskCount" column="recent_week_task_count"/><result property="overdueCount" column="overdue_count"/>
+        <result property="blockedCount" column="blocked_count"/><result property="coordinationCount" column="coordination_count"/>
+        <result property="period" column="period"/><result property="definition" column="definition"/><result property="lastUpdated" column="last_updated"/>
+    </resultMap>
+    <resultMap id="DecisionResult" type="com.ailab.system.domain.LabManagementDecision">
+        <id property="id" column="id"/><result property="period" column="period"/><result property="bizLine" column="biz_line"/>
+        <result property="problem" column="problem"/><result property="decisionContent" column="decision_content"/>
+        <result property="ownerId" column="owner_id"/><result property="dueDate" column="due_date"/>
+        <result property="relatedGoalId" column="related_goal_id"/><result property="relatedTaskId" column="related_task_id"/>
+        <result property="decisionStatus" column="decision_status"/><result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/><result property="createTime" column="create_time"/>
+    </resultMap>
+    <sql id="teamScope"><if test="scope.roleKey == 'lab_lead'">and t.biz_line=#{scope.bizLine}</if></sql>
+    <sql id="decisionScope"><if test="scope.roleKey == 'lab_lead'">and d.biz_line=#{scope.bizLine}</if></sql>
+    <select id="selectPendingDecisions" resultMap="DecisionResult">
+        select d.id,d.period,d.biz_line,d.problem,d.decision_content,d.owner_id,d.due_date,d.related_goal_id,d.related_task_id,
+          d.decision_status,d.version,d.del_flag,d.create_time from lab_management_decision d
+        where d.del_flag='0' and d.decision_status='OPEN' and d.period=#{period}<include refid="decisionScope"/> order by d.due_date,d.id limit 201
+    </select>
+    <select id="selectNewBlocks" resultMap="ActionResult">
+        select t.id,'NEW_BLOCK' type,t.title,b.block_status status,t.plan_date due_date,t.period,
+          b.block_reason definition,b.block_start_time last_updated
+        from lab_task_block_event b join lab_task t on t.id=b.task_id and t.del_flag='0'
+        where b.del_flag='0' and b.block_status='OPEN' and b.block_start_time&gt;=#{since}
+        <include refid="teamScope"/> order by b.block_start_time desc,b.id limit 201
+    </select>
+    <select id="selectForecastDelays" resultMap="ActionResult">
+        select t.id,'FORECAST_DELAY' type,t.title,t.execution_status status,t.plan_date due_date,t.period,
+          coalesce(t.fail_reason,t.next_action,t.result_desc) definition,coalesce(t.update_time,t.create_time) last_updated
+        from lab_task t where t.del_flag='0' and t.task_level='week' and t.period_lock_flag='0'
+          and t.execution_status='ACTIVE' and t.plan_date&lt;=date_add(date(#{asOf}),interval 7 day)
+          and (t.current_block_flag='1' or t.plan_date&lt;date(#{asOf}) or t.result_status='DELAYED')
+        <include refid="teamScope"/> order by t.plan_date,t.id limit 201
+    </select>
+    <select id="selectPendingAcceptance" resultMap="ActionResult">
+        select t.id,'PENDING_ACCEPTANCE' type,t.title,t.workflow_status status,t.plan_date due_date,t.period,
+          t.deliverable definition,coalesce(t.update_time,t.create_time) last_updated
+        from lab_task t where t.del_flag='0' and t.task_level='month' and t.workflow_status='PENDING_REVIEW' and t.period_lock_flag='0'
+        <include refid="teamScope"/> order by t.plan_date,t.id limit 201
+    </select>
+    <select id="selectStaleKeyResults" resultMap="ActionResult">
+        select t.id,'STALE_KEY_RESULT' type,t.title,t.workflow_status status,t.plan_date due_date,t.period,
+          t.next_action definition,coalesce(t.update_time,t.create_time) last_updated
+        from lab_task t where t.del_flag='0' and t.task_level='month' and t.task_type='key' and t.period_lock_flag='0'
+          and t.workflow_status in('DRAFT','ACTIVE') and coalesce(t.update_time,t.create_time)&lt;#{staleBefore}
+        <include refid="teamScope"/> order by coalesce(t.update_time,t.create_time),t.id limit 201
+    </select>
+    <select id="selectTeamCommitmentCounts" resultMap="LoadResult">
+        select m.id member_id,u.nick_name member_name,m.biz_line,
+          sum(case when t.task_level='month' then 1 else 0 end) active_task_count,
+          sum(case when t.task_level='week' then 1 else 0 end) recent_week_task_count,
+          sum(case when t.task_level='week' and t.execution_status='ACTIVE' and t.plan_date&lt;date(#{asOf}) then 1 else 0 end) overdue_count,
+          sum(case when t.current_block_flag='1' then 1 else 0 end) blocked_count,
+          sum(case when t.coordination_required='1' then 1 else 0 end) coordination_count,
+          #{period} period,'按月度父任务归属统计成员结果、承诺和异常' definition,max(coalesce(t.update_time,t.create_time)) last_updated
+        from lab_member m join sys_user u on u.user_id=m.user_id and u.status='0' and u.del_flag='0'
+        left join lab_task t on t.owner_id=m.id and t.del_flag='0' and t.period_lock_flag='0'
+          and ((t.task_level='month' and t.period=#{period}) or (t.task_level='week' and exists(
+            select 1 from lab_task p where p.id=t.parent_id and p.task_level='month' and p.period=#{period} and p.del_flag='0')))
+        where m.member_status='ACTIVE' and m.del_flag='0'
+        <if test="scope.roleKey == 'lab_lead'">and m.biz_line=#{scope.bizLine}</if>
+        group by m.id,u.nick_name,m.biz_line order by m.biz_line,m.id limit 201
+    </select>
+    <select id="selectOwnMonthlyResults" resultMap="ActionResult">
+        select t.id,'MONTH_RESULT' type,t.title,t.workflow_status status,t.plan_date due_date,t.period,t.deliverable definition,
+          coalesce(t.update_time,t.create_time) last_updated from lab_task t
+        where t.del_flag='0' and t.owner_id=#{scope.memberId} and t.task_level='month' and t.period=#{period} order by t.plan_date,t.id limit 201
+    </select>
+    <select id="selectOwnWeeklyCommitments" resultMap="ActionResult">
+        select t.id,'WEEK_COMMITMENT' type,t.title,t.execution_status status,t.plan_date due_date,t.period,t.deliverable definition,
+          coalesce(t.update_time,t.create_time) last_updated from lab_task t join lab_task p on p.id=t.parent_id and p.del_flag='0'
+        where t.del_flag='0' and t.owner_id=#{scope.memberId} and t.task_level='week' and p.period=#{period} order by t.plan_date,t.id limit 201
+    </select>
+    <select id="selectOwnDueItems" resultMap="ActionResult">
+        select t.id,'DUE_COMMITMENT' type,t.title,t.execution_status status,t.plan_date due_date,t.period,t.deliverable definition,
+          coalesce(t.update_time,t.create_time) last_updated from lab_task t
+        where t.del_flag='0' and t.owner_id=#{scope.memberId} and t.task_level='week' and t.execution_status='ACTIVE'
+          and t.period_lock_flag='0' and t.plan_date&lt;=date_add(date(#{asOf}),interval 7 day) order by t.plan_date,t.id limit 201
+    </select>
+    <select id="selectOwnBlocks" resultMap="ActionResult">
+        select t.id,'OPEN_BLOCK' type,t.title,b.block_status status,t.plan_date due_date,t.period,b.block_reason definition,
+          b.block_start_time last_updated from lab_task_block_event b join lab_task t on t.id=b.task_id and t.del_flag='0'
+        where b.del_flag='0' and b.block_status='OPEN' and t.owner_id=#{scope.memberId} and t.period_lock_flag='0'
+        order by b.block_start_time,b.id limit 201
+    </select>
+    <select id="selectOwnMissingEvidence" resultMap="ActionResult">
+        select t.id,'MISSING_EVIDENCE' type,t.title,case when t.result_desc is null or trim(t.result_desc)='' then 'MISSING_RESULT' else 'MISSING_EVIDENCE' end status,
+          t.plan_date due_date,t.period,t.deliverable definition,coalesce(t.update_time,t.create_time) last_updated
+        from lab_task t where t.del_flag='0' and t.owner_id=#{scope.memberId} and t.period_lock_flag='0'
+          and ((t.task_level='month' and t.period=#{period}
+                and (t.workflow_status='PENDING_REVIEW' or (t.workflow_status='ACTIVE' and coalesce(t.result_status,'DOING')&lt;&gt;'DOING'))
+                and (t.result_desc is null or trim(t.result_desc)='' or not exists(select 1 from lab_task_evidence e where e.task_id=t.id and e.del_flag='0')))
+            or (t.task_level='week' and exists(select 1 from lab_task p where p.id=t.parent_id and p.period=#{period} and p.del_flag='0')
+                and t.execution_status in('SELF_DONE','SELF_UNDONE') and (t.result_desc is null or trim(t.result_desc)='')))
+        order by t.plan_date,t.id limit 201
+    </select>
+</mapper>
