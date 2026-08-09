@@ -4,6 +4,9 @@ import java.util.Date;
 
 /** One trusted task/recipient projection returned by an aggregate reminder query. */
 public class ReminderCandidate {
+    private String candidateType;
+    private String businessType;
+    private Long businessId;
     private Long taskId;
     private String taskTitle;
     private Integer episodeNo;
@@ -12,6 +15,13 @@ public class ReminderCandidate {
     private String audience;
     private String missingFields;
     private String period;
+
+    public String getCandidateType() { return candidateType; }
+    public void setCandidateType(String candidateType) { this.candidateType = candidateType; }
+    public String getBusinessType() { return businessType; }
+    public void setBusinessType(String businessType) { this.businessType = businessType; }
+    public Long getBusinessId() { return businessId; }
+    public void setBusinessId(Long businessId) { this.businessId = businessId; }
 
     public Long getTaskId() { return taskId; }
     public void setTaskId(Long taskId) { this.taskId = taskId; }

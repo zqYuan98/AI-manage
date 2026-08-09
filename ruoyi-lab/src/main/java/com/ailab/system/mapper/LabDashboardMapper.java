@@ -18,6 +18,8 @@ public interface LabDashboardMapper {
     List<ReminderCandidate> selectOpenBlockReminderCandidates();
     List<ReminderCandidate> selectPendingTaskReminderCandidates(@Param("period") String period,
             @Param("managerEscalation") boolean managerEscalation);
+    List<ReminderCandidate> selectOperationalReminderCandidates(@Param("today") java.sql.Date today,
+            @Param("week") String week, @Param("month") String month);
     int insertReminderIfAbsent(LabReminder reminder);
     List<LabReminder> selectReminderList(@Param("scope") LabAccessContext scope,
             @Param("unreadOnly") Boolean unreadOnly);

@@ -14,7 +14,9 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
+import java.time.DayOfWeek;
 import java.time.temporal.ChronoUnit;
+import java.time.temporal.IsoFields;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -48,6 +50,15 @@ public class LabReminderServiceImpl implements LabReminderService {
             long days = ChronoUnit.DAYS.between(localDate(candidate.getBlockStartTime()), today);
             String level;
             if ("MANAGER".equals(candidate.getAudience())) {
+                if (days == 0) {
+                    LabReminder reminder = reminder(candidate, "NEW_BLOCK", "INFO", today);
+                    reminder.setTitle("新增阻塞：" + text(candidate.getTaskTitle(), "未命名任务"));
+                    reminder.setReminderContent("发现新的开放阻塞，请确认协调责任人与下一步行动。");
+                    reminder.setIdempotencyKey("NEW_BLOCK:" + candidate.getTaskId() + ":" + candidate.getEpisodeNo()
+                            + ":" + candidate.getRecipientId() + ":INFO:" + today);
+                    inserted += insertIdempotently(reminder);
+                    continue;
+                }
                 if (days < 14) continue;
                 level = "CRITICAL";
             } else if ("OWNER".equals(candidate.getAudience())) {
@@ -69,11 +80,11 @@ public class LabReminderServiceImpl implements LabReminderService {
     public int scanPendingTasks() {
         LocalDate today = LocalDate.now(clock);
         YearMonth month = YearMonth.from(today);
+        int inserted = scanOperational(today, month);
         int remainingAfterToday = month.atEndOfMonth().getDayOfMonth() - today.getDayOfMonth();
-        if (remainingAfterToday > 2) return 0;
+        if (remainingAfterToday > 2) return inserted;
         boolean managerEscalation = remainingAfterToday <= 1;
         String period = month.toString();
-        int inserted = 0;
         for (ReminderCandidate candidate : safe(mapper.selectPendingTaskReminderCandidates(period, managerEscalation))) {
             if (candidate == null || candidate.getTaskId() == null || candidate.getRecipientId() == null) continue;
             LabReminder reminder = reminder(candidate, "PENDING_TASK", managerEscalation && "MANAGER".equals(candidate.getAudience())
@@ -82,6 +93,36 @@ public class LabReminderServiceImpl implements LabReminderService {
                     + text(candidate.getTaskTitle(), "未命名任务"));
             reminder.setReminderContent("尚缺必填项：" + text(candidate.getMissingFields(), "待补充字段") + "。周期关闭前请完成维护。");
             reminder.setIdempotencyKey("PENDING:" + candidate.getTaskId() + ":" + candidate.getRecipientId() + ":" + today);
+            inserted += insertIdempotently(reminder);
+        }
+        return inserted;
+    }
+
+    private int scanOperational(LocalDate today, YearMonth month) {
+        String week = today.get(IsoFields.WEEK_BASED_YEAR) + "-W"
+                + String.format("%02d", today.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR));
+        int inserted = 0;
+        for (ReminderCandidate candidate : safe(mapper.selectOperationalReminderCandidates(
+                java.sql.Date.valueOf(today), week, month.toString()))) {
+            if (candidate == null || candidate.getCandidateType() == null || candidate.getRecipientId() == null
+                    || candidate.getBusinessId() == null) continue;
+            String type = candidate.getCandidateType();
+            if ("MISSING_WEEKLY".equals(type) && today.getDayOfWeek() == DayOfWeek.MONDAY) continue;
+            String level; String title; String content;
+            if ("MISSING_WEEKLY".equals(type)) {
+                level="INFO"; title="尚未完成本周承诺"; content="周初承诺截止后仍没有已激活承诺，请从月度结果拆出本周交付。";
+            } else if ("DUE_SELF_CLOSE".equals(type)) {
+                level="WARNING"; title="到期承诺尚未闭环"; content="该承诺已过计划日期，请如实标记已完成或未完成并补齐结果。";
+            } else if ("FORECAST_DELAY".equals(type)) {
+                level="WARNING"; title="承诺预计延期"; content="请检查延期原因、资源协调和下一步行动。";
+            } else if ("DECISION_DUE".equals(type)) {
+                level="WARNING"; title="管理决策待跟进"; content="该管理决策尚未完成，请更新结果或新的截止时间。";
+            } else continue;
+            LabReminder reminder=reminder(candidate,type,level,today);
+            reminder.setTitle(title + "：" + text(candidate.getTaskTitle(), "未命名事项"));
+            reminder.setReminderContent(content);
+            reminder.setIdempotencyKey(type + ":" + candidate.getBusinessId() + ":"
+                    + candidate.getRecipientId() + ":" + level + ":" + today);
             inserted += insertIdempotently(reminder);
         }
         return inserted;
@@ -119,7 +160,8 @@ public class LabReminderServiceImpl implements LabReminderService {
 
     private LabReminder reminder(ReminderCandidate candidate, String type, String level, LocalDate today) {
         LabReminder value = new LabReminder();
-        value.setTaskId(candidate.getTaskId()); value.setBusinessType("TASK"); value.setBusinessId(candidate.getTaskId());
+        value.setTaskId(candidate.getTaskId()); value.setBusinessType(text(candidate.getBusinessType(), candidate.getTaskId()==null?"DECISION":"TASK"));
+        value.setBusinessId(candidate.getBusinessId()==null?candidate.getTaskId():candidate.getBusinessId());
         value.setEpisodeNo(candidate.getEpisodeNo()); value.setRecipientId(candidate.getRecipientId());
         value.setReminderType(type); value.setReminderLevel(level);
         value.setReminderDate(Date.from(today.atStartOfDay(clock.getZone()).toInstant()));

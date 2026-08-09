@@ -113,6 +113,59 @@ class LabReminderServiceTest {
     }
 
     @Test
+    void dailyScanRemindsMissingCommitmentsDueSelfCloseForecastDelayAndOpenDecisionWithStableKeys() {
+        ReminderCandidate missing = operational("MISSING_WEEKLY", 41L, "TASK", 41L, 101L, "OWNER", "2026-W33");
+        ReminderCandidate due = operational("DUE_SELF_CLOSE", 42L, "TASK", 42L, 102L, "OWNER", "2026-W32");
+        ReminderCandidate forecast = operational("FORECAST_DELAY", 43L, "TASK", 43L, 901L, "MANAGER", "2026-W33");
+        ReminderCandidate decision = operational("DECISION_DUE", null, "DECISION", 44L, 103L, "OWNER", "2026-08");
+        when(mapper.selectOperationalReminderCandidates(any(java.sql.Date.class), eq("2026-W33"), eq("2026-08")))
+                .thenReturn(Arrays.asList(missing, due, forecast, decision));
+        when(mapper.insertReminderIfAbsent(any(LabReminder.class))).thenReturn(1);
+
+        assertEquals(4, service.scanPendingTasks());
+
+        ArgumentCaptor<LabReminder> captor = ArgumentCaptor.forClass(LabReminder.class);
+        verify(mapper, org.mockito.Mockito.times(4)).insertReminderIfAbsent(captor.capture());
+        List<LabReminder> reminders = captor.getAllValues();
+        assertTrue(reminders.stream().anyMatch(r -> r.getIdempotencyKey().equals("MISSING_WEEKLY:41:101:INFO:2026-08-15")));
+        assertTrue(reminders.stream().anyMatch(r -> r.getIdempotencyKey().equals("DUE_SELF_CLOSE:42:102:WARNING:2026-08-15")));
+        assertTrue(reminders.stream().anyMatch(r -> r.getIdempotencyKey().equals("FORECAST_DELAY:43:901:WARNING:2026-08-15")));
+        assertTrue(reminders.stream().anyMatch(r -> "DECISION".equals(r.getBusinessType()) && Long.valueOf(44L).equals(r.getBusinessId())));
+    }
+
+    @Test
+    void missingWeeklyCommitmentWaitsUntilAfterMondayCutoffAndMalformedRecipientsDoNotBlockOtherBatches() {
+        Clock monday = Clock.fixed(Instant.parse("2026-08-10T01:00:00Z"), ZONE);
+        service = new LabReminderServiceImpl(mapper, access, monday);
+        ReminderCandidate missing = operational("MISSING_WEEKLY", 51L, "TASK", 51L, 101L, "OWNER", "2026-W33");
+        ReminderCandidate malformed = operational("DUE_SELF_CLOSE", 52L, "TASK", 52L, null, "OWNER", "2026-W32");
+        ReminderCandidate due = operational("DUE_SELF_CLOSE", 53L, "TASK", 53L, 103L, "OWNER", "2026-W32");
+        when(mapper.selectOperationalReminderCandidates(any(java.sql.Date.class), eq("2026-W33"), eq("2026-08")))
+                .thenReturn(Arrays.asList(missing, malformed, due));
+        when(mapper.insertReminderIfAbsent(any(LabReminder.class))).thenReturn(1);
+
+        assertEquals(1, service.scanPendingTasks());
+
+        ArgumentCaptor<LabReminder> captor = ArgumentCaptor.forClass(LabReminder.class);
+        verify(mapper).insertReminderIfAbsent(captor.capture());
+        assertTrue(captor.getValue().getIdempotencyKey().startsWith("DUE_SELF_CLOSE:53:103:"));
+    }
+
+    @Test
+    void aNewBlockImmediatelyNotifiesManagersBeforeLongRunningEscalations() {
+        ReminderCandidate manager = block(61L, 3, "2026-08-15T00:30:00Z", 901L, "MANAGER");
+        ReminderCandidate owner = block(61L, 3, "2026-08-15T00:30:00Z", 101L, "OWNER");
+        when(mapper.selectOpenBlockReminderCandidates()).thenReturn(Arrays.asList(manager, owner));
+        when(mapper.insertReminderIfAbsent(any(LabReminder.class))).thenReturn(1);
+
+        assertEquals(1, service.scanBlocks());
+
+        ArgumentCaptor<LabReminder> captor = ArgumentCaptor.forClass(LabReminder.class);
+        verify(mapper).insertReminderIfAbsent(captor.capture());
+        assertEquals("NEW_BLOCK:61:3:901:INFO:2026-08-15", captor.getValue().getIdempotencyKey());
+    }
+
+    @Test
     void listScopeComesOnlyFromTrustedAccessContext() {
         LabAccessContext lead = context(2L, 102L, LabAccessServiceImpl.LEAD, "algorithm");
         when(access.context(2L)).thenReturn(lead);
@@ -173,6 +226,13 @@ class LabReminderServiceTest {
         ReminderCandidate value = new ReminderCandidate(); value.setTaskId(taskId); value.setEpisodeNo(episode);
         value.setBlockStartTime(Date.from(Instant.parse(start))); value.setRecipientId(recipient); value.setAudience(audience);
         value.setTaskTitle("blocked-" + taskId); return value;
+    }
+
+    private ReminderCandidate operational(String type, Long taskId, String businessType, Long businessId,
+            Long recipient, String audience, String period) {
+        ReminderCandidate value = new ReminderCandidate(); value.setCandidateType(type); value.setTaskId(taskId);
+        value.setBusinessType(businessType); value.setBusinessId(businessId); value.setRecipientId(recipient);
+        value.setAudience(audience); value.setPeriod(period); value.setTaskTitle(type + "-" + businessId); return value;
     }
 
     private LabAccessContext context(Long user, Long member, String role, String line) {

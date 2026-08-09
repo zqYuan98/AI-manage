@@ -15,6 +15,8 @@
         <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
     </resultMap>
     <resultMap id="ReminderCandidateResult" type="com.ailab.system.dto.ReminderCandidate">
+        <result property="candidateType" column="candidate_type"/><result property="businessType" column="business_type"/>
+        <result property="businessId" column="business_id"/>
         <result property="taskId" column="task_id"/><result property="taskTitle" column="task_title"/>
         <result property="episodeNo" column="episode_no"/><result property="blockStartTime" column="block_start_time"/>
         <result property="recipientId" column="recipient_id"/><result property="audience" column="audience"/>
@@ -157,6 +159,47 @@
         join lab_member manager_member on manager_member.user_id=manager_user.user_id and manager_member.member_status='ACTIVE' and manager_member.del_flag='0'
         where #{managerEscalation}=true and <include refid="pendingTaskPredicate"/>
         order by task_id,recipient_id,audience
+    </select>
+
+    <select id="selectOperationalReminderCandidates" resultMap="ReminderCandidateResult">
+        select 'MISSING_WEEKLY' candidate_type,'TASK' business_type,m.id business_id,
+          m.id task_id,m.title task_title,null episode_no,null block_start_time,m.owner_id recipient_id,'OWNER' audience,
+          null missing_fields,#{week} period
+        from lab_task m
+        join lab_member owner on owner.id=m.owner_id and owner.member_status='ACTIVE' and owner.del_flag='0'
+        join sys_user owner_user on owner_user.user_id=owner.user_id and owner_user.status='0' and owner_user.del_flag='0'
+        where m.del_flag='0' and m.task_level='month' and m.period=#{month} and m.workflow_status in('ACTIVE','PENDING_REVIEW')
+          and m.period_lock_flag='0'
+          and not exists(select 1 from lab_task w where w.parent_id=m.id and w.task_level='week' and w.period=#{week}
+            and w.execution_status in('ACTIVE','SELF_DONE','SELF_UNDONE') and w.del_flag='0')
+          and not exists(select 1 from lab_period_close pc where pc.period=m.period and pc.close_status='CLOSED' and pc.del_flag='0')
+        union all
+        select 'DUE_SELF_CLOSE','TASK',t.id,t.id,t.title,null,null,t.owner_id,'OWNER',null,t.period
+        from lab_task t
+        join lab_task parent_month on parent_month.id=t.parent_id and parent_month.task_level='month' and parent_month.del_flag='0'
+        join lab_member owner on owner.id=t.owner_id and owner.member_status='ACTIVE' and owner.del_flag='0'
+        join sys_user owner_user on owner_user.user_id=owner.user_id and owner_user.status='0' and owner_user.del_flag='0'
+        where t.del_flag='0' and t.task_level='week' and t.execution_status='ACTIVE' and t.period_lock_flag='0'
+          and t.plan_date&lt;#{today,jdbcType=DATE}
+          and not exists(select 1 from lab_period_close pc where pc.period=parent_month.period and pc.close_status='CLOSED' and pc.del_flag='0')
+        union all
+        select 'FORECAST_DELAY','TASK',t.id,t.id,t.title,null,null,manager_member.id,'MANAGER',null,t.period
+        from lab_task t
+        join lab_task parent_month on parent_month.id=t.parent_id and parent_month.task_level='month' and parent_month.del_flag='0'
+        join sys_role manager_role on manager_role.role_key='lab_manager' and manager_role.status='0' and manager_role.del_flag='0'
+        join sys_user_role manager_link on manager_link.role_id=manager_role.role_id
+        join sys_user manager_user on manager_user.user_id=manager_link.user_id and manager_user.status='0' and manager_user.del_flag='0'
+        join lab_member manager_member on manager_member.user_id=manager_user.user_id and manager_member.member_status='ACTIVE' and manager_member.del_flag='0'
+        where t.del_flag='0' and t.task_level='week' and t.execution_status='ACTIVE' and t.period_lock_flag='0'
+          and (t.current_block_flag='1' or t.plan_date&lt;#{today,jdbcType=DATE} or t.result_status='DELAYED')
+          and not exists(select 1 from lab_period_close pc where pc.period=parent_month.period and pc.close_status='CLOSED' and pc.del_flag='0')
+        union all
+        select 'DECISION_DUE','DECISION',d.id,null,d.problem,null,null,d.owner_id,'OWNER',null,d.period
+        from lab_management_decision d
+        join lab_member owner on owner.id=d.owner_id and owner.member_status='ACTIVE' and owner.del_flag='0'
+        join sys_user owner_user on owner_user.user_id=owner.user_id and owner_user.status='0' and owner_user.del_flag='0'
+        where d.del_flag='0' and d.decision_status='OPEN' and d.due_date&lt;=#{today,jdbcType=DATE}
+        order by candidate_type,business_id,recipient_id
     </select>
 
     <insert id="insertReminderIfAbsent" parameterType="com.ailab.system.domain.LabReminder" useGeneratedKeys="true" keyProperty="id">

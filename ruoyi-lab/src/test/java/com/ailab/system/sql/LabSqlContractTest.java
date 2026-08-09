@@ -486,6 +486,19 @@ class LabSqlContractTest {
         assertEquals(0, parentheses, "unbalanced SQL parentheses");
     }
 
+    @Test
+    void operationalReminderSqlExcludesClosedSourcesAndCoversCommitmentsDelaysAndDecisions() throws Exception {
+        String xml = new String(Files.readAllBytes(findRoot().resolve("ruoyi-lab/src/main/resources/mapper/lab/LabDashboardMapper.xml")), StandardCharsets.UTF_8);
+        assertTrue(xml.contains("selectOperationalReminderCandidates"));
+        assertTrue(xml.contains("MISSING_WEEKLY"));
+        assertTrue(xml.contains("DUE_SELF_CLOSE"));
+        assertTrue(xml.contains("FORECAST_DELAY"));
+        assertTrue(xml.contains("DECISION_DUE"));
+        assertTrue(xml.contains("pc.close_status='CLOSED'"));
+        assertTrue(xml.contains("execution_status='ACTIVE'"));
+        assertTrue(xml.contains("decision_status='OPEN'"));
+    }
+
     private static void assertTaskCoordinationContract(String sql) {
         Set<String> taskColumns = columns(tableBlocks(sql).get("lab_task")).keySet();
         assertTrue(taskColumns.containsAll(set("coordination_required", "coordination_owner_id", "coordination_dept_id", "coordination_content", "coordination_support")), "task coordination fields missing");
