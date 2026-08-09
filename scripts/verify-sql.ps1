@@ -18,6 +18,7 @@ $requiredFields.lab_formal_acceptance_revision = @('period','biz_line','revision
 $requiredFields.lab_formal_acceptance_fact = @('formal_revision_id','task_id','fact_json','evidence_version','reviewer_id','review_time')
 $requiredFields.lab_period_close_snapshot = @('period','revision_no','period_version','formal_revision_id','performance_revision','closed_by','closed_time','calculation_version')
 $requiredFields.lab_period_close_fact = @('close_snapshot_id','fact_type','business_id','fact_json')
+$requiredFields.lab_period_close += @('period_version')
 $requiredFields.lab_management_decision = @('period','biz_line','problem','decision_content','owner_id','due_date','related_goal_id','related_task_id','decision_status','version')
 $tableMatches = [regex]::Matches($sql, '(?is)(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(lab_[a-z0-9_]+)`?\s*\(.*?\)\s*ENGINE=.*?;)')
 $found = @($tableMatches | ForEach-Object { $_.Groups[2].Value.ToLowerInvariant() })

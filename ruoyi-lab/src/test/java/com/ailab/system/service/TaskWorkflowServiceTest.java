@@ -32,6 +32,18 @@ class TaskWorkflowServiceTest {
     private final TaskWorkflowService service = new TaskWorkflowServiceImpl(CLOCK);
 
     @Test
+    void returningMonthlyResultResetsCurrentFactsButKeepsHistoryForEventLayer() {
+        LabTask task=validDraft();task.setWorkflowStatus(LabConstants.WORKFLOW_PENDING_REVIEW);
+        task.setResultStatus(LabConstants.RESULT_DELAYED);task.setActualFinishTime(new Date(3L));task.setResultDesc("旧结果");
+        task.setFailReason("旧原因");task.setNextAction("旧下一步");TaskSubmitCommand command=new TaskSubmitCommand();command.setReviewerComment("补充证据后重提");
+
+        service.reviewReturn(task,command,99L);
+
+        assertEquals(LabConstants.WORKFLOW_ACTIVE,task.getWorkflowStatus());assertEquals(LabConstants.RESULT_DOING,task.getResultStatus());
+        assertNull(task.getActualFinishTime());assertNull(task.getResultDesc());assertNull(task.getFailReason());assertNull(task.getNextAction());
+    }
+
+    @Test
     void activatesAValidDraftPlan() {
         LabTask task = validDraft();
 

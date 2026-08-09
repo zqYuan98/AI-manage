@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabPeriodCloseSnapshotMapper">
+    <resultMap id="SnapshotResult" type="com.ailab.system.domain.LabPeriodCloseSnapshot">
+        <id property="id" column="id"/><result property="period" column="period"/>
+        <result property="revisionNo" column="revision_no"/><result property="periodVersion" column="period_version"/>
+        <result property="formalRevisionId" column="formal_revision_id"/><result property="performanceRevision" column="performance_revision"/>
+        <result property="closedBy" column="closed_by"/><result property="closedTime" column="closed_time"/>
+        <result property="calculationVersion" column="calculation_version"/><result property="delFlag" column="del_flag"/>
+    </resultMap>
+    <resultMap id="FactResult" type="com.ailab.system.domain.LabPeriodCloseFact">
+        <id property="id" column="id"/><result property="closeSnapshotId" column="close_snapshot_id"/>
+        <result property="factType" column="fact_type"/><result property="businessId" column="business_id"/>
+        <result property="factJson" column="fact_json"/><result property="delFlag" column="del_flag"/>
+    </resultMap>
+    <resultMap id="WorkflowEventResult" type="com.ailab.system.domain.LabTaskWorkflowEvent">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/>
+        <result property="fromStatus" column="from_status"/><result property="toStatus" column="to_status"/>
+        <result property="resultStatus" column="result_status"/><result property="actorId" column="actor_id"/>
+        <result property="eventType" column="event_type"/><result property="reason" column="reason"/>
+        <result property="taskVersion" column="task_version"/><result property="eventTime" column="event_time"/>
+        <result property="idempotencyKey" column="idempotency_key"/><result property="delFlag" column="del_flag"/>
+    </resultMap>
+    <resultMap id="ExecutionEventResult" type="com.ailab.system.domain.LabTaskExecutionEvent">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/>
+        <result property="fromStatus" column="from_status"/><result property="toStatus" column="to_status"/>
+        <result property="resultStatus" column="result_status"/><result property="actualFinishTime" column="actual_finish_time"/>
+        <result property="actorId" column="actor_id"/><result property="eventType" column="event_type"/>
+        <result property="reason" column="reason"/><result property="taskVersion" column="task_version"/>
+        <result property="evidenceVersion" column="evidence_version"/><result property="idempotencyKey" column="idempotency_key"/>
+        <result property="eventTime" column="event_time"/><result property="delFlag" column="del_flag"/>
+    </resultMap>
+    <select id="selectMaxRevision" parameterType="string" resultType="int">
+        select coalesce(max(revision_no),0) from lab_period_close_snapshot where period=#{period} and del_flag='0'
+    </select>
+    <select id="selectLatestFormalRevisionId" parameterType="string" resultType="long">
+        select id from lab_formal_acceptance_revision where period=#{period} and del_flag='0'
+        order by accepted_time desc,id desc limit 1
+    </select>
+    <select id="taskMatchesLastEvent" parameterType="long" resultType="boolean">
+        select case when t.task_level='month' then
+            coalesce((select e.to_status from lab_task_workflow_event e where e.task_id=t.id and e.del_flag='0'
+                order by e.event_time desc,e.id desc limit 1),'')=coalesce(t.workflow_status,'')
+          else coalesce((select e.to_status from lab_task_execution_event e where e.task_id=t.id and e.del_flag='0'
+                order by e.event_time desc,e.id desc limit 1),'')=coalesce(t.execution_status,'') end
+        from lab_task t where t.id=#{taskId} and t.del_flag='0'
+    </select>
+    <select id="hasOpenBlock" parameterType="long" resultType="boolean">
+        select exists(select 1 from lab_task_block_event where task_id=#{taskId} and block_status='OPEN' and del_flag='0')
+    </select>
+    <select id="selectWorkflowEvents" parameterType="long" resultMap="WorkflowEventResult">
+        select id,task_id,from_status,to_status,result_status,actor_id,event_type,reason,task_version,event_time,idempotency_key,del_flag
+        from lab_task_workflow_event where task_id=#{taskId} and del_flag='0' order by event_time,id
+    </select>
+    <select id="selectExecutionEvents" parameterType="long" resultMap="ExecutionEventResult">
+        select id,task_id,from_status,to_status,result_status,actual_finish_time,actor_id,event_type,reason,task_version,
+               evidence_version,idempotency_key,event_time,del_flag
+        from lab_task_execution_event where task_id=#{taskId} and del_flag='0' order by event_time,id
+    </select>
+    <insert id="insertSnapshot" parameterType="com.ailab.system.domain.LabPeriodCloseSnapshot" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_period_close_snapshot(period,revision_no,period_version,formal_revision_id,performance_revision,
+            closed_by,closed_time,calculation_version,del_flag,create_by,create_time,remark)
+        values(#{period},#{revisionNo},#{periodVersion},#{formalRevisionId},#{performanceRevision},#{closedBy},
+            #{closedTime},#{calculationVersion},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <insert id="insertFact" parameterType="com.ailab.system.domain.LabPeriodCloseFact" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_period_close_fact(close_snapshot_id,fact_type,business_id,fact_json,del_flag,create_by,create_time,remark)
+        values(#{closeSnapshotId},#{factType},#{businessId},#{factJson},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <select id="selectSnapshot" parameterType="long" resultMap="SnapshotResult">
+        select id,period,revision_no,period_version,formal_revision_id,performance_revision,closed_by,closed_time,
+               calculation_version,del_flag from lab_period_close_snapshot where id=#{id} and del_flag='0'
+    </select>
+    <select id="selectFactsBySnapshot" parameterType="long" resultMap="FactResult">
+        select id,close_snapshot_id,fact_type,business_id,fact_json,del_flag
+        from lab_period_close_fact where close_snapshot_id=#{closeSnapshotId} and del_flag='0' order by fact_type,business_id
+    </select>
+</mapper>

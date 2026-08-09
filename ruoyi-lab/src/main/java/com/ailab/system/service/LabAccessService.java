@@ -10,6 +10,7 @@ public interface LabAccessService {
     void requireTaskRead(LabTask task, Long userId);
     void requireTaskWrite(LabTask task, Long userId);
     void requireTaskReview(LabTask task, Long userId);
+    void requireEligibleReviewer(LabTask task);
     void requireGoalRead(Long userId);
     void requireGoalWrite(LabGoal goal, Long userId);
     void requireManager(Long userId);

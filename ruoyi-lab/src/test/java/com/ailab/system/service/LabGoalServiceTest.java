@@ -501,6 +501,7 @@ class LabGoalServiceTest {
         @Override public List<LabTask> selectTaskList(LabTask query) { return new ArrayList<LabTask>(data.values()); }
         @Override public LabTask selectTaskById(Long id) { return data.get(id); }
         @Override public LabTask selectTaskForUpdate(Long id) { return selectTaskById(id); }
+        @Override public LabTask selectCarriedTask(Long carriedFromId, String period) { return null; }
         @Override public List<LabTask> selectTasksByParentId(Long parentId) { List<LabTask> result = new ArrayList<LabTask>(); for (LabTask task : data.values()) if (parentId.equals(task.getParentId()) && !"2".equals(task.getDelFlag())) result.add(task); return result; }
         @Override public List<LabTask> selectTasksByParentIdForUpdate(Long parentId) { return selectTasksByParentId(parentId); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneId(Long milestoneId) {
@@ -535,5 +536,6 @@ class LabGoalServiceTest {
         final Map<Long, LabAccessContext> contexts = new LinkedHashMap<Long, LabAccessContext>();
         void put(Long userId, Long memberId, String roleKey) { LabAccessContext value = new LabAccessContext(); value.setUserId(userId); value.setMemberId(memberId); value.setRoleKey(roleKey); value.setBizLine("algorithm"); value.setDeptId(101L); contexts.put(userId, value); }
         @Override public LabAccessContext selectAccessContext(Long userId) { return contexts.get(userId); }
+        @Override public int countEligibleReviewers(Long ownerId, String bizLine) { return 1; }
     }
 }

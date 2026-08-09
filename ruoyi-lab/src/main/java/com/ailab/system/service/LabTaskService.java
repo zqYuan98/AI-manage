@@ -5,6 +5,7 @@ import com.ailab.system.domain.LabTaskBlockEvent;
 import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.domain.LabTaskQualityGate;
 import com.ailab.system.dto.TaskSubmitCommand;
+import com.ailab.system.dto.MonthlyCarryCommand;
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -21,6 +22,7 @@ public interface LabTaskService {
     void reviewPass(Long id, Integer version, TaskSubmitCommand command, Long actorId);
     void reviewReturn(Long id, Integer version, TaskSubmitCommand command, Long actorId);
     void reopenTask(Long id, Integer version, String reason, Long actorId);
+    LabTask carryMonthlyResult(Long id, Integer version, MonthlyCarryCommand command, Long actorId);
     BigDecimal calculateMonthProgress(Long monthTaskId, Long actorId);
 
     List<LabTaskEvidence> listEvidence(Long taskId, Long actorId);

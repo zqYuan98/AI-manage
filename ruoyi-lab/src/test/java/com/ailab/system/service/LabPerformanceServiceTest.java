@@ -31,6 +31,7 @@ import com.ailab.system.dto.RedLineRevokeCommand;
 import com.ailab.system.mapper.LabPerformanceMapper;
 import com.ailab.system.service.impl.LabAccessServiceImpl;
 import com.ailab.system.service.impl.LabPerformanceServiceImpl;
+import com.ailab.system.service.impl.LabPeriodCloseSnapshotService;
 import com.ruoyi.common.exception.ServiceException;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -59,13 +60,14 @@ class LabPerformanceServiceTest {
 
     @Mock private LabPerformanceMapper mapper;
     @Mock private LabAccessService access;
+    @Mock private LabPeriodCloseSnapshotService closeSnapshots;
     private LabPerformanceCalculator calculator;
     private LabPerformanceService service;
 
     @BeforeEach
     void setUp() {
         calculator = new LabPerformanceCalculator();
-        service = new LabPerformanceServiceImpl(mapper, access, calculator, CLOCK);
+        service = new LabPerformanceServiceImpl(mapper, access, calculator, closeSnapshots, CLOCK);
     }
 
     @Test
@@ -379,6 +381,7 @@ class LabPerformanceServiceTest {
         when(mapper.selectCollaborationsForPeriodForUpdate("2026-08")).thenReturn(Collections.<LabCollaborationRecord>emptyList());
         when(mapper.selectCriticalAssetFactsForUpdate(any(String.class), any(String.class))).thenReturn(Collections.<PerformanceAssetFact>emptyList());
         when(mapper.selectMaxRevision(7L, "2026-08")).thenReturn(2);
+        when(closeSnapshots.latestFormalRevisionId("2026-08")).thenReturn(30L);
         when(mapper.insertOverdueRecord(any(LabCollaborationRecord.class))).thenReturn(1);
         when(mapper.insertPerfScore(any(LabPerfScore.class))).thenReturn(1);
         when(mapper.lockTasksForPeriod(eq("2026-08"), eq("1"))).thenReturn(1);
@@ -395,6 +398,8 @@ class LabPerformanceServiceTest {
         assertEquals("PERIOD_OVERDUE:2026-08:1", overdue.getValue().getIdempotencyKey());
         assertEquals("APPROVED", overdue.getValue().getReviewStatus());
         verify(mapper).markCurrentScoresHistorical("2026-08", 7L, "100");
+        verify(closeSnapshots).close(eq("2026-08"), eq(0), eq(30L), eq(3), eq(900L),
+                eq(Collections.singletonList(unsubmitted)), anyList(), anyList());
         verify(mapper, never()).selectCollaborationForPeriod("2026-08");
         InOrder lockOrder = inOrder(mapper);
         lockOrder.verify(mapper).selectPeriodForUpdate("2026-08");
@@ -412,7 +417,7 @@ class LabPerformanceServiceTest {
             @Override public Clock withZone(ZoneId zone) { return this; }
             @Override public Instant instant() { clockCalls.incrementAndGet(); return CLOCK.instant(); }
         };
-        service = new LabPerformanceServiceImpl(mapper, access, calculator, trackingClock);
+        service = new LabPerformanceServiceImpl(mapper, access, calculator, closeSnapshots, trackingClock);
         LabPeriodClose open = period("2026-08", "OPEN", 3);
         when(mapper.selectPeriodForUpdate("2026-08")).thenReturn(open);
         LabTask confirmed = task(1L, 100, "CONFIRMED", "ONTIME");
@@ -813,7 +818,7 @@ class LabPerformanceServiceTest {
     }
 
     private LabMember member(Long id) { LabMember m = new LabMember(); m.setId(id); m.setMemberStatus("ACTIVE"); return m; }
-    private LabPeriodClose period(String period, String status, int version) { LabPeriodClose p = new LabPeriodClose(); p.setId(31L); p.setPeriod(period); p.setCloseStatus(status); p.setVersion(version); return p; }
+    private LabPeriodClose period(String period, String status, int version) { LabPeriodClose p = new LabPeriodClose(); p.setId(31L); p.setPeriod(period); p.setCloseStatus(status); p.setPeriodVersion(0); p.setVersion(version); return p; }
     private LabPerfScore score(Long id, Long memberId, int revision) { LabPerfScore s = new LabPerfScore(); s.setId(id); s.setMemberId(memberId); s.setPeriod("2026-08"); s.setRevisionNo(revision); s.setCurrentFlag("1"); s.setVersion(0); return s; }
 
     private void manager(Long userId, Long memberId) { when(access.context(userId)).thenReturn(context(userId, memberId, LabAccessServiceImpl.MANAGER, "manage")); }

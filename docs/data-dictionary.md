@@ -26,7 +26,7 @@
 | `lab_ipr` | 知识产权台账 | `ipr_no`,`owner_id`,`ipr_stage`,`status` | 阶段前进；回退及原因 manager-only |
 | `lab_collaboration_record` | 跨成员协同事实 | `task_id`,`period`,`from_member_id`,`to_member_id` | review 后进入绩效；季度 BACKUP 资格按截止期/资产/成员证据派生并快照 |
 | `lab_perf_score` | 月度评分与季度校准 | `member_id`,`period`,`revision_no`,`current_flag` | current revision 唯一；关期 immutable；red-line 撤销保留旧 revision |
-| `lab_period_close` | 关期/重开记录 | `period`,`close_status`,`version` | OPEN/CLOSED；close 锁源事实，reopen manager-only 且必填原因 |
+| `lab_period_close` | 关期/重开记录 | `period`,`close_status`,`period_version`,`version` | OPEN/CLOSED；关期固化源事实，重开仅管理者可操作且必填原因；每次重开递增 `period_version` |
 | `lab_report_template` | 模板家族修订 | `template_code`,`period_type`,`revision_no` | 每 code 的 latest=max revision；每 period type 至多一个 enabled default |
 | `lab_report_section` | 模板章节配置 | `template_id`,`section_code`,`sort_no` | provider-local typed filters/fields/metrics；敏感 permission 固化快照 |
 | `lab_report_summary` | period×bizLine×section 人工小结 | 唯一 `(period,biz_line,section_code)` | 三字段 canonical JSON；`source_revision` 乐观并发；optional 清空为软删除 |

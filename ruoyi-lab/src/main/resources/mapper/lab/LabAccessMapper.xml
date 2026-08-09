@@ -16,4 +16,13 @@
         order by case r.role_key when 'lab_manager' then 1 when 'lab_lead' then 2 else 3 end
         limit 1
     </select>
+    <select id="countEligibleReviewers" resultType="int">
+        select count(distinct lm.id)
+        from lab_member lm
+        join sys_user u on u.user_id=lm.user_id and u.status='0' and u.del_flag='0'
+        join sys_user_role ur on ur.user_id=u.user_id
+        join sys_role r on r.role_id=ur.role_id and r.status='0' and r.del_flag='0'
+        where lm.member_status='ACTIVE' and lm.del_flag='0' and lm.id&lt;&gt;#{ownerId}
+          and (r.role_key='lab_manager' or (r.role_key='lab_lead' and lm.biz_line=#{bizLine}))
+    </select>
 </mapper>

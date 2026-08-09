@@ -51,6 +51,14 @@ public class LabAccessServiceImpl implements LabAccessService {
         }
     }
 
+    @Override
+    public void requireEligibleReviewer(LabTask task) {
+        if (task == null || task.getOwnerId() == null || task.getBizLine() == null
+                || mapper.countEligibleReviewers(task.getOwnerId(), task.getBizLine()) < 1) {
+            throw new ServiceException("月度结果激活前必须存在另一名当前可用的审核人");
+        }
+    }
+
     @Override public void requireGoalRead(Long userId) { context(userId); }
 
     @Override

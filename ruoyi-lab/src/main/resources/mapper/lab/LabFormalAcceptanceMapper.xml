@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabFormalAcceptanceMapper">
+    <resultMap id="RevisionResult" type="com.ailab.system.domain.LabFormalAcceptanceRevision">
+        <id property="id" column="id"/><result property="period" column="period"/>
+        <result property="bizLine" column="biz_line"/><result property="revisionNo" column="revision_no"/>
+        <result property="acceptedBy" column="accepted_by"/><result property="acceptedTime" column="accepted_time"/>
+        <result property="calculationVersion" column="calculation_version"/><result property="delFlag" column="del_flag"/>
+    </resultMap>
+    <resultMap id="FactResult" type="com.ailab.system.domain.LabFormalAcceptanceFact">
+        <id property="id" column="id"/><result property="formalRevisionId" column="formal_revision_id"/>
+        <result property="taskId" column="task_id"/><result property="factJson" column="fact_json"/>
+        <result property="evidenceVersion" column="evidence_version"/><result property="reviewerId" column="reviewer_id"/>
+        <result property="reviewTime" column="review_time"/><result property="delFlag" column="del_flag"/>
+    </resultMap>
+    <insert id="ensurePeriodLock">
+        insert into lab_period_close(period,close_status,period_version,version,del_flag,create_by,create_time)
+        values(#{period},'OPEN',0,0,'0',#{actor},sysdate())
+        on duplicate key update id=last_insert_id(id)
+    </insert>
+    <select id="lockPeriod" parameterType="string" resultType="long">
+        select id from lab_period_close where period=#{period} and del_flag='0' for update
+    </select>
+    <select id="selectMaxRevision" resultType="int">
+        select coalesce(max(revision_no),0) from lab_formal_acceptance_revision
+        where period=#{period} and biz_line=#{bizLine} and del_flag='0'
+    </select>
+    <insert id="insertRevision" parameterType="com.ailab.system.domain.LabFormalAcceptanceRevision" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_formal_acceptance_revision(period,biz_line,revision_no,accepted_by,accepted_time,
+            calculation_version,del_flag,create_by,create_time,remark)
+        values(#{period},#{bizLine},#{revisionNo},#{acceptedBy},#{acceptedTime},#{calculationVersion},
+            #{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <insert id="insertFact" parameterType="com.ailab.system.domain.LabFormalAcceptanceFact" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_formal_acceptance_fact(formal_revision_id,task_id,fact_json,evidence_version,reviewer_id,
+            review_time,del_flag,create_by,create_time,remark)
+        values(#{formalRevisionId},#{taskId},#{factJson},#{evidenceVersion},#{reviewerId},#{reviewTime},
+            #{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <select id="selectRevision" parameterType="long" resultMap="RevisionResult">
+        select id,period,biz_line,revision_no,accepted_by,accepted_time,calculation_version,del_flag
+        from lab_formal_acceptance_revision where id=#{id} and del_flag='0'
+    </select>
+    <select id="selectFactsByRevision" parameterType="long" resultMap="FactResult">
+        select id,formal_revision_id,task_id,fact_json,evidence_version,reviewer_id,review_time,del_flag
+        from lab_formal_acceptance_fact where formal_revision_id=#{formalRevisionId} and del_flag='0' order by id
+    </select>
+</mapper>

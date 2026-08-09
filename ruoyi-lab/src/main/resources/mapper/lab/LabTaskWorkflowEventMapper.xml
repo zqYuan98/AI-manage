@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabTaskWorkflowEventMapper">
+    <resultMap id="EventResult" type="com.ailab.system.domain.LabTaskWorkflowEvent">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/>
+        <result property="fromStatus" column="from_status"/><result property="toStatus" column="to_status"/>
+        <result property="resultStatus" column="result_status"/><result property="actorId" column="actor_id"/>
+        <result property="eventType" column="event_type"/><result property="reason" column="reason"/>
+        <result property="taskVersion" column="task_version"/><result property="eventTime" column="event_time"/>
+        <result property="idempotencyKey" column="idempotency_key"/><result property="delFlag" column="del_flag"/>
+    </resultMap>
+    <insert id="insertEvent" parameterType="com.ailab.system.domain.LabTaskWorkflowEvent" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_task_workflow_event(task_id,from_status,to_status,result_status,actor_id,event_type,reason,
+            task_version,event_time,idempotency_key,del_flag,create_by,create_time,remark)
+        values(#{taskId},#{fromStatus},#{toStatus},#{resultStatus},#{actorId},#{eventType},#{reason},
+            #{taskVersion},#{eventTime},#{idempotencyKey},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <select id="selectEvents" parameterType="long" resultMap="EventResult">
+        select id,task_id,from_status,to_status,result_status,actor_id,event_type,reason,task_version,event_time,
+               idempotency_key,del_flag
+        from lab_task_workflow_event where task_id=#{taskId} and del_flag='0' order by event_time,id
+    </select>
+</mapper>

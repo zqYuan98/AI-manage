@@ -4,6 +4,7 @@ import com.ailab.system.domain.LabTask;
 import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.domain.LabTaskQualityGate;
 import com.ailab.system.dto.TaskSubmitCommand;
+import com.ailab.system.dto.MonthlyCarryCommand;
 import com.ailab.system.dto.WeeklyCommitmentCommand;
 import com.ailab.system.service.LabCommitmentService;
 import com.ailab.system.service.LabTaskService;
@@ -161,6 +162,14 @@ public class LabTaskController extends BaseController {
     @PutMapping("/{id}/result/reopen")
     public AjaxResult reopen(@PathVariable Long id, @RequestParam Integer version, @RequestParam String reason) {
         taskService.reopenTask(id, version, reason, SecurityUtils.getUserId()); return success();
+    }
+
+    @PreAuthorize("@ss.hasPermi('lab:task:add')")
+    @Log(title = "月度结果转入下月", businessType = BusinessType.INSERT)
+    @PostMapping("/{id}/result/carry")
+    public AjaxResult carryMonthly(@PathVariable Long id, @RequestParam Integer version,
+            @RequestBody MonthlyCarryCommand command) {
+        return success(taskService.carryMonthlyResult(id, version, command, SecurityUtils.getUserId()));
     }
 
     @PreAuthorize("@ss.hasPermi('lab:task:evidence')")

@@ -42,6 +42,7 @@ class LabSqlContractTest {
         FIELDS.put("lab_period_close_snapshot", set("period", "revision_no", "period_version", "formal_revision_id", "performance_revision", "closed_by", "closed_time", "calculation_version"));
         FIELDS.put("lab_period_close_fact", set("close_snapshot_id", "fact_type", "business_id", "fact_json"));
         FIELDS.put("lab_management_decision", set("period", "biz_line", "problem", "decision_content", "owner_id", "due_date", "related_goal_id", "related_task_id", "decision_status", "version"));
+        FIELDS.get("lab_period_close").add("period_version");
     }
 
     @Test

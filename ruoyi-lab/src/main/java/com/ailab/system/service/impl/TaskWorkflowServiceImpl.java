@@ -126,13 +126,18 @@ public class TaskWorkflowServiceImpl implements TaskWorkflowService {
         requireTask(task);
         requireMonthlyTask(task);
         requireWorkflow(task, LabConstants.WORKFLOW_PENDING_REVIEW);
-        if (command == null || actorId == null) {
-            throw new ServiceException("退回审核需要指定审核人");
+        if (command == null || actorId == null || isBlank(command.getReviewerComment())) {
+            throw new ServiceException("退回审核需要指定审核人并填写原因");
         }
         if (actorId.equals(task.getOwnerId())) {
             throw new ServiceException("审核人不能是任务负责人");
         }
         task.setWorkflowStatus(LabConstants.WORKFLOW_ACTIVE);
+        task.setResultStatus(LabConstants.RESULT_DOING);
+        task.setActualFinishTime(null);
+        task.setResultDesc(null);
+        task.setFailReason(null);
+        task.setNextAction(null);
     }
 
     @Override

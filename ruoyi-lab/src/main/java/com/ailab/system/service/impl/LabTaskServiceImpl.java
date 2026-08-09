@@ -8,6 +8,7 @@ import com.ailab.system.domain.LabTaskEvidence;
 import com.ailab.system.domain.LabTaskQualityGate;
 import com.ailab.system.dto.FieldValidationError;
 import com.ailab.system.dto.TaskSubmitCommand;
+import com.ailab.system.dto.MonthlyCarryCommand;
 import com.ailab.system.exception.LabValidationException;
 import com.ailab.system.mapper.LabGoalMapper;
 import com.ailab.system.mapper.LabTaskEvidenceMapper;
@@ -23,6 +24,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -48,21 +50,41 @@ public class LabTaskServiceImpl implements LabTaskService {
     private final LabGoalMapper goalMapper;
     private final TaskWorkflowService workflowService;
     private final LabAccessService accessService;
+    private final LabTaskWorkflowEventService workflowEventService;
+    private final LabFormalAcceptanceService formalAcceptanceService;
     private final Clock clock;
 
     @Autowired
     public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
+            LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService,
+            LabTaskWorkflowEventService workflowEventService, LabFormalAcceptanceService formalAcceptanceService) {
+        this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService,
+                workflowEventService, formalAcceptanceService, Clock.systemDefaultZone());
+    }
+
+    /** 兼容聚焦旧任务合同的测试构造入口。 */
+    public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
             LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService) {
-        this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService, Clock.systemDefaultZone());
+        this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService, null, null,
+                Clock.systemDefaultZone());
     }
 
     public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
             LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService, Clock clock) {
+        this(taskMapper, evidenceMapper, goalMapper, workflowService, accessService, null, null, clock);
+    }
+
+    public LabTaskServiceImpl(LabTaskMapper taskMapper, LabTaskEvidenceMapper evidenceMapper,
+            LabGoalMapper goalMapper, TaskWorkflowService workflowService, LabAccessService accessService,
+            LabTaskWorkflowEventService workflowEventService, LabFormalAcceptanceService formalAcceptanceService,
+            Clock clock) {
         this.taskMapper = taskMapper;
         this.evidenceMapper = evidenceMapper;
         this.goalMapper = goalMapper;
         this.workflowService = workflowService;
         this.accessService = accessService;
+        this.workflowEventService = workflowEventService;
+        this.formalAcceptanceService = formalAcceptanceService;
         this.clock = clock;
     }
 
@@ -215,6 +237,7 @@ public class LabTaskServiceImpl implements LabTaskService {
         if (tasks.isEmpty() || total.compareTo(ONE_HUNDRED) != 0) {
             throw new ServiceException("Monthly key-task performance weights must total 100 before plan activation");
         }
+        for (LabTask task : tasks) accessService.requireEligibleReviewer(task);
         for (LabTask task : tasks) {
             List<FieldValidationError> errors = workflowService.activatePlan(task);
             requireValid(errors);
@@ -222,6 +245,8 @@ public class LabTaskServiceImpl implements LabTaskService {
         for (LabTask task : tasks) {
             task.setUpdateBy(actor(actorId));
             if (taskMapper.updateTask(task) != 1) throw optimisticConflict();
+            appendWorkflowEvent(task, LabConstants.WORKFLOW_DRAFT, LabConstants.WORKFLOW_ACTIVE,
+                    member(actorId), "ACTIVATE", "激活月度结果");
         }
         return tasks.size();
     }
@@ -251,8 +276,9 @@ public class LabTaskServiceImpl implements LabTaskService {
             throw new ServiceException("Weekly task links must match its current month task");
         }
         LabPeriodUtils.PeriodRange month = LabPeriodUtils.parseMonth(parent.getPeriod());
-        LabPeriodUtils.PeriodRange week = LabPeriodUtils.parseWeek(task.getPeriod());
-        if (week.getStartDate().isBefore(month.getStartDate()) || week.getEndDate().isAfter(month.getEndDate())) {
+        LabPeriodUtils.parseWeek(task.getPeriod());
+        LocalDate planned = businessDate(task.getPlanDate());
+        if (planned == null || planned.isBefore(month.getStartDate()) || planned.isAfter(month.getEndDate())) {
             throw new ServiceException("Weekly task links must match its current month task");
         }
         requireValid(workflowService.activatePlan(task));
@@ -263,6 +289,7 @@ public class LabTaskServiceImpl implements LabTaskService {
     @Transactional
     public void submitResult(Long id, Integer version, TaskSubmitCommand command, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        String fromStatus = task.getWorkflowStatus();
         requireUnlocked(task);
         accessService.requireTaskWrite(task, actorId);
         Long actorMemberId = member(actorId);
@@ -275,23 +302,29 @@ public class LabTaskServiceImpl implements LabTaskService {
             }
         }
         saveWorkflowTask(task, actorId);
+        appendWorkflowEvent(task, fromStatus, task.getWorkflowStatus(), actorMemberId,
+                "SUBMIT", task.getResultDesc());
     }
 
     @Override
     @Transactional
     public void withdrawResult(Long id, Integer version, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        String fromStatus = task.getWorkflowStatus();
         requireUnlocked(task);
         accessService.requireTaskWrite(task, actorId);
         requireOwner(task, member(actorId));
         workflowService.withdraw(task);
         saveWorkflowTask(task, actorId);
+        appendWorkflowEvent(task, fromStatus, task.getWorkflowStatus(), member(actorId),
+                "WITHDRAW", "提交人撤回月度结果");
     }
 
     @Override
     @Transactional
     public void reviewPass(Long id, Integer version, TaskSubmitCommand command, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        String fromStatus = task.getWorkflowStatus();
         requireUnlocked(task);
         accessService.requireTaskReview(task, actorId);
         Long actorMemberId = member(actorId);
@@ -303,27 +336,82 @@ public class LabTaskServiceImpl implements LabTaskService {
             }
         }
         saveWorkflowTask(task, actorId);
+        appendWorkflowEvent(task, fromStatus, task.getWorkflowStatus(), actorMemberId,
+                "CONFIRM", command.getReviewerComment());
+        if (formalAcceptanceService != null) {
+            formalAcceptanceService.accept(task, actorMemberId, command.getReviewerComment(), task.getVersion());
+        }
     }
 
     @Override
     @Transactional
     public void reviewReturn(Long id, Integer version, TaskSubmitCommand command, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        String fromStatus = task.getWorkflowStatus();
         requireUnlocked(task);
         accessService.requireTaskReview(task, actorId);
         workflowService.reviewReturn(task, command, member(actorId));
         saveWorkflowTask(task, actorId);
+        appendWorkflowEvent(task, fromStatus, task.getWorkflowStatus(), member(actorId),
+                "RETURN", command.getReviewerComment());
     }
 
     @Override
     @Transactional
     public void reopenTask(Long id, Integer version, String reason, Long actorId) {
         LabTask task = loadVersioned(id, version);
+        String fromStatus = task.getWorkflowStatus();
         requireUnlocked(task);
         accessService.requireManager(actorId);
         workflowService.managerReopen(task, member(actorId), reason);
         task.setRemark(reason);
         saveWorkflowTask(task, actorId);
+        appendWorkflowEvent(task, fromStatus, task.getWorkflowStatus(), member(actorId), "REOPEN", reason);
+    }
+
+    @Override
+    @Transactional
+    public LabTask carryMonthlyResult(Long id, Integer version, MonthlyCarryCommand command, Long actorId) {
+        LabTask source = loadVersioned(id, version);
+        accessService.requireTaskWrite(source, actorId);
+        if (!LabConstants.TASK_LEVEL_MONTH.equals(source.getTaskLevel())
+                || !LabConstants.WORKFLOW_CONFIRMED.equals(source.getWorkflowStatus())
+                || !LabConstants.RESULT_UNDONE.equals(source.getResultStatus())) {
+            throw new ServiceException("只有已确认且未完成的月度结果可以转入下月");
+        }
+        if (command == null || command.getPlanDate() == null || blank(command.getReason())) {
+            throw new ServiceException("转入下月必须填写计划日期和原因");
+        }
+        YearMonth targetMonth = YearMonth.from(LabPeriodUtils.parseMonth(source.getPeriod()).getStartDate()).plusMonths(1);
+        String targetPeriod = targetMonth.toString();
+        LocalDate targetDate = command.getPlanDate().toInstant().atZone(clock.getZone()).toLocalDate();
+        if (!YearMonth.from(targetDate).equals(targetMonth)) {
+            throw new ServiceException("转期计划日期必须位于紧接的下一个月份");
+        }
+        LabTask existing = taskMapper.selectCarriedTask(source.getId(), targetPeriod);
+        if (existing != null) return existing;
+        LabTask carried = copyForNextMonth(source, targetPeriod, command.getPlanDate(), actorId);
+        if (taskMapper.insertTask(carried) != 1) { throw new ServiceException("月度结果转期创建失败"); }
+        appendWorkflowEvent(source, LabConstants.WORKFLOW_CONFIRMED, LabConstants.WORKFLOW_CONFIRMED,
+                member(actorId), "CARRY", command.getReason().trim());
+        return carried;
+    }
+
+    private LabTask copyForNextMonth(LabTask source, String targetPeriod, Date planDate, Long actorId) {
+        LabTask target = new LabTask();
+        target.setParentId(0L); target.setGoalId(source.getGoalId()); target.setMilestoneId(source.getMilestoneId());
+        target.setTaskLevel(LabConstants.TASK_LEVEL_MONTH); target.setPeriod(targetPeriod); target.setBizLine(source.getBizLine());
+        target.setTaskType(source.getTaskType()); target.setTitle(source.getTitle()); target.setOwnerId(source.getOwnerId());
+        target.setDeptId(source.getDeptId()); target.setPlanDate(planDate); target.setDeliverable(source.getDeliverable());
+        target.setPerfWeight(source.getPerfWeight()); target.setGoalWeight(source.getGoalWeight());
+        target.setWorkflowStatus(LabConstants.WORKFLOW_DRAFT); target.setResultStatus(LabConstants.RESULT_DOING);
+        target.setExecutionStatus(null); target.setExecutionVersion(0); target.setCarriedFromId(source.getId());
+        target.setAssetId(source.getAssetId()); target.setCoordinationRequired(source.getCoordinationRequired());
+        target.setCoordinationOwnerId(source.getCoordinationOwnerId()); target.setCoordinationDeptId(source.getCoordinationDeptId());
+        target.setCoordinationContent(source.getCoordinationContent()); target.setCoordinationSupport(source.getCoordinationSupport());
+        target.setCoordinationDesc(source.getCoordinationDesc()); target.setBlockFlag(LabConstants.NO);
+        target.setPeriodLockFlag(LabConstants.NO); target.setVersion(0); target.setDelFlag(LabConstants.NO);
+        target.setCreateBy(actor(actorId)); return target;
     }
 
     @Override
@@ -493,6 +581,13 @@ public class LabTaskServiceImpl implements LabTaskService {
         if (taskMapper.updateTask(task) != 1) throw optimisticConflict();
     }
 
+    private void appendWorkflowEvent(LabTask task, String fromStatus, String toStatus,
+            Long actorMemberId, String eventType, String reason) {
+        if (workflowEventService != null && LabConstants.TASK_LEVEL_MONTH.equals(task.getTaskLevel())) {
+            workflowEventService.append(task, fromStatus, toStatus, actorMemberId, eventType, reason);
+        }
+    }
+
     private void validateTaskConnections(LabTask task, Long actorId, Map<Long, LabGoal> lockedGoals,
             Map<Long, LabTask> lockedTasks, Map<Long, String> lockedOwners) {
         if (task == null || blank(task.getTaskLevel()) || blank(task.getPeriod())) throw new ServiceException("Task level and period are required");
@@ -515,9 +610,10 @@ public class LabTaskServiceImpl implements LabTaskService {
             if (!same(parent.getBizLine(), task.getBizLine())) throw new ServiceException("Weekly task must use its month task business line");
             if (LabConstants.YES.equals(parent.getPeriodLockFlag())) throw new ServiceException("Weekly task cannot change a period-locked month plan");
             LabPeriodUtils.PeriodRange month = LabPeriodUtils.parseMonth(parent.getPeriod());
-            LabPeriodUtils.PeriodRange week = LabPeriodUtils.parseWeek(task.getPeriod());
-            if (week.getStartDate().isBefore(month.getStartDate()) || week.getEndDate().isAfter(month.getEndDate())) {
-                throw new ServiceException("Weekly task period must be fully contained in its month task period");
+            LabPeriodUtils.parseWeek(task.getPeriod());
+            LocalDate planned = businessDate(task.getPlanDate());
+            if (planned == null || planned.isBefore(month.getStartDate()) || planned.isAfter(month.getEndDate())) {
+                throw new ServiceException("Weekly task plan date must belong to its parent month");
             }
             return;
         }
@@ -800,6 +896,10 @@ public class LabTaskServiceImpl implements LabTaskService {
 
     private boolean isCompleted(String status) {
         return LabConstants.RESULT_EXCEEDED.equals(status) || LabConstants.RESULT_ONTIME.equals(status) || LabConstants.RESULT_DELAYED.equals(status);
+    }
+
+    private LocalDate businessDate(Date value) {
+        return value == null ? null : value.toInstant().atZone(clock.getZone()).toLocalDate();
     }
     private boolean same(Object left, Object right) { return left == null ? right == null : left.equals(right); }
     private String actor(Long id) { if (id == null) throw new ServiceException("Authenticated actor is required"); return String.valueOf(id); }

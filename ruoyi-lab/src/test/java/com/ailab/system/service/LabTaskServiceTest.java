@@ -79,12 +79,27 @@ class LabTaskServiceTest {
         parent.setGoalId(1L); parent.setMilestoneId(2L); tasks.put(parent);
         LabTask weekly = task(null, 10L, "week", "2026-W36", 8L, "0", "0");
         weekly.setGoalId(1L); weekly.setMilestoneId(2L);
+        weekly.setPlanDate(Date.from(Instant.parse("2026-09-02T00:00:00Z")));
 
         assertThrows(ServiceException.class, () -> service.createTask(weekly, 8L));
-        weekly.setPeriod("2026-W32");
+        weekly.setPlanDate(Date.from(Instant.parse("2026-08-20T00:00:00Z"))); weekly.setPeriod("2026-W32");
 
         service.createTask(weekly, 8L);
         assertNotNull(weekly.getId());
+    }
+
+    @Test
+    void crossMonthIsoWeekBelongsToParentMonthByItsPlanDate() {
+        goals.put(goal(1L, 0L, "YEAR", 2026, null));
+        goals.put(goal(2L, 1L, "QUARTER", 2026, "2026Q3"));
+        LabTask parent = activeTask(10L, 8L); parent.setGoalId(1L); parent.setMilestoneId(2L); tasks.put(parent);
+        LabTask weekly = task(null, 10L, "week", "2026-W36", 8L, "0", "0");
+        weekly.setGoalId(1L); weekly.setMilestoneId(2L);
+        weekly.setPlanDate(Date.from(Instant.parse("2026-08-31T00:00:00Z")));
+
+        service.createTask(weekly, 8L);
+
+        assertNotNull(weekly.getId()); assertEquals("2026-W36", weekly.getPeriod());
     }
 
     @Test
@@ -111,6 +126,17 @@ class LabTaskServiceTest {
         assertEquals(LabConstants.WORKFLOW_ACTIVE, tasks.find(1L).getWorkflowStatus());
         assertEquals(LabConstants.WORKFLOW_ACTIVE, tasks.find(2L).getWorkflowStatus());
         assertEquals(new BigDecimal("90"), second.getGoalWeight(), "goal weight must not drive performance plan activation");
+    }
+
+    @Test
+    void monthlyPlanRequiresAnotherEnabledReviewerBeforeActivation() {
+        LabTask task = task(1L, 0L, "month", "2026-08", 8L, "100", "100");
+        tasks.put(task); access.eligibleReviewerCount = 0;
+
+        assertThrows(ServiceException.class, () -> service.activateMonthlyPlan(8L, "2026-08", 8L));
+
+        access.eligibleReviewerCount = 1;
+        assertEquals(1, service.activateMonthlyPlan(8L, "2026-08", 8L));
     }
 
     @Test
@@ -861,6 +887,7 @@ class LabTaskServiceTest {
         }
         @Override public LabTask selectTaskById(Long id) { LabTask t = data.get(id); return t == null || "2".equals(t.getDelFlag()) ? null : t; }
         @Override public LabTask selectTaskForUpdate(Long id) { lockedTaskIds.add(id); LabTask current = lockedOverrides.get(id); return current == null ? selectTaskById(id) : current; }
+        @Override public LabTask selectCarriedTask(Long carriedFromId, String period) { for (LabTask row : data.values()) if (carriedFromId.equals(row.getCarriedFromId()) && period.equals(row.getPeriod()) && !"2".equals(row.getDelFlag())) return row; return null; }
         @Override public List<LabTask> selectTasksByParentId(Long parentId) { List<LabTask> r = new ArrayList<LabTask>(); for (LabTask t : data.values()) if (parentId.equals(t.getParentId()) && !"2".equals(t.getDelFlag())) r.add(t); return r; }
         @Override public List<LabTask> selectTasksByParentIdForUpdate(Long parentId) { lockedChildrenParentIds.add(parentId); return selectTasksByParentId(parentId); }
         @Override public List<LabTask> selectKeyMonthTasksByMilestoneId(Long id) { return new ArrayList<LabTask>(); }
@@ -890,11 +917,13 @@ class LabTaskServiceTest {
     static final class MemoryAccessMapper implements LabAccessMapper {
         final Map<Long, LabAccessContext> contexts = new LinkedHashMap<Long, LabAccessContext>();
         boolean consumePage;
+        int eligibleReviewerCount = 1;
         void put(Long userId, Long memberId, String roleKey, String bizLine) { LabAccessContext value = new LabAccessContext(); value.setUserId(userId); value.setMemberId(memberId); value.setRoleKey(roleKey); value.setBizLine(bizLine); value.setDeptId(101L); contexts.put(userId, value); }
         @Override public LabAccessContext selectAccessContext(Long userId) {
             if (consumePage && PageHelper.getLocalPage() != null) PageHelper.clearPage();
             return contexts.get(userId);
         }
+        @Override public int countEligibleReviewers(Long ownerId, String bizLine) { return eligibleReviewerCount; }
     }
 
     static final class ExposedTaskController extends LabTaskController {

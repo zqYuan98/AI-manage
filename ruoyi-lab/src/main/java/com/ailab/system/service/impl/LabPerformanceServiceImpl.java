@@ -40,9 +40,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class LabPerformanceServiceImpl implements LabPerformanceService {
-    private final LabPerformanceMapper mapper; private final LabAccessService access; private final LabPerformanceCalculator calculator; private final Clock clock;
-    @Autowired public LabPerformanceServiceImpl(LabPerformanceMapper mapper,LabAccessService access,LabPerformanceCalculator calculator){this(mapper,access,calculator,Clock.systemDefaultZone());}
-    public LabPerformanceServiceImpl(LabPerformanceMapper mapper,LabAccessService access,LabPerformanceCalculator calculator,Clock clock){this.mapper=mapper;this.access=access;this.calculator=calculator;this.clock=clock;}
+    private final LabPerformanceMapper mapper; private final LabAccessService access; private final LabPerformanceCalculator calculator;
+    private final LabPeriodCloseSnapshotService closeSnapshots; private final Clock clock;
+    @Autowired public LabPerformanceServiceImpl(LabPerformanceMapper mapper,LabAccessService access,LabPerformanceCalculator calculator,
+            LabPeriodCloseSnapshotService closeSnapshots){this(mapper,access,calculator,closeSnapshots,Clock.systemDefaultZone());}
+    public LabPerformanceServiceImpl(LabPerformanceMapper mapper,LabAccessService access,LabPerformanceCalculator calculator,Clock clock){this(mapper,access,calculator,null,clock);}
+    public LabPerformanceServiceImpl(LabPerformanceMapper mapper,LabAccessService access,LabPerformanceCalculator calculator,
+            LabPeriodCloseSnapshotService closeSnapshots,Clock clock){this.mapper=mapper;this.access=access;this.calculator=calculator;this.closeSnapshots=closeSnapshots;this.clock=clock;}
 
     @Override public List<LabPerfScore> listMyScores(String period,Long actorUserId){requireAssessmentPeriod(period);LabAccessContext actor=access.context(actorUserId);return mapper.selectScoresForMember(actor.getMemberId(),period);}
     @Override public List<LabPerfScore> listScores(String period,Long actorUserId){requireAssessmentPeriod(period);access.requireManager(actorUserId);return mapper.selectCurrentScores(period);}
@@ -92,10 +96,17 @@ public class LabPerformanceServiceImpl implements LabPerformanceService {
             LabCollaborationRecord overdue=overdue(task,period,actor,actorUserId,cutoff); int inserted=mapper.insertOverdueRecord(overdue); if(inserted<0||inserted>1)throw new ServiceException("Invalid overdue idempotency result"); if(inserted==1)collaboration.add(overdue);
         }
         Map<Long,List<LabTaskEvidence>> evidenceMap=evidenceMap(evidence); Map<Long,List<LabTaskQualityGate>> gateMap=gateMap(gates); List<LabPerfScore> scores=new ArrayList<LabPerfScore>();
+        for(LabTask task:tasks)task.setEvidenceList(evidenceMap.get(task.getId()));
         for(LabMember member:members){
             PerformanceCalculationInput input=input(member.getId(),period,true,cutoff,tasks,evidenceMap,gateMap,collaboration,quarterCollaboration,assetFacts); PerformanceCalculationResult result=calculator.calculate(input);
             Integer max=mapper.selectMaxRevision(member.getId(),period); int history=mapper.markCurrentScoresHistorical(period,member.getId(),actor(actorUserId)); if(history<0||history>1)throw new ServiceException("Current performance revision invariant is broken");
             LabPerfScore score=score(member.getId(),period,max==null?1:max+1,result,cutoff,actorUserId); requireAffected(mapper.insertPerfScore(score),"Performance revision was not inserted");scores.add(score);
+        }
+        if(closeSnapshots!=null){
+            int performanceRevision=0;for(LabPerfScore score:scores)performanceRevision=Math.max(performanceRevision,score.getRevisionNo());
+            closeSnapshots.close(period,close.getPeriodVersion()==null?0:close.getPeriodVersion(),
+                    closeSnapshots.latestFormalRevisionId(period),performanceRevision,actor.getMemberId(),tasks,
+                    collaboration,members);
         }
         int locked=mapper.lockTasksForPeriod(period,LabConstants.YES);if(locked!=tasks.size())throw new ServiceException("Period task lock changed concurrently");
         requireAffected(mapper.closePeriod(close.getId(),close.getVersion(),actor(actorUserId),cutoff,reason.trim()),"Period close changed concurrently"); return scores;

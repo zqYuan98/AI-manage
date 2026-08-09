@@ -5,7 +5,7 @@
         <id property="id" column="id"/><result property="period" column="period"/><result property="closeStatus" column="close_status"/>
         <result property="closeBy" column="close_by"/><result property="closeTime" column="close_time"/><result property="closeReason" column="close_reason"/>
         <result property="reopenBy" column="reopen_by"/><result property="reopenTime" column="reopen_time"/><result property="reopenReason" column="reopen_reason"/>
-        <result property="reopenHistoryJson" column="reopen_history_json"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
+        <result property="reopenHistoryJson" column="reopen_history_json"/><result property="periodVersion" column="period_version"/><result property="version" column="version"/><result property="delFlag" column="del_flag"/>
         <result property="createBy" column="create_by"/><result property="createTime" column="create_time"/><result property="updateBy" column="update_by"/>
         <result property="updateTime" column="update_time"/><result property="remark" column="remark"/>
     </resultMap>
@@ -37,7 +37,9 @@
         <result property="taskLevel" column="task_level"/><result property="period" column="period"/><result property="bizLine" column="biz_line"/><result property="taskType" column="task_type"/>
         <result property="title" column="title"/><result property="ownerId" column="owner_id"/><result property="deptId" column="dept_id"/><result property="planDate" column="plan_date"/>
         <result property="actualFinishTime" column="actual_finish_time"/><result property="deliverable" column="deliverable"/><result property="perfWeight" column="perf_weight"/><result property="goalWeight" column="goal_weight"/>
-        <result property="workflowStatus" column="workflow_status"/><result property="resultStatus" column="result_status"/><result property="resultDesc" column="result_desc"/>
+        <result property="workflowStatus" column="workflow_status"/><result property="resultStatus" column="result_status"/>
+        <result property="executionStatus" column="execution_status"/><result property="carriedFromId" column="carried_from_id"/>
+        <result property="executionVersion" column="execution_version"/><result property="resultDesc" column="result_desc"/>
         <result property="failReason" column="fail_reason"/><result property="nextAction" column="next_action"/><result property="assetId" column="asset_id"/>
         <result property="coordinationRequired" column="coordination_required"/><result property="coordinationOwnerId" column="coordination_owner_id"/><result property="coordinationDeptId" column="coordination_dept_id"/>
         <result property="coordinationContent" column="coordination_content"/><result property="coordinationSupport" column="coordination_support"/><result property="coordinationDesc" column="coordination_desc"/>
@@ -76,8 +78,14 @@
 
     <select id="selectPeriodForUpdate" parameterType="string" resultMap="PeriodResult">select * from lab_period_close where period=#{period} and del_flag='0' for update</select>
     <insert id="ensureOpenPeriod">insert into lab_period_close(period,close_status,version,del_flag,create_by,create_time) values(#{period},'OPEN',0,'0',#{actor},sysdate()) on duplicate key update id=last_insert_id(id)</insert>
-    <select id="selectPeriodTasks" parameterType="string" resultMap="TaskResult">select * from lab_task where period=#{period} and del_flag='0' order by id</select>
-    <select id="selectPeriodTasksForUpdate" parameterType="string" resultMap="TaskResult">select * from lab_task where period=#{period} and del_flag='0' order by id for update</select>
+    <select id="selectPeriodTasks" parameterType="string" resultMap="TaskResult">
+        select t.* from lab_task t left join lab_task p on p.id=t.parent_id and p.task_level='month' and p.del_flag='0'
+        where (t.period=#{period} or (t.task_level='week' and p.period=#{period})) and t.del_flag='0' order by t.id
+    </select>
+    <select id="selectPeriodTasksForUpdate" parameterType="string" resultMap="TaskResult">
+        select t.* from lab_task t left join lab_task p on p.id=t.parent_id and p.task_level='month' and p.del_flag='0'
+        where (t.period=#{period} or (t.task_level='week' and p.period=#{period})) and t.del_flag='0' order by t.id for update
+    </select>
     <select id="selectActiveMembersForUpdate" resultMap="MemberResult">
         select m.* from lab_member m join sys_user u on u.user_id=m.user_id and u.status='0' and u.del_flag='0'
         where m.member_status='ACTIVE' and m.del_flag='0' order by m.id for update
@@ -130,12 +138,14 @@
         insert into lab_perf_score(member_id,period,revision_no,current_flag,delivery_score,quality_score,collaboration_score,score,detail_json,calculation_version,cutoff_time,result_status,red_line_flag,red_line_reason,revoked_flag,revoke_reason,red_line_correction_json,confirmation_status,confirmed_by,confirmed_time,calibration_status,calibrate_score,calibrator_id,calibration_note,calibration_time,version,del_flag,create_by,create_time,remark)
         values(#{memberId},#{period},#{revisionNo},#{currentFlag},#{deliveryScore},#{qualityScore},#{collaborationScore},#{score},#{detailJson},#{calculationVersion},#{cutoffTime},#{resultStatus},#{redLineFlag},#{redLineReason},#{revokedFlag},#{revokeReason},#{redLineCorrectionJson},#{confirmationStatus},#{confirmedBy},#{confirmedTime},#{calibrationStatus},#{calibrateScore},#{calibratorId},#{calibrationNote},#{calibrationTime},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
     </insert>
-    <update id="lockTasksForPeriod">update lab_task set period_lock_flag=#{lockFlag},update_by='period-close',update_time=sysdate(),version=version+1 where period=#{period} and del_flag='0' and period_lock_flag&lt;&gt;#{lockFlag}</update>
+    <update id="lockTasksForPeriod">update lab_task t left join lab_task p on p.id=t.parent_id and p.task_level='month' and p.del_flag='0'
+        set t.period_lock_flag=#{lockFlag},t.update_by='period-close',t.update_time=sysdate(),t.version=t.version+1
+        where (t.period=#{period} or (t.task_level='week' and p.period=#{period})) and t.del_flag='0' and t.period_lock_flag&lt;&gt;#{lockFlag}</update>
     <update id="closePeriod">update lab_period_close set close_status='CLOSED',close_by=#{actor},close_time=#{time},close_reason=#{reason},update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and close_status='OPEN' and del_flag='0'</update>
     <update id="reopenPeriod">
         update lab_period_close set close_status='OPEN',reopen_by=#{actor},reopen_time=#{time},reopen_reason=#{reason},
         reopen_history_json=json_array_append(coalesce(reopen_history_json,json_array()),'$',json_object('version',version+1,'actor',#{actor},'time',date_format(#{time},'%Y-%m-%d %H:%i:%s'),'reason',#{reason})),
-        update_by=#{actor},update_time=sysdate(),version=version+1 where id=#{id} and version=#{version} and close_status='CLOSED' and del_flag='0'
+        update_by=#{actor},update_time=sysdate(),period_version=period_version+1,version=version+1 where id=#{id} and version=#{version} and close_status='CLOSED' and del_flag='0'
     </update>
     <select id="selectCurrentScores" parameterType="string" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where period=#{period} and current_flag='1' and del_flag='0' order by member_id,id</select>
     <select id="selectCurrentScoresForUpdate" parameterType="string" resultMap="ScoreResult">select <include refid="scoreColumns"/> from lab_perf_score where period=#{period} and current_flag='1' and del_flag='0' order by member_id,id for update</select>

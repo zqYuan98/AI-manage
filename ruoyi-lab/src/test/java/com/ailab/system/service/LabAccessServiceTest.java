@@ -123,5 +123,6 @@ class LabAccessServiceTest {
         private final Map<Long, LabAccessContext> contexts = new LinkedHashMap<Long, LabAccessContext>();
         void put(LabAccessContext context) { contexts.put(context.getUserId(), context); }
         @Override public LabAccessContext selectAccessContext(Long userId) { return contexts.get(userId); }
+        @Override public int countEligibleReviewers(Long ownerId, String bizLine) { return 1; }
     }
 }

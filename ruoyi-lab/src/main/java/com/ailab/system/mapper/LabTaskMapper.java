@@ -13,6 +13,7 @@ public interface LabTaskMapper {
     List<LabTask> selectTaskList(LabTask query);
     LabTask selectTaskById(Long id);
     LabTask selectTaskForUpdate(Long id);
+    LabTask selectCarriedTask(@Param("carriedFromId") Long carriedFromId, @Param("period") String period);
     List<LabTask> selectTasksByParentId(Long parentId);
     List<LabTask> selectTasksByParentIdForUpdate(Long parentId);
     List<LabTask> selectKeyMonthTasksByMilestoneId(Long milestoneId);
