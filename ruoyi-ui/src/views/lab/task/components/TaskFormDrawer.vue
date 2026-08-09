@@ -11,8 +11,8 @@
       <header class="task-form__header">
         <button type="button" aria-label="关闭" @click="$emit('close')"><i class="el-icon-close" /></button>
         <span class="lab-eyebrow">任务事实卡</span>
-        <h2>{{ form.id ? '编辑任务事实' : '新增任务' }}</h2>
-        <p>先维护计划字段，再按实际发生逐步补充协同、结果、证据和阻塞事实。</p>
+        <h2>{{ form.id ? (isWeekly ? '编辑周承诺' : '编辑月任务事实') : (isWeekly ? '新增本周承诺' : '新增月任务') }}</h2>
+        <p>{{ isWeekly ? '周承诺只维护所属月结果、交付物、截止日期和必要协同。' : '先维护计划字段，再按实际发生逐步补充协同、结果、证据和阻塞事实。' }}</p>
       </header>
 
       <el-alert v-if="conflictNotice" class="task-form__notice" type="warning" :closable="false" show-icon>
@@ -26,30 +26,30 @@
         <section class="task-form__section">
           <div class="task-form__section-title"><span>01</span><div><h3>任务身份</h3><p>月任务承接目标，周任务承接月任务。</p></div></div>
           <div class="task-form__grid">
-            <el-form-item label="任务层级" prop="taskLevel" :error="errorFor('taskLevel')">
+            <el-form-item v-if="!isWeekly" label="任务层级" prop="taskLevel" :error="errorFor('taskLevel')">
               <el-radio-group v-model="form.taskLevel" :disabled="structureLocked" @change="handleLevelChange">
                 <el-radio-button label="month">月度</el-radio-button>
                 <el-radio-button label="week">周度</el-radio-button>
               </el-radio-group>
             </el-form-item>
-            <el-form-item label="任务类型" prop="taskType" :error="errorFor('taskType')">
+            <el-form-item v-if="!isWeekly" label="任务类型" prop="taskType" :error="errorFor('taskType')">
               <el-select v-model="form.taskType" :disabled="structureLocked" @change="normalizeWeights">
                 <el-option label="重点任务" value="key" />
                 <el-option label="日常任务" value="daily" />
               </el-select>
             </el-form-item>
-            <el-form-item v-if="form.taskLevel === 'month'" label="月度周期" prop="period" :error="errorFor('period')">
+            <el-form-item v-if="!isWeekly" label="月度周期" prop="period" :error="errorFor('period')">
               <el-date-picker v-model="form.period" type="month" value-format="yyyy-MM" format="yyyy 年 MM 月" :disabled="structureLocked" />
             </el-form-item>
             <el-form-item v-else label="ISO 周期" prop="period" :error="errorFor('period')">
               <el-input v-model.trim="form.period" placeholder="例如 2026-W32" :disabled="structureLocked" />
             </el-form-item>
-            <el-form-item v-if="form.taskLevel === 'week'" label="所属月任务" prop="parentId" :error="errorFor('parentId')">
+            <el-form-item v-if="isWeekly" label="所属月结果" prop="parentId" :error="errorFor('parentId')">
               <el-select v-model="form.parentId" filterable :disabled="structureLocked" @change="inheritMonthTask">
                 <el-option v-for="monthTask in monthTasks" :key="monthTask.id" :label="`${monthTask.period} · ${monthTask.title}`" :value="monthTask.id" />
               </el-select>
             </el-form-item>
-            <template v-else>
+            <template v-if="!isWeekly">
               <el-form-item label="年度目标" prop="goalId" :error="errorFor('goalId')">
                 <el-select v-model="form.goalId" filterable :disabled="structureLocked" @change="form.milestoneId = null">
                   <el-option v-for="goal in annualGoals" :key="goal.id" :label="goal.title" :value="goal.id" />
@@ -68,19 +68,19 @@
           <div class="task-form__section-title"><span>02</span><div><h3>计划合同</h3><p>标题、负责人、日期和交付物是激活前置条件。</p></div></div>
           <el-form-item label="任务标题" prop="title" :error="errorFor('title')"><el-input v-model.trim="form.title" maxlength="255" show-word-limit :disabled="locked" /></el-form-item>
           <div class="task-form__grid">
-            <el-form-item label="负责人" prop="ownerId" :error="errorFor('ownerId')">
+            <el-form-item v-if="!isWeekly" label="负责人" prop="ownerId" :error="errorFor('ownerId')">
               <el-select v-model="form.ownerId" filterable :disabled="structureLocked" @change="syncOwner">
                 <el-option v-for="owner in taskOwners" :key="owner.id" :label="ownerLabel(owner)" :value="owner.id" />
               </el-select>
             </el-form-item>
-            <el-form-item label="业务线" prop="bizLine" :error="errorFor('bizLine')"><el-input v-model="form.bizLine" disabled /></el-form-item>
-            <el-form-item label="部门 ID" prop="deptId" :error="errorFor('deptId')"><el-input-number v-model="form.deptId" :min="1" :disabled="structureLocked" /></el-form-item>
-            <el-form-item label="计划完成日期" prop="planDate" :error="errorFor('planDate')"><el-date-picker v-model="form.planDate" type="date" value-format="yyyy-MM-dd" :disabled="structureLocked" /></el-form-item>
+            <el-form-item v-if="!isWeekly" label="业务线" prop="bizLine" :error="errorFor('bizLine')"><el-input v-model="form.bizLine" disabled /></el-form-item>
+            <el-form-item v-if="!isWeekly" label="部门 ID" prop="deptId" :error="errorFor('deptId')"><el-input-number v-model="form.deptId" :min="1" :disabled="structureLocked" /></el-form-item>
+            <el-form-item :label="isWeekly ? '承诺完成日期' : '计划完成日期'" prop="planDate" :error="errorFor('planDate')"><el-date-picker v-model="form.planDate" type="date" value-format="yyyy-MM-dd" :disabled="structureLocked" /></el-form-item>
           </div>
           <el-form-item label="交付物" prop="deliverable" :error="errorFor('deliverable')"><el-input v-model.trim="form.deliverable" type="textarea" :rows="2" maxlength="1000" show-word-limit :disabled="locked" /></el-form-item>
         </section>
 
-        <section class="task-form__section">
+        <section v-if="!isWeekly" class="task-form__section">
           <div class="task-form__section-title"><span>03</span><div><h3>双权重</h3><p>仅月度重点任务参与；绩效权重与目标权重各自形成 100% 合同。</p></div></div>
           <div class="task-form__grid">
             <el-form-item label="绩效权重（%）" prop="perfWeight" :error="errorFor('perfWeight')">
@@ -197,6 +197,9 @@ export default {
     },
     isKeyMonth() {
       return this.form.taskLevel === 'month' && this.form.taskType === 'key'
+    },
+    isWeekly() {
+      return this.form.taskLevel === 'week'
     },
     annualGoals() {
       return this.goals.filter(goal => goal.goalLevel === 'YEAR')

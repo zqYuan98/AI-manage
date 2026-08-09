@@ -8,6 +8,26 @@ export function getDashboardOverview(period) {
   })
 }
 
+function getWorkbench(role, period, asOf) {
+  return request({
+    url: `/lab/workbench/${role}`,
+    method: 'get',
+    params: { period, asOf }
+  })
+}
+
+export function getManagerWorkbench(period, asOf) {
+  return getWorkbench('manager', period, asOf)
+}
+
+export function getLeadWorkbench(period, asOf) {
+  return getWorkbench('lead', period, asOf)
+}
+
+export function getMemberWorkbench(period, asOf) {
+  return getWorkbench('member', period, asOf)
+}
+
 export function listDashboardReminders(params) {
   return request({
     url: '/lab/dashboard/reminders',

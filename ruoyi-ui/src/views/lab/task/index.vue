@@ -285,8 +285,13 @@ export default {
   created() {
     this.loadSavedFilters()
     Promise.all([this.loadOwners(), this.loadGoals()]).then(() => {
-      if (this.$route.query.my === '1' && this.currentMember) this.setScope('mine')
-      else this.refreshAll()
+      if (this.$route.query.my === '1' && this.currentMember) {
+        this.scopeMode = 'mine'
+        this.query.ownerId = this.currentMember.id
+      }
+      return this.refreshAll()
+    }).then(() => {
+      if (this.$route.query.action === 'create-weekly') this.openCreate('week')
     })
   },
   methods: {
