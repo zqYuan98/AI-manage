@@ -20,6 +20,12 @@ public class LabProperties
 
     private long maxUploadSizeBytes = 50L * 1024 * 1024;
 
+    /** Read weekly execution facts instead of the legacy workflow projection. */
+    private boolean readNewModel;
+
+    /** Allow members to write the self-close weekly execution workflow. */
+    private boolean writeSelfClose;
+
     public String getOutputDirectory()
     {
         return outputDirectory;
@@ -68,5 +74,25 @@ public class LabProperties
     public void setMaxUploadSizeBytes(long maxUploadSizeBytes)
     {
         this.maxUploadSizeBytes = maxUploadSizeBytes;
+    }
+
+    public boolean isReadNewModel()
+    {
+        return readNewModel;
+    }
+
+    public void setReadNewModel(boolean readNewModel)
+    {
+        this.readNewModel = readNewModel;
+    }
+
+    public boolean isWriteSelfClose()
+    {
+        return writeSelfClose;
+    }
+
+    public void setWriteSelfClose(boolean writeSelfClose)
+    {
+        this.writeSelfClose = writeSelfClose;
     }
 }

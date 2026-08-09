@@ -24,14 +24,25 @@ import org.junit.jupiter.api.Test;
 
 /** Structural contract for the executable, re-runnable AI laboratory SQL bootstrap. */
 class LabSqlContractTest {
-    private static final Set<String> TABLES = set("lab_goal", "lab_task", "lab_task_evidence", "lab_task_quality_gate", "lab_task_block_event", "lab_reminder", "lab_asset", "lab_member", "lab_skill", "lab_member_skill", "lab_one2one", "lab_ipr", "lab_collaboration_record", "lab_perf_score", "lab_period_close", "lab_report_template", "lab_report_section", "lab_report_summary", "lab_report_instance", "lab_report_job");
+    private static final Set<String> TABLES = set("lab_goal", "lab_task", "lab_task_execution_event", "lab_task_migration_issue", "lab_task_workflow_event", "lab_formal_acceptance_revision", "lab_formal_acceptance_fact", "lab_period_close_snapshot", "lab_period_close_fact", "lab_management_decision", "lab_task_evidence", "lab_task_quality_gate", "lab_task_block_event", "lab_reminder", "lab_asset", "lab_member", "lab_skill", "lab_member_skill", "lab_one2one", "lab_ipr", "lab_collaboration_record", "lab_perf_score", "lab_period_close", "lab_report_template", "lab_report_section", "lab_report_summary", "lab_report_instance", "lab_report_job");
     private static final Set<String> AUDIT = set("id", "del_flag", "create_by", "create_time", "update_by", "update_time", "remark");
-    private static final Set<String> DICTS = set("lab_biz_line|hardware", "lab_biz_line|platform", "lab_biz_line|algorithm", "lab_biz_line|manage", "lab_task_workflow_status|DRAFT", "lab_task_workflow_status|ACTIVE", "lab_task_workflow_status|PENDING_REVIEW", "lab_task_workflow_status|CONFIRMED", "lab_task_result_status|DOING", "lab_task_result_status|EXCEEDED", "lab_task_result_status|ONTIME", "lab_task_result_status|DELAYED", "lab_task_result_status|UNDONE", "lab_task_type|key", "lab_task_type|daily", "lab_task_level|month", "lab_task_level|week", "lab_asset_type|hardware", "lab_asset_type|algorithm", "lab_asset_type|platform", "lab_asset_stage|VERIFYING", "lab_asset_stage|DEPLOYED", "lab_asset_stage|ACCEPTED", "lab_ipr_type|SOFTWARE_COPYRIGHT", "lab_ipr_type|PATENT", "lab_ipr_type|CERTIFICATION", "lab_ipr_stage|DRAFT", "lab_ipr_stage|PREPARING", "lab_ipr_stage|SUBMITTED", "lab_ipr_stage|ACCEPTED", "lab_ipr_stage|AUTHORIZED", "lab_section_type|TABLE", "lab_section_type|STAT", "lab_section_type|TEXT", "lab_section_type|MANUAL", "lab_section_type|GROUP_TEXT", "lab_section_type|CHART", "lab_goal_status|ACTIVE", "lab_goal_status|COMPLETED", "lab_goal_status|TERMINATED");
+    private static final Set<String> DICTS = set("lab_biz_line|hardware", "lab_biz_line|platform", "lab_biz_line|algorithm", "lab_biz_line|manage", "lab_task_workflow_status|DRAFT", "lab_task_workflow_status|ACTIVE", "lab_task_workflow_status|PENDING_REVIEW", "lab_task_workflow_status|CONFIRMED", "lab_task_result_status|DOING", "lab_task_result_status|EXCEEDED", "lab_task_result_status|ONTIME", "lab_task_result_status|DELAYED", "lab_task_result_status|UNDONE", "lab_task_execution_status|PLANNED", "lab_task_execution_status|ACTIVE", "lab_task_execution_status|SELF_DONE", "lab_task_execution_status|SELF_UNDONE", "lab_task_execution_status|CANCELLED", "lab_task_type|key", "lab_task_type|daily", "lab_task_level|month", "lab_task_level|week", "lab_asset_type|hardware", "lab_asset_type|algorithm", "lab_asset_type|platform", "lab_asset_stage|VERIFYING", "lab_asset_stage|DEPLOYED", "lab_asset_stage|ACCEPTED", "lab_ipr_type|SOFTWARE_COPYRIGHT", "lab_ipr_type|PATENT", "lab_ipr_type|CERTIFICATION", "lab_ipr_stage|DRAFT", "lab_ipr_stage|PREPARING", "lab_ipr_stage|SUBMITTED", "lab_ipr_stage|ACCEPTED", "lab_ipr_stage|AUTHORIZED", "lab_section_type|TABLE", "lab_section_type|STAT", "lab_section_type|TEXT", "lab_section_type|MANUAL", "lab_section_type|GROUP_TEXT", "lab_section_type|CHART", "lab_goal_status|ACTIVE", "lab_goal_status|COMPLETED", "lab_goal_status|TERMINATED");
     private static final Set<String> PERMISSIONS = set("lab:dashboard:view", "lab:reminder:list", "lab:reminder:read", "lab:goal:list", "lab:goal:add", "lab:goal:edit", "lab:goal:remove", "lab:goal:activate", "lab:task:list", "lab:task:add", "lab:task:edit", "lab:task:remove", "lab:task:evidence", "lab:task:review", "lab:member:list", "lab:member:add", "lab:member:edit", "lab:member:remove", "lab:skill:list", "lab:skill:config", "lab:one2one:list", "lab:one2one:add", "lab:one2one:edit", "lab:asset:list", "lab:asset:add", "lab:asset:edit", "lab:asset:remove", "lab:ipr:list", "lab:ipr:add", "lab:ipr:edit", "lab:ipr:remove", "lab:perf:list", "lab:perf:close", "lab:perf:reopen", "lab:perf:redline", "lab:perf:revoke", "lab:perf:calibrate", "lab:perf:history", "lab:template:list", "lab:template:config", "lab:template:import", "lab:template:export", "lab:report:list", "lab:report:generate", "lab:report:retry", "lab:report:download", "lab:report:finalize", "lab:report:sensitive");
     private static final Map<String, Set<String>> FIELDS = fields();
     private static final Set<String> LOOKUP_INDEXES = lookupIndexes();
     static { LOOKUP_INDEXES.remove("lab_member_skill|keyidx_lab_member_skill_member(member_id)"); LOOKUP_INDEXES.remove("lab_report_summary|keyidx_lab_report_summary_period(period,biz_line)"); }
     static { FIELDS.get("lab_task_quality_gate").add("evidence_id"); FIELDS.get("lab_task_block_event").add("episode_no"); FIELDS.get("lab_reminder").addAll(set("business_type","business_id","episode_no","reminder_level","reminder_date","title","version")); }
+    static {
+        FIELDS.get("lab_task").addAll(set("execution_status", "carried_from_id", "execution_version"));
+        FIELDS.put("lab_task_execution_event", set("task_id", "from_status", "to_status", "result_status", "actual_finish_time", "actor_id", "event_type", "reason", "task_version", "evidence_version", "idempotency_key", "event_time"));
+        FIELDS.put("lab_task_migration_issue", set("task_id", "issue_code", "source_state_json", "resolution_status", "resolved_by", "resolved_time", "version"));
+        FIELDS.put("lab_task_workflow_event", set("task_id", "from_status", "to_status", "result_status", "actor_id", "event_type", "reason", "task_version", "event_time"));
+        FIELDS.put("lab_formal_acceptance_revision", set("period", "biz_line", "revision_no", "accepted_by", "accepted_time", "calculation_version"));
+        FIELDS.put("lab_formal_acceptance_fact", set("formal_revision_id", "task_id", "fact_json", "evidence_version", "reviewer_id", "review_time"));
+        FIELDS.put("lab_period_close_snapshot", set("period", "revision_no", "period_version", "formal_revision_id", "performance_revision", "closed_by", "closed_time", "calculation_version"));
+        FIELDS.put("lab_period_close_fact", set("close_snapshot_id", "fact_type", "business_id", "fact_json"));
+        FIELDS.put("lab_management_decision", set("period", "biz_line", "problem", "decision_content", "owner_id", "due_date", "related_goal_id", "related_task_id", "decision_status", "version"));
+    }
 
     @Test
     void ailabSqlMeetsTheApprovedSchemaAndSeedContract() throws IOException {
@@ -122,6 +133,14 @@ class LabSqlContractTest {
                 "legacy active blocked", "legacy locked cross month")) {
             assertTrue(legacy.contains(fixture), "missing legacy execution fixture: " + fixture);
         }
+    }
+
+    @Test
+    void commitmentCutoverStateIsPersistedInSystemConfiguration() throws IOException {
+        String sql = readSql();
+        assertTrue(sql.contains("lab.commitment.readNewModel"));
+        assertTrue(sql.contains("lab.commitment.writeSelfClose"));
+        assertTrue(sql.contains("lab.commitment.pointOfNoReturn"));
     }
 
     @Test

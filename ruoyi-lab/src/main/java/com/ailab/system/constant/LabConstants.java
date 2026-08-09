@@ -13,6 +13,16 @@ public final class LabConstants {
     public static final String RESULT_DELAYED = "DELAYED";
     public static final String RESULT_UNDONE = "UNDONE";
 
+    public static final String EXECUTION_PLANNED = "PLANNED";
+    public static final String EXECUTION_ACTIVE = "ACTIVE";
+    public static final String EXECUTION_SELF_DONE = "SELF_DONE";
+    public static final String EXECUTION_SELF_UNDONE = "SELF_UNDONE";
+    public static final String EXECUTION_CANCELLED = "CANCELLED";
+    public static final String EXECUTION_EVENT_MIGRATED_BASELINE = "MIGRATED_BASELINE";
+    public static final String MIGRATION_TERMINAL_WITH_OPEN_BLOCK = "TERMINAL_WITH_OPEN_BLOCK";
+    public static final String MIGRATION_AMBIGUOUS_LEGACY_COMBINATION = "AMBIGUOUS_LEGACY_COMBINATION";
+    public static final String MIGRATION_TERMINAL_UNRESOLVED = "MIGRATION_TERMINAL_UNRESOLVED";
+
     public static final String EVIDENCE_AUDIT_PENDING = "PENDING";
     public static final String EVIDENCE_AUDIT_APPROVED = "APPROVED";
 

@@ -35,6 +35,9 @@ public class LabTask extends BaseEntity {
     /** Query-only workflow collection used by dashboard drill-downs. */
     private List<String> workflowStatuses = new ArrayList<String>();
     private String resultStatus;
+    private String executionStatus;
+    private Long carriedFromId;
+    private Integer executionVersion;
     private String resultDesc;
     private String failReason;
     private String nextAction;
@@ -105,6 +108,12 @@ public class LabTask extends BaseEntity {
     }
     public String getResultStatus() { return resultStatus; }
     public void setResultStatus(String resultStatus) { this.resultStatus = resultStatus; }
+    public String getExecutionStatus() { return executionStatus; }
+    public void setExecutionStatus(String executionStatus) { this.executionStatus = executionStatus; }
+    public Long getCarriedFromId() { return carriedFromId; }
+    public void setCarriedFromId(Long carriedFromId) { this.carriedFromId = carriedFromId; }
+    public Integer getExecutionVersion() { return executionVersion; }
+    public void setExecutionVersion(Integer executionVersion) { this.executionVersion = executionVersion; }
     public String getResultDesc() { return resultDesc; }
     public void setResultDesc(String resultDesc) { this.resultDesc = resultDesc; }
     public String getFailReason() { return failReason; }

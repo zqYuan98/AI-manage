@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ailab.system.mapper.LabCommitmentMapper">
+    <resultMap id="EventResult" type="com.ailab.system.domain.LabTaskExecutionEvent">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/>
+        <result property="fromStatus" column="from_status"/><result property="toStatus" column="to_status"/>
+        <result property="resultStatus" column="result_status"/><result property="actualFinishTime" column="actual_finish_time"/>
+        <result property="actorId" column="actor_id"/><result property="eventType" column="event_type"/>
+        <result property="reason" column="reason"/><result property="taskVersion" column="task_version"/>
+        <result property="evidenceVersion" column="evidence_version"/><result property="idempotencyKey" column="idempotency_key"/>
+        <result property="eventTime" column="event_time"/><result property="delFlag" column="del_flag"/>
+    </resultMap>
+    <resultMap id="IssueResult" type="com.ailab.system.domain.LabTaskMigrationIssue">
+        <id property="id" column="id"/><result property="taskId" column="task_id"/>
+        <result property="issueCode" column="issue_code"/><result property="sourceStateJson" column="source_state_json"/>
+        <result property="resolutionStatus" column="resolution_status"/><result property="resolutionCode" column="resolution_code"/><result property="resolvedBy" column="resolved_by"/>
+        <result property="resolvedTime" column="resolved_time"/><result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/>
+    </resultMap>
+    <select id="selectUnmigratedWeeklyTasks" resultType="com.ailab.system.domain.LabTask">
+        select id,task_level,workflow_status,result_status,actual_finish_time,period_lock_flag,version
+        from lab_task where task_level='week' and execution_status is null and del_flag='0' order by id
+    </select>
+    <select id="selectExecutionEvents" parameterType="long" resultMap="EventResult">
+        select id,task_id,from_status,to_status,result_status,actual_finish_time,actor_id,event_type,reason,
+               task_version,evidence_version,idempotency_key,event_time,del_flag
+        from lab_task_execution_event where task_id=#{taskId} and del_flag='0' order by event_time,id
+    </select>
+    <select id="selectOpenMigrationIssues" resultMap="IssueResult">
+        select id,task_id,issue_code,source_state_json,resolution_status,resolution_code,resolved_by,resolved_time,version,del_flag
+        from lab_task_migration_issue where resolution_status='OPEN' and del_flag='0' order by task_id,id
+    </select>
+    <select id="countOpenMigrationIssues" resultType="int">
+        select count(1) from lab_task_migration_issue where resolution_status='OPEN' and del_flag='0'
+    </select>
+    <insert id="insertExecutionEvent" parameterType="com.ailab.system.domain.LabTaskExecutionEvent" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_task_execution_event(task_id,from_status,to_status,result_status,actual_finish_time,actor_id,event_type,
+            reason,task_version,evidence_version,idempotency_key,event_time,del_flag,create_by,create_time,remark)
+        values(#{taskId},#{fromStatus},#{toStatus},#{resultStatus},#{actualFinishTime},#{actorId},#{eventType},
+            #{reason},#{taskVersion},#{evidenceVersion},#{idempotencyKey},#{eventTime},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <insert id="insertMigrationIssue" parameterType="com.ailab.system.domain.LabTaskMigrationIssue" useGeneratedKeys="true" keyProperty="id">
+        insert into lab_task_migration_issue(task_id,issue_code,source_state_json,resolution_status,version,del_flag,create_by,create_time,remark)
+        values(#{taskId},#{issueCode},#{sourceStateJson},#{resolutionStatus},#{version},#{delFlag},#{createBy},sysdate(),#{remark})
+    </insert>
+    <update id="updateExecutionStatus">
+        update lab_task set execution_status=#{executionStatus},execution_version=execution_version+1,
+            update_by=#{updateBy},update_time=sysdate()
+        where id=#{taskId} and execution_version=#{expectedExecutionVersion} and period_lock_flag='0' and del_flag='0'
+    </update>
+    <select id="selectCutoverValue" resultType="string">
+        select config_value from sys_config where config_key=#{configKey} limit 1
+    </select>
+    <update id="updateCutoverValue">
+        update sys_config set config_value=#{newValue},update_by='commitment-cutover',update_time=sysdate()
+        where config_key=#{configKey} and config_value=#{expectedValue}
+    </update>
+</mapper>
