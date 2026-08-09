@@ -39,5 +39,22 @@ class ReportFencingContractTest {
         String reset=statement(xml,"update","resetstalereportjob");assertTrue(reset.contains("run_token=#{runtoken}")&&reset.contains("&lt;=#{stalebefore}")&&reset.contains("run_token=null"),"recovery must not reset a freshly heartbeating run");
     }
 
+    @Test
+    void finalReportSchemaPersistsEveryFormalFactPin() throws Exception {
+        String sql=new String(Files.readAllBytes(java.nio.file.Paths.get("../sql/ailab.sql")),StandardCharsets.UTF_8)
+                .toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+"," ");
+        for(String column:new String[]{"source_close_revision","source_formal_revision","source_execution_cutoff","preview_only","json_hash","markdown_hash","word_hash","pdf_hash"})
+            assertTrue(sql.contains("`"+column+"`"),column);
+        String mapper=new String(Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportMapper.xml")),StandardCharsets.UTF_8)
+                .toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+"," ");
+        assertTrue(mapper.contains("selectlatestclosesnapshotforupdate"));
+        String close=statement(mapper,"select","selectlatestclosesnapshotforupdate");
+        assertTrue(close.contains("join lab_period_close"));
+        assertTrue(close.contains("close_status='closed'"));
+        assertTrue(close.contains("period_version=s.period_version"));
+        assertTrue(statement(mapper,"update","finalizereport").contains("preview_only='0'"));
+        assertTrue(statement(mapper,"update","finalizereport").contains("source_close_revision is not null"));
+    }
+
     private String statement(String xml,String tag,String id){String start="<"+tag+" id=\""+id+"\"";int from=xml.indexOf(start);int to=xml.indexOf("</"+tag+">",from);assertTrue(from>=0&&to>from,"missing mapper statement "+id);return xml.substring(from,to);}
 }

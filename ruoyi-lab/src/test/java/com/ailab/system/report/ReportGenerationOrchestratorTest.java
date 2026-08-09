@@ -19,6 +19,7 @@ import com.ailab.system.domain.LabReportSection;
 import com.ailab.system.domain.LabReportTemplate;
 import com.ailab.system.domain.LabReportJob;
 import com.ailab.system.domain.LabReportSummary;
+import com.ailab.system.domain.LabPeriodCloseSnapshot;
 import com.ailab.system.controller.LabReportController;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.LabReportAccessScope;
@@ -39,6 +40,7 @@ import com.ailab.system.report.model.ReportPerformancePin;
 import com.ailab.system.report.model.TrustedReportContextFactory;
 import com.ailab.system.report.provider.DataSourceProvider;
 import com.ailab.system.report.provider.DataSourceProviderRegistry;
+import com.ailab.system.report.provider.ReportFactClassification;
 import com.ailab.system.report.renderer.SectionRenderer;
 import com.ailab.system.report.renderer.SectionRendererRegistry;
 import com.ailab.system.service.LabAccessService;
@@ -89,6 +91,9 @@ class ReportGenerationOrchestratorTest {
         when(access.reportScope(1001L)).thenReturn(new LabReportAccessScope(true,"manage",false,true));
         doAnswer(call -> { ((LabReportInstance) call.getArgument(0)).setId(31L); return 1; })
                 .when(mapper).insertReportInstance(any(LabReportInstance.class));
+        when(mapper.selectLatestCloseSnapshotForUpdate(any(String.class))).thenAnswer(call -> closeSnapshot(call.getArgument(0)));
+        when(store.read(any(String.class),any(String.class))).thenAnswer(call ->
+                call.getArgument(1, String.class).getBytes(StandardCharsets.UTF_8));
     }
 
     @Test
@@ -104,8 +109,32 @@ class ReportGenerationOrchestratorTest {
         assertEquals(5, instance.getRevisionNo()); assertEquals(3, instance.getSourcePerfRevision());
         assertEquals("1", instance.getSensitiveFlag()); assertEquals("AUTO", instance.getSourceType());
         assertEquals("DRAFT", instance.getLifecycleStatus());
+        assertEquals(71L, instance.getSourceCloseRevision()); assertEquals(61L, instance.getSourceFormalRevision());
+        assertEquals(Instant.parse("2026-08-03T10:00:00Z"), instance.getSourceExecutionCutoff().toInstant());
+        assertEquals("0", instance.getPreviewOnly());
         assertTrue(instance.getSourceDataJson().contains("\"memberId\":11") && instance.getSourceDataJson().contains("\"memberId\":12"));
         assertEquals("PENDING", instance.getJsonStatus()); assertEquals("NOT_REQUESTED", instance.getWordStatus()); assertEquals("NOT_REQUESTED", instance.getPdfStatus());
+    }
+
+    @Test
+    void openPeriodCannotCreateAFinalCandidate() {
+        LabReportTemplate template=template();when(mapper.selectTemplateById(7L)).thenReturn(template);when(mapper.selectTemplateForUpdate(7L)).thenReturn(template);
+        when(mapper.selectLatestCloseSnapshotForUpdate("2026-07")).thenReturn(null);
+
+        assertThrows(ServiceException.class,()->orchestrator.createGeneration(7L,"2026-07","ALL",1001L));
+
+        verify(mapper,never()).insertReportInstance(any());
+    }
+
+    @Test
+    void livePreviewInstanceCanNeverBeFinalized() {
+        LabReportInstance preview=draft(31L,4);preview.setPreviewOnly("1");
+        when(mapper.selectReportById(31L)).thenReturn(preview);when(mapper.lockReportFamily("monthly","2026-07","ALL")).thenReturn(Collections.singletonList(preview));when(mapper.selectReportForUpdate(31L)).thenReturn(preview);
+
+        assertThrows(ServiceException.class,()->orchestrator.finalizeReport(31L,4,1001L));
+
+        verify(mapper,never()).finalizeReport(any(),any(),any());
+        verify(mapper,never()).finalizePinnedReport(any(),any(),any(),any(),any(),any(),any());
     }
 
     @Test
@@ -177,6 +206,7 @@ class ReportGenerationOrchestratorTest {
         assertThrows(ServiceException.class,()->orchestrator.finalizeReport(31L,4,1001L));
 
         verify(mapper,never()).finalizeReport(any(),any(),any());
+        verify(mapper,never()).finalizePinnedReport(any(),any(),any(),any(),any(),any(),any());
     }
 
     @Test
@@ -187,15 +217,19 @@ class ReportGenerationOrchestratorTest {
         when(mapper.selectReportForUpdate(31L)).thenReturn(incomplete);
         assertThrows(ServiceException.class, () -> orchestrator.finalizeReport(31L, 4, 1001L));
         verify(mapper, never()).finalizeReport(any(), any(), any());
+        verify(mapper,never()).finalizePinnedReport(any(),any(),any(),any(),any(),any(),any());
 
         LabReportInstance complete = draft(31L, 4); complete.setPdfStatus("SUCCESS");
         when(mapper.selectReportById(31L)).thenReturn(complete);
         when(mapper.selectReportForUpdate(31L)).thenReturn(complete);
         when(mapper.supersedeCurrentReport("monthly", "2026-07", "ALL", 31L, "1001")).thenReturn(1);
-        when(mapper.finalizeReport(31L, 4, "1001")).thenReturn(1);
+        when(mapper.finalizePinnedReport(eq(31L),eq(4),eq("1001"),any(String.class),any(String.class),any(String.class),any(String.class))).thenReturn(1);
         LabReportInstance finalized = orchestrator.finalizeReport(31L, 4, 1001L);
         assertEquals("FINALIZED", finalized.getLifecycleStatus()); assertEquals("1", finalized.getCurrentFlag());
+        assertEquals(64,finalized.getJsonHash().length());assertEquals(64,finalized.getMarkdownHash().length());
+        assertEquals(64,finalized.getWordHash().length());assertEquals(64,finalized.getPdfHash().length());
         verify(mapper).supersedeCurrentReport("monthly", "2026-07", "ALL", 31L, "1001");
+        verify(mapper).finalizePinnedReport(eq(31L),eq(4),eq("1001"),eq(finalized.getJsonHash()),eq(finalized.getMarkdownHash()),eq(finalized.getWordHash()),eq(finalized.getPdfHash()));
     }
 
     @Test
@@ -206,6 +240,7 @@ class ReportGenerationOrchestratorTest {
         assertThrows(ServiceException.class,()->orchestrator.finalizeReport(31L,4,1001L));
 
         verify(mapper,never()).finalizeReport(any(),any(),any());
+        verify(mapper,never()).finalizePinnedReport(any(),any(),any(),any(),any(),any(),any());
     }
 
     @Test
@@ -215,6 +250,7 @@ class ReportGenerationOrchestratorTest {
         assertThrows(ServiceException.class,()->orchestrator.finalizeReport(31L,4,1001L));
 
         verify(mapper,never()).finalizeReport(any(),any(),any());
+        verify(mapper,never()).finalizePinnedReport(any(),any(),any(),any(),any(),any(),any());
     }
 
     @Test
@@ -323,7 +359,7 @@ class ReportGenerationOrchestratorTest {
         when(mapper.completeMarkdown(eq(31L),eq(51L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);
         when(store.publish(eq(31L),eq(51L),eq("run-token-1234567890"),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.json");
         when(store.publish(eq(31L),eq(51L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
-        DataSourceProvider provider=new DataSourceProvider(){public String getId(){return "GOAL_PROGRESS";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData load(ReportContext c,ReportSectionConfig s){return new ReportSectionData(s.getSectionCode(),s.getSectionType(),s.getTitle(),Collections.<java.util.Map<String,Object>>emptyList(),Collections.<String,Object>singletonMap("text","data"));}};
+        DataSourceProvider provider=new DataSourceProvider(){public String getId(){return "GOAL_PROGRESS";}public boolean supports(String id){return getId().equals(id);}public ReportFactClassification getFactClassification(){return ReportFactClassification.FORMAL_SNAPSHOT;}public ReportSectionData load(ReportContext c,ReportSectionConfig s){return new ReportSectionData(s.getSectionCode(),s.getSectionType(),s.getTitle(),Collections.<java.util.Map<String,Object>>emptyList(),Collections.<String,Object>singletonMap("text","data"));}};
         SectionRenderer renderer=new SectionRenderer(){public String getId(){return "TEXT";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData render(ReportContext c,ReportSectionConfig s,ReportSectionData d){return d;}};
         LabAccessContext manager=new LabAccessContext();manager.setUserId(1001L);manager.setMemberId(11L);manager.setRoleKey("lab_manager");manager.setBizLine("manage");when(access.context(1001L)).thenReturn(manager);when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.singleton("lab:report:sensitive"));
         ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);
@@ -344,7 +380,7 @@ class ReportGenerationOrchestratorTest {
         LabReportSection configured=section("EXEC_SUMMARY",false);configured.setSectionType("MANUAL");configured.setDataSource(null);configured.setManualFlag("1");configured.setRenderConfigJson("{\"required\":true}");when(mapper.selectSections(7L)).thenReturn(Collections.singletonList(configured));
         when(mapper.completeJson(eq(31L),eq(63L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);when(mapper.completeMarkdown(eq(31L),eq(63L),eq("run-token-1234567890"),any(),any(),eq("1001"))).thenReturn(1);
         when(store.publish(eq(31L),eq(63L),eq("run-token-1234567890"),eq("report-31"),eq("JSON"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.json");when(store.publish(eq(31L),eq(63L),eq("run-token-1234567890"),eq("report-31"),eq("MARKDOWN"),any())).thenReturn("archive/report-31/runs/run-token-1234567890/report-31.md");
-        DataSourceProvider provider=new DataSourceProvider(){public String getId(){return "MANUAL_SUMMARY";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData load(ReportContext c,ReportSectionConfig s){return new ReportSectionData(s.getSectionCode(),s.getSectionType(),s.getTitle(),Collections.<java.util.Map<String,Object>>emptyList(),Collections.<String,Object>emptyMap());}};
+        DataSourceProvider provider=new DataSourceProvider(){public String getId(){return "MANUAL_SUMMARY";}public boolean supports(String id){return getId().equals(id);}public ReportFactClassification getFactClassification(){return ReportFactClassification.MANUAL_REVISION;}public ReportSectionData load(ReportContext c,ReportSectionConfig s){return new ReportSectionData(s.getSectionCode(),s.getSectionType(),s.getTitle(),Collections.<java.util.Map<String,Object>>emptyList(),Collections.<String,Object>emptyMap());}};
         SectionRenderer renderer=new SectionRenderer(){public String getId(){return "MANUAL";}public boolean supports(String id){return getId().equals(id);}public ReportSectionData render(ReportContext c,ReportSectionConfig s,ReportSectionData d){return d;}};
         when(menus.selectMenuPermsByUserId(1001L)).thenReturn(Collections.singleton("lab:report:sensitive"));ReportJobDispatcher downstream=mock(ReportJobDispatcher.class);
         ReportGenerationWorker worker=new ReportGenerationWorker(mapper,lock(),new TrustedReportContextFactory(access,menus),new DataSourceProviderRegistry(Collections.singletonList(provider)),new SectionRendererRegistry(Collections.singletonList(renderer)),new ReportExporterRegistry(Arrays.<ReportExporter>asList(new JsonReportExporter(),new MarkdownReportExporter())),store,new ReportDataCodec(),downstream,Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"),ZoneOffset.UTC));
@@ -695,7 +731,9 @@ class ReportGenerationOrchestratorTest {
         value.setTemplateId(7L); value.setTemplateCode("monthly"); value.setTemplateRevision(6); value.setPeriod("2026-07");
         value.setBizLine("ALL"); value.setRevisionNo(4); value.setLifecycleStatus("DRAFT"); value.setCurrentFlag("0");
         value.setFinalFlag("0"); value.setSensitiveFlag("0"); value.setSourceType("AUTO"); value.setSourcePerfRevision(3);
+        value.setSourceCloseRevision(71L); value.setSourceFormalRevision(61L); value.setSourceExecutionCutoff(java.util.Date.from(Instant.parse("2026-08-03T10:00:00Z"))); value.setPreviewOnly("0");
         value.setSourceDataJson("{\"performancePins\":[]}");
         value.setContentJson("{}"); value.setContentMarkdown("# report"); value.setJsonStatus("SUCCESS");
         value.setJsonPath("archive/report-"+id+"/report.json");value.setMarkdownStatus("SUCCESS");value.setMarkdownPath("archive/report-"+id+"/report.md");value.setWordStatus("SUCCESS");value.setWordPath("archive/report-"+id+"/report.docx");value.setPdfStatus("SUCCESS");value.setPdfPath("archive/report-"+id+"/report.pdf");value.setVersion(version); return value; }
+    private LabPeriodCloseSnapshot closeSnapshot(String period){LabPeriodCloseSnapshot value=new LabPeriodCloseSnapshot();value.setId(71L);value.setPeriod(period);value.setRevisionNo(2);value.setFormalRevisionId(61L);value.setPerformanceRevision(3);value.setClosedTime(java.util.Date.from(Instant.parse("2026-08-03T10:00:00Z")));value.setCalculationVersion("commitment-v1");return value;}
 }

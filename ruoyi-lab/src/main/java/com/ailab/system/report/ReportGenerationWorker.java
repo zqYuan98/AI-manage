@@ -167,9 +167,12 @@ public class ReportGenerationWorker {
         LabReportTemplate template = mapper.selectTemplateById(report.getTemplateId());
         if (template == null || !report.getTemplateCode().equals(template.getTemplateCode()) || !report.getTemplateRevision().equals(template.getRevisionNo())) throw new ServiceException("Pinned report template revision is unavailable");
         Long actorId; try { actorId = Long.valueOf(actor); } catch (NumberFormatException ex) { throw new ServiceException("Report job actor is invalid"); }
+        if(report.getSourceCloseRevision()==null||report.getSourceFormalRevision()==null||report.getSourceExecutionCutoff()==null||"1".equals(report.getPreviewOnly()))throw new ServiceException("Pinned formal report facts are unavailable");
         Map<String,Object> attributes = new LinkedHashMap<String,Object>(); attributes.put("performanceRevision", report.getSourcePerfRevision());
+        attributes.put("closeRevision",report.getSourceCloseRevision());attributes.put("formalRevision",report.getSourceFormalRevision());
+        attributes.put("executionCutoff",report.getSourceExecutionCutoff().toInstant().toString());attributes.put("finalSnapshot",Boolean.TRUE);attributes.put("manualRevisionPinned",Boolean.TRUE);
         List<com.ailab.system.report.model.ReportPerformancePin> pins=codec.decodePerformancePins(report.getSourceDataJson());if(pins!=null)attributes.put("performancePins", pinValues(pins));
-        ReportContext base = contexts.create(actorId, report.getPeriod(), clock.instant(), attributes);
+        ReportContext base = contexts.create(actorId, report.getPeriod(), report.getSourceExecutionCutoff().toInstant(), attributes);
         ReportContext context = new ReportContext(report.getPeriod(), report.getBizLine(), base.getRequesterId(), base.getGeneratedAt(), base.getAccessScope(), attributes);
         Map<String,String> summaries = codec.decodeManualSummaryTexts(report.getSourceDataJson()); List<ReportSectionData> values = new ArrayList<ReportSectionData>();
         ReportDataBudget.Accumulator budget=ReportDataBudget.accumulator(context);
@@ -184,6 +187,7 @@ public class ReportGenerationWorker {
             ReportSectionData rendered=renderers.require(section.getSectionType()).render(sectionContext, section, source);budget.accept(rendered);values.add(rendered);
         }
         Map<String,Object> metadata = new LinkedHashMap<String,Object>(); metadata.put("reportId", report.getId()); metadata.put("sourcePerformanceRevision", report.getSourcePerfRevision()); metadata.put("sourceType", report.getSourceType());
+        metadata.put("sourceCloseRevision",report.getSourceCloseRevision());metadata.put("sourceFormalRevision",report.getSourceFormalRevision());metadata.put("executionCutoff",report.getSourceExecutionCutoff().toInstant().toString());
         metadata.put("header", codec.decodeObject(template.getHeaderJson(), "template header"));
         metadata.put("style", codec.decodeObject(template.getStyleJson(), "template style"));
         budget.complete(metadata);

@@ -17,6 +17,7 @@ import com.ailab.system.report.provider.GoalProgressProvider;
 import com.ailab.system.report.provider.IprSummaryProvider;
 import com.ailab.system.report.provider.ManualSummaryProvider;
 import com.ailab.system.report.provider.PerfSummaryProvider;
+import com.ailab.system.report.provider.ReportFactClassification;
 import com.ailab.system.report.provider.TaskBlockProvider;
 import com.ailab.system.report.provider.TaskCoordProvider;
 import com.ailab.system.report.provider.TaskDetailProvider;
@@ -59,6 +60,51 @@ class ReportProviderContractTest {
         }
         assertEquals(ReportConfigCatalog.providerIds(), ids);
         assertTrue(ReportConfigCatalog.queryFields().contains("taskPeriod"));
+    }
+
+    @Test
+    void everyProviderDeclaresItsExactFormalFactClassification() {
+        Map<String, ReportFactClassification> expected = new LinkedHashMap<String, ReportFactClassification>();
+        expected.put(ReportConfigCatalog.GOAL_PROGRESS, ReportFactClassification.FORMAL_SNAPSHOT);
+        expected.put(ReportConfigCatalog.TASK_DETAIL, ReportFactClassification.FORMAL_CLOSE_SNAPSHOT);
+        expected.put(ReportConfigCatalog.TASK_STAT, ReportFactClassification.FORMAL_CLOSE_SNAPSHOT);
+        expected.put(ReportConfigCatalog.TASK_UNDONE, ReportFactClassification.FORMAL_CLOSE_SNAPSHOT);
+        expected.put(ReportConfigCatalog.TASK_NEXT, ReportFactClassification.CONTEXT_SNAPSHOT);
+        expected.put(ReportConfigCatalog.TASK_COORD, ReportFactClassification.CONTEXT_SNAPSHOT);
+        expected.put(ReportConfigCatalog.TASK_BLOCK, ReportFactClassification.CONTEXT_SNAPSHOT);
+        expected.put(ReportConfigCatalog.ASSET_SUMMARY, ReportFactClassification.CONTEXT_SNAPSHOT);
+        expected.put(ReportConfigCatalog.IPR_SUMMARY, ReportFactClassification.CONTEXT_SNAPSHOT);
+        expected.put(ReportConfigCatalog.PERF_SUMMARY, ReportFactClassification.FORMAL_SNAPSHOT);
+        expected.put(ReportConfigCatalog.MANUAL_SUMMARY, ReportFactClassification.MANUAL_REVISION);
+        for (AbstractLabDataSourceProvider provider : providers()) {
+            assertEquals(expected.get(provider.getId()), provider.getFactClassification(), provider.getId());
+        }
+        assertEquals(expected.keySet(), ReportConfigCatalog.providerIds());
+    }
+
+    @Test
+    void finalProvidersFailClosedWithoutTheirPinnedFactBoundary() {
+        Map<String,Object> finalOnly=new LinkedHashMap<String,Object>();finalOnly.put("finalSnapshot",Boolean.TRUE);
+        ReportContext missing=new ReportContext("2026-08","platform",30005L,Instant.EPOCH,context("2026-08").getAccessScope(),finalOnly);
+        assertThrows(IllegalStateException.class,()->new TaskDetailProvider().load(missing,sectionFor("TASK_DETAIL")));
+        assertThrows(IllegalStateException.class,()->new GoalProgressProvider().load(missing,sectionFor("GOAL_PROGRESS")));
+        assertThrows(IllegalStateException.class,()->new TaskNextProvider().load(missing,sectionFor("TASK_NEXT")));
+        assertThrows(IllegalStateException.class,()->new ManualSummaryProvider().load(missing,manual()));
+    }
+
+    @Test
+    void formalTaskAndGoalProvidersReadOnlyThePinnedCloseSnapshot() throws Exception {
+        String xml=new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("src/main/resources/mapper/lab/LabReportDataMapper.xml")),java.nio.charset.StandardCharsets.UTF_8);
+        for(String id:Arrays.asList("selectTasks","selectUndoneTasks","selectTaskStats")){
+            String statement=xml.substring(xml.indexOf("<select id=\""+id+"\""),xml.indexOf("</select>",xml.indexOf("<select id=\""+id+"\"")));
+            assertTrue(statement.contains("closeRevision != null"),id);assertTrue(statement.contains("lab_period_close_fact"),id);
+        }
+        String goals=xml.substring(xml.indexOf("<select id=\"selectFormalGoalProgress\""),xml.indexOf("</select>",xml.indexOf("<select id=\"selectFormalGoalProgress\"")));
+        assertTrue(goals.contains("lab_formal_acceptance_fact"));
+        assertTrue(goals.contains("r.id&lt;=#{formalRevision}"));
+        assertTrue(goals.contains("row_number() over(partition by f.task_id"));
+        assertTrue(!goals.contains("lab_period_close_fact"),"formal goal progress must use the pinned acceptance revision");
+        assertTrue(!goals.contains("from lab_task "),"formal goal progress must not fall back to mutable task rows");
     }
 
     @Test

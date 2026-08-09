@@ -31,6 +31,8 @@ public class ReportManualImportPersistence {
         target.setLifecycleStatus("DRAFT"); target.setCurrentFlag("0"); target.setFinalFlag("0");
         target.setSensitiveFlag(source.getSensitiveFlag()); target.setSourceType("MANUAL_IMPORT");
         target.setSourcePerfRevision(source.getSourcePerfRevision()); target.setSourceDataJson(source.getSourceDataJson());
+        target.setSourceCloseRevision(source.getSourceCloseRevision());target.setSourceFormalRevision(source.getSourceFormalRevision());
+        target.setSourceExecutionCutoff(source.getSourceExecutionCutoff());target.setPreviewOnly("0");
         target.setContentJson(contentJson); target.setContentMarkdown(markdown);
         target.setJsonStatus("SUCCESS"); target.setMarkdownStatus("SUCCESS");
         target.setWordStatus("PENDING"); target.setPdfStatus("NOT_REQUESTED");

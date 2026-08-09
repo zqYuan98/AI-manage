@@ -15,4 +15,5 @@ public interface LabReportDataMapper {
     List<Map<String, Object>> selectAssets(ReportQueryCriteria criteria);
     List<Map<String, Object>> selectIprs(ReportQueryCriteria criteria);
     List<Map<String, Object>> selectCurrentPerfScores(ReportQueryCriteria criteria);
+    List<Map<String, Object>> selectFormalGoalProgress(ReportQueryCriteria criteria);
 }

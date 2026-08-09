@@ -1,6 +1,7 @@
 package com.ailab.system.domain;
 
 import com.ruoyi.common.core.domain.BaseEntity;
+import java.util.Date;
 
 /** Report archive. templateCode/templateRevision pin the exact source revision forever. */
 public class LabReportInstance extends BaseEntity {
@@ -8,6 +9,8 @@ public class LabReportInstance extends BaseEntity {
     private Long id; private String reportNo; private Long templateId; private String templateCode; private Integer templateRevision;
     private String period; private String bizLine; private Integer revisionNo; private String lifecycleStatus; private String currentFlag;
     private String finalFlag; private String sensitiveFlag; private String sourceType; private String sourceDataJson; private Integer sourcePerfRevision;
+    private Long sourceCloseRevision; private Long sourceFormalRevision; private Date sourceExecutionCutoff; private String previewOnly;
+    private String jsonHash; private String markdownHash; private String wordHash; private String pdfHash;
     private String contentJson; private String contentMarkdown; private String jsonStatus; private String jsonPath; private String jsonError;
     private String markdownStatus; private String markdownPath; private String markdownError; private String wordStatus; private String wordPath;
     private String wordError; private String pdfStatus; private String pdfPath; private String pdfError; private Integer version; private String delFlag;
@@ -26,6 +29,14 @@ public class LabReportInstance extends BaseEntity {
     public String getSourceType() { return sourceType; } public void setSourceType(String value) { sourceType = value; }
     public String getSourceDataJson() { return sourceDataJson; } public void setSourceDataJson(String value) { sourceDataJson = value; }
     public Integer getSourcePerfRevision() { return sourcePerfRevision; } public void setSourcePerfRevision(Integer value) { sourcePerfRevision = value; }
+    public Long getSourceCloseRevision() { return sourceCloseRevision; } public void setSourceCloseRevision(Long value) { sourceCloseRevision = value; }
+    public Long getSourceFormalRevision() { return sourceFormalRevision; } public void setSourceFormalRevision(Long value) { sourceFormalRevision = value; }
+    public Date getSourceExecutionCutoff() { return copy(sourceExecutionCutoff); } public void setSourceExecutionCutoff(Date value) { sourceExecutionCutoff = copy(value); }
+    public String getPreviewOnly() { return previewOnly; } public void setPreviewOnly(String value) { previewOnly = value; }
+    public String getJsonHash() { return jsonHash; } public void setJsonHash(String value) { jsonHash = value; }
+    public String getMarkdownHash() { return markdownHash; } public void setMarkdownHash(String value) { markdownHash = value; }
+    public String getWordHash() { return wordHash; } public void setWordHash(String value) { wordHash = value; }
+    public String getPdfHash() { return pdfHash; } public void setPdfHash(String value) { pdfHash = value; }
     public String getContentJson() { return contentJson; } public void setContentJson(String value) { contentJson = value; }
     public String getContentMarkdown() { return contentMarkdown; } public void setContentMarkdown(String value) { contentMarkdown = value; }
     public String getJsonStatus() { return jsonStatus; } public void setJsonStatus(String value) { jsonStatus = value; }
@@ -42,4 +53,5 @@ public class LabReportInstance extends BaseEntity {
     public String getPdfError() { return pdfError; } public void setPdfError(String value) { pdfError = value; }
     public Integer getVersion() { return version; } public void setVersion(Integer value) { version = value; }
     public String getDelFlag() { return delFlag; } public void setDelFlag(String value) { delFlag = value; }
+    private Date copy(Date value) { return value == null ? null : new Date(value.getTime()); }
 }

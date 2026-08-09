@@ -37,6 +37,7 @@ public final class GoalProgressProvider extends AbstractLabDataSourceProvider {
         return kind == ReportPeriod.Kind.MONTH || kind == ReportPeriod.Kind.QUARTER || kind == ReportPeriod.Kind.YEAR;
     }
     @Override protected ReportSectionData loadValidated(ReportQueryCriteria criteria, ReportSectionConfig section) {
+        if(criteria.getCloseRevision()!=null){List<Map<String,Object>> rows=copyRows(mapper().selectFormalGoalProgress(criteria));Map<String,Object> summary=summaryCount(rows);recomputeFilteredSummary(rows,summary);return section(criteria,section,rows,summary);}
         if (dashboardMapper == null) throw new IllegalStateException("Dashboard goal projection is unavailable");
         Date asOf = endOfPeriod(criteria.getReportPeriod());
         List<GoalHealthFact> facts = dashboardMapper.selectGoalHealthFacts(year(criteria.getReportPeriod()), asOf,

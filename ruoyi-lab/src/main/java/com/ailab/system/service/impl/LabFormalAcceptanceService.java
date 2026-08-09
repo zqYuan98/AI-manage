@@ -86,6 +86,9 @@ public class LabFormalAcceptanceService {
     private String snapshot(LabTask task, Long reviewerId, Date acceptedAt, String comment) {
         java.util.LinkedHashMap<String, Object> value = new java.util.LinkedHashMap<String, Object>();
         value.put("taskId", task.getId());
+        value.put("goalId", task.getGoalId());
+        value.put("milestoneId", task.getMilestoneId());
+        value.put("ownerId", task.getOwnerId());
         value.put("period", task.getPeriod());
         value.put("bizLine", task.getBizLine());
         value.put("title", task.getTitle());

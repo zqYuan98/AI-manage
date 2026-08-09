@@ -22,24 +22,30 @@ import org.springframework.beans.factory.annotation.Autowired;
  * before a provider reaches MyBatis. */
 public abstract class AbstractLabDataSourceProvider implements DataSourceProvider {
     @Autowired(required = false) private LabReportDataMapper mapper;
-    private final String id; private final List<ReportFieldSpec> fieldSpecs; private final List<String> schema; private final Map<String,ReportFieldSpec> specsByName; private final Set<String> fields;
+    private final String id; private final ReportFactClassification classification; private final List<ReportFieldSpec> fieldSpecs; private final List<String> schema; private final Map<String,ReportFieldSpec> specsByName; private final Set<String> fields;
     /**
      * The schema is both the sole query-field allow-list and the published row contract.  Keeping a
      * copied insertion-order list prevents a JDBC driver's sparse Map (it may omit NULL columns)
      * from changing the shape or field order of a report section.
      */
-    protected AbstractLabDataSourceProvider(String id, Set<String> fields) {
-        this.id = id;
+    protected AbstractLabDataSourceProvider(String id, ReportFactClassification classification, Set<String> fields) {
+        if (classification == null) throw new IllegalArgumentException("Report fact classification is required");
+        this.id = id; this.classification = classification;
         this.fieldSpecs = ReportFieldSpec.fromNames(fields);
         List<String> names=new ArrayList<String>(); Map<String,ReportFieldSpec> specs=new LinkedHashMap<String,ReportFieldSpec>();
         for(ReportFieldSpec spec:fieldSpecs){names.add(spec.getName());specs.put(spec.getName(),spec);}
         this.schema = Collections.unmodifiableList(names); this.specsByName=Collections.unmodifiableMap(specs);
         this.fields = Collections.unmodifiableSet(new java.util.LinkedHashSet<String>(this.schema));
     }
+    protected AbstractLabDataSourceProvider(String id, Set<String> fields) {
+        this(id, ReportFactClassification.requireForProvider(id), fields);
+    }
     @Override public final String getId() { return id; }
+    @Override public final ReportFactClassification getFactClassification() { return classification; }
     @Override public final boolean supports(String providerId) { return id.equals(providerId); }
     @Override public final ReportSectionData load(ReportContext context, ReportSectionConfig section) {
         if (context == null || section == null) throw new IllegalArgumentException("context and section are required");
+        requireFormalPins(context);
         String requiredPermission = section.getSensitivePermission();
         if (requiredPermission != null && !requiredPermission.trim().isEmpty()
                 && !context.getAccessScope().hasPermission(requiredPermission)) {
@@ -48,6 +54,18 @@ public abstract class AbstractLabDataSourceProvider implements DataSourceProvide
         if ("MANUAL".equals(section.getSectionType())) { if (!ReportConfigCatalog.MANUAL_SUMMARY.equals(id)) throw new IllegalArgumentException("Only manual provider may load a manual section"); }
         else if (!id.equals(section.getDataSource()) || !ReportConfigCatalog.compatibleProviders(section.getSectionType()).contains(id)) throw new IllegalArgumentException("Provider is not compatible with section");
         validateConfig(section); ReportQueryCriteria criteria=ReportQueryCriteria.from(context, section); validateCriteria(criteria); if (!supports(criteria.getReportPeriod().getKind())) throw new IllegalArgumentException("Provider does not support this period kind"); return loadValidated(criteria, section);
+    }
+    private void requireFormalPins(ReportContext context) {
+        if (!context.isFinalSnapshot()) return;
+        if (classification == ReportFactClassification.FORMAL_CLOSE_SNAPSHOT && context.getSourceCloseRevision() == null)
+            throw new IllegalStateException("Final report close revision is unavailable");
+        if (classification == ReportFactClassification.FORMAL_SNAPSHOT && context.getSourceFormalRevision() == null)
+            throw new IllegalStateException("Final report formal revision is unavailable");
+        if (classification == ReportFactClassification.CONTEXT_SNAPSHOT && context.getExecutionCutoff() == null)
+            throw new IllegalStateException("Final report execution cutoff is unavailable");
+        if (classification == ReportFactClassification.MANUAL_REVISION
+                && !Boolean.TRUE.equals(context.getAttributes().get("manualRevisionPinned")))
+            throw new IllegalStateException("Final report manual revision is unavailable");
     }
     protected abstract ReportSectionData loadValidated(ReportQueryCriteria criteria, ReportSectionConfig section);
     protected boolean supports(ReportPeriod.Kind kind) { return kind == ReportPeriod.Kind.MONTH; }

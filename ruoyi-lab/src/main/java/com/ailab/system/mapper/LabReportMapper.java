@@ -5,6 +5,7 @@ import com.ailab.system.domain.LabReportJob;
 import com.ailab.system.domain.LabReportSection;
 import com.ailab.system.domain.LabReportSummary;
 import com.ailab.system.domain.LabReportTemplate;
+import com.ailab.system.domain.LabPeriodCloseSnapshot;
 import com.ailab.system.report.model.ReportPerformancePin;
 import java.util.Date;
 import java.util.List;
@@ -36,6 +37,7 @@ public interface LabReportMapper {
 
     Integer selectMaxReportRevisionForUpdate(@Param("templateCode") String templateCode, @Param("period") String period,
             @Param("bizLine") String bizLine);
+    LabPeriodCloseSnapshot selectLatestCloseSnapshotForUpdate(@Param("period") String period);
     List<ReportPerformancePin> selectSourcePerformancePins(@Param("period") String period, @Param("bizLine") String bizLine);
     int insertReportInstance(LabReportInstance instance);
     LabReportInstance selectReportById(@Param("id") Long id);
@@ -48,6 +50,9 @@ public interface LabReportMapper {
     int supersedeCurrentReport(@Param("templateCode") String templateCode, @Param("period") String period,
             @Param("bizLine") String bizLine, @Param("excludeId") Long excludeId, @Param("actor") String actor);
     int finalizeReport(@Param("id") Long id, @Param("version") Integer version, @Param("actor") String actor);
+    int finalizePinnedReport(@Param("id") Long id, @Param("version") Integer version, @Param("actor") String actor,
+            @Param("jsonHash") String jsonHash, @Param("markdownHash") String markdownHash,
+            @Param("wordHash") String wordHash, @Param("pdfHash") String pdfHash);
 
     int markDataPending(@Param("id") Long id, @Param("jobId") Long jobId, @Param("runToken") String runToken, @Param("actor") String actor);
     int completeJson(@Param("id") Long id, @Param("jobId") Long jobId, @Param("runToken") String runToken,

@@ -3,6 +3,7 @@ package com.ailab.system.report;
 import com.ailab.system.domain.LabReportInstance;
 import com.ailab.system.domain.LabReportSection;
 import com.ailab.system.domain.LabReportTemplate;
+import com.ailab.system.domain.LabPeriodCloseSnapshot;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.ReportArtifact;
 import com.ailab.system.mapper.LabReportMapper;
@@ -61,6 +62,8 @@ public class ReportGenerationOrchestrator {
         LabReportTemplate template = requiredTemplate(mapper.selectTemplateForUpdate(templateId));
         if(!snapshot.getTemplateCode().equals(template.getTemplateCode()))throw new ServiceException("Template family changed concurrently");
         if (!template.isLatest() || !"ENABLED".equals(template.getStatus()) || !parsed.getKind().name().equals(template.getPeriodType())) throw new ServiceException("Only the latest enabled template can generate the requested report type");
+        LabPeriodCloseSnapshot close=mapper.selectLatestCloseSnapshotForUpdate(period);
+        if(close==null||close.getId()==null||close.getClosedTime()==null)throw new ServiceException("The report period must be closed before a final report candidate is generated");
         List<LabReportSection> sections = safe(mapper.selectSections(templateId));
         Map<String,String> manualSummaryTexts=manualSummaryTexts(sections,period,bizLine);requireManualCompleteness(sections,manualSummaryTexts);
         Integer max = mapper.selectMaxReportRevisionForUpdate(template.getTemplateCode(), period, bizLine);
@@ -69,7 +72,9 @@ public class ReportGenerationOrchestrator {
         int performanceRevision = 0; for (ReportPerformancePin pin : performancePins) performanceRevision=Math.max(performanceRevision,pin.getRevisionNo());
         LabReportInstance instance = base(template, period, bizLine, max == null ? 1 : max + 1, actorUserId);
         instance.setSensitiveFlag(sensitive(sections) ? "1" : "0"); instance.setSourceType("AUTO");
-        instance.setSourcePerfRevision(performanceRevision);
+        instance.setSourcePerfRevision(close.getPerformanceRevision()==null?performanceRevision:close.getPerformanceRevision());
+        instance.setSourceCloseRevision(close.getId());instance.setSourceFormalRevision(close.getFormalRevisionId()==null?0L:close.getFormalRevisionId());
+        instance.setSourceExecutionCutoff(close.getClosedTime());instance.setPreviewOnly("0");
         instance.setSourceDataJson(codec.encodeSourceSnapshot(performancePins,manualSummaryTexts));
         affected(mapper.insertReportInstance(instance), "Report generation version was not created");
         return instance;
@@ -95,13 +100,17 @@ public class ReportGenerationOrchestrator {
         LabReportInstance report = requiredReport(mapper.selectReportForUpdate(reportId));
         if (report.getVersion() == null || report.getVersion().intValue() != expectedVersion) throw new ServiceException("Report changed concurrently; reload before finalizing");
         if (!"DRAFT".equals(report.getLifecycleStatus())) throw new ServiceException("Finalized and superseded reports are immutable");
+        if ("1".equals(report.getPreviewOnly())) throw new ServiceException("A live preview can never be finalized; generate a closed-period candidate");
+        if(report.getSourceCloseRevision()==null||report.getSourceFormalRevision()==null||report.getSourceExecutionCutoff()==null)throw new ServiceException("Formal report source revisions are incomplete");
         requireManualCompleteness(safe(mapper.selectSections(report.getTemplateId())),codec.decodeManualSummaryTexts(report.getSourceDataJson()));
         for (String status : statuses(report)) if (!"SUCCESS".equals(status)) throw new ServiceException("JSON, Markdown, Word and PDF must all succeed before finalization");
         for (String path : paths(report)) if (!hasText(path)) throw new ServiceException("JSON, Markdown, Word and PDF must all have durable artifacts before finalization");
         if(mapper.countActiveReportJobs(reportId)!=0)throw new ServiceException("Report generation jobs must finish before finalization");
+        String jsonHash=hash(store.read(report.getJsonPath(),"JSON"));String markdownHash=hash(store.read(report.getMarkdownPath(),"MARKDOWN"));
+        String wordHash=hash(store.read(report.getWordPath(),"WORD"));String pdfHash=hash(store.read(report.getPdfPath(),"PDF"));
         mapper.supersedeCurrentReport(report.getTemplateCode(), report.getPeriod(), report.getBizLine(), reportId, actor(actorUserId));
-        affected(mapper.finalizeReport(reportId, expectedVersion, actor(actorUserId)), "Report finalization changed concurrently");
-        report.setLifecycleStatus("FINALIZED"); report.setCurrentFlag("1"); report.setFinalFlag("1"); report.setVersion(expectedVersion + 1); return report;
+        affected(mapper.finalizePinnedReport(reportId, expectedVersion, actor(actorUserId),jsonHash,markdownHash,wordHash,pdfHash), "Report finalization changed concurrently");
+        report.setLifecycleStatus("FINALIZED"); report.setCurrentFlag("1"); report.setFinalFlag("1");report.setJsonHash(jsonHash);report.setMarkdownHash(markdownHash);report.setWordHash(wordHash);report.setPdfHash(pdfHash); report.setVersion(expectedVersion + 1); return report;
     }
 
     public LabReportInstance authorizeView(Long reportId, Long actorUserId) {
@@ -133,6 +142,7 @@ public class ReportGenerationOrchestrator {
         LabReportInstance value = new LabReportInstance(); value.setReportNo(reportNo(period, bizLine)); value.setTemplateId(template.getId());
         value.setTemplateCode(template.getTemplateCode()); value.setTemplateRevision(template.getRevisionNo()); value.setPeriod(period); value.setBizLine(bizLine);
         value.setRevisionNo(revision); value.setLifecycleStatus("DRAFT"); value.setCurrentFlag("0"); value.setFinalFlag("0");
+        value.setPreviewOnly("0");
         value.setJsonStatus("PENDING"); value.setMarkdownStatus("PENDING"); value.setWordStatus("NOT_REQUESTED"); value.setPdfStatus("NOT_REQUESTED");
         value.setVersion(0); value.setDelFlag("0"); value.setCreateBy(actor(actorUserId)); return value;
     }
@@ -159,5 +169,6 @@ public class ReportGenerationOrchestrator {
     private void affected(int value, String message) { if (value != 1) throw new ServiceException(message); }
     private String actor(Long value) { return String.valueOf(value); }
     private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
+    private String hash(byte[] value){try{byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(value);StringBuilder result=new StringBuilder(64);for(byte item:digest)result.append(String.format(java.util.Locale.ROOT,"%02x",item&0xff));return result.toString();}catch(java.security.NoSuchAlgorithmException ex){throw new IllegalStateException("SHA-256 is unavailable",ex);}}
     private <T> List<T> safe(List<T> value) { return value == null ? Collections.<T>emptyList() : value; }
 }

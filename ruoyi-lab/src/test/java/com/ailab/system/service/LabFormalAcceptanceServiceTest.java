@@ -41,6 +41,9 @@ class LabFormalAcceptanceServiceTest {
         org.junit.jupiter.api.Assertions.assertTrue(fact.getFactJson().contains("\"id\":71"));
         org.junit.jupiter.api.Assertions.assertTrue(fact.getFactJson().contains("\"auditStatus\":\"APPROVED\""));
         org.junit.jupiter.api.Assertions.assertTrue(fact.getFactJson().contains("\"reviewerId\":8"));
+        org.junit.jupiter.api.Assertions.assertTrue(fact.getFactJson().contains("\"goalId\":21"));
+        org.junit.jupiter.api.Assertions.assertTrue(fact.getFactJson().contains("\"milestoneId\":22"));
+        org.junit.jupiter.api.Assertions.assertTrue(fact.getFactJson().contains("\"ownerId\":23"));
         verify(mapper).ensurePeriodLock("2026-08","8");
         verify(mapper).lockPeriod("2026-08");
     }
@@ -53,7 +56,7 @@ class LabFormalAcceptanceServiceTest {
         assertEquals("{\"result\":\"old\"}",service.readFacts(30L).get(0).getFactJson());
     }
 
-    private static LabTask acceptedTask(){LabTask task=new LabTask();task.setId(9L);task.setTaskLevel("month");task.setPeriod("2026-08");task.setBizLine("algorithm");
+    private static LabTask acceptedTask(){LabTask task=new LabTask();task.setId(9L);task.setGoalId(21L);task.setMilestoneId(22L);task.setOwnerId(23L);task.setTaskLevel("month");task.setPeriod("2026-08");task.setBizLine("algorithm");
         task.setTitle("完成算法验证");task.setDeliverable("验收记录");task.setResultStatus("ONTIME");task.setResultDesc("完成");
         task.setWorkflowStatus("CONFIRMED");task.setPerfWeight(new BigDecimal("60"));task.setGoalWeight(new BigDecimal("40"));task.setVersion(4);
         LabTaskEvidence evidence=new LabTaskEvidence();evidence.setId(71L);evidence.setTaskId(9L);evidence.setAuditStatus("APPROVED");

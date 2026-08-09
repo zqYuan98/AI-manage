@@ -28,6 +28,14 @@ public final class ReportContext {
     public String getPeriod() { return period; } public String getBizLine() { return bizLine; } public Long getRequesterId() { return requesterId; }
     public Instant getGeneratedAt() { return generatedAt; } public Map<String, Object> getAttributes() { return attributes; }
     public ReportAccessScope getAccessScope() { return accessScope; }
+    public boolean isFinalSnapshot() { return Boolean.TRUE.equals(attributes.get("finalSnapshot")); }
+    public Long getSourceCloseRevision() { return number("closeRevision"); }
+    public Long getSourceFormalRevision() { return number("formalRevision"); }
+    public Instant getExecutionCutoff() {
+        Object value=attributes.get("executionCutoff");
+        return value==null?null:Instant.parse(String.valueOf(value));
+    }
+    private Long number(String key){Object value=attributes.get(key);return value instanceof Number?Long.valueOf(((Number)value).longValue()):null;}
     @Override public boolean equals(Object other) {
         if (this == other) return true;
         if (!(other instanceof ReportContext)) return false;
