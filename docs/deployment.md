@@ -37,6 +37,7 @@ Linux 报告节点只支持 `x86_64` 或 `aarch64`，内核必须为 **5.3 或�
 | `MYSQL_USERNAME` / `MYSQL_PASSWORD` | `ailab_app` / secret | 最小权限账号，不使用 root |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `redis` / `6379` / secret | Redis 不得暴露公网 |
 | `TOKEN_SECRET` | 至少 32 字节随机值 | 必填、无默认值；轮换会使旧 token 失效 |
+| `LOG_PATH` | `D:/ailab/runtime/logs` 或 `/srv/ailab/runtime/logs` | 绝对路径、启动前创建并只授予服务账号写权限 |
 | `RUOYI_PROFILE` | `D:/ailab/upload` 或 `/srv/ailab/upload` | 绝对路径、服务账号专用 |
 | `LAB_REPORT_OUTPUT_DIRECTORY` | `/srv/ailab/reports` | 持久盘；备份范围 |
 | `LAB_REPORT_TEMP_DIRECTORY` | `/srv/ailab/reports/tmp` | 与归档同一信任边界，不对外服务 |
@@ -57,6 +58,7 @@ $env:MYSQL_PASSWORD = '<从安全存储注入>'
 $env:REDIS_HOST = '127.0.0.1'
 $env:TOKEN_SECRET = '<至少32字节随机值>'
 $env:DEMO_RUNTIME_ROOT = 'D:/ailab/runtime'
+$env:LOG_PATH = 'D:/ailab/runtime/logs'
 $env:LAB_LIBREOFFICE_EXECUTABLE = 'C:/Program Files/LibreOffice/program/soffice.exe'
 java -jar ruoyi-admin/target/ruoyi-admin.jar
 ```
@@ -72,6 +74,7 @@ export REDIS_HOST=redis
 export REDIS_PASSWORD="$(cat /run/secrets/redis_password)"
 export TOKEN_SECRET="$(cat /run/secrets/token_secret)"
 export DEMO_RUNTIME_ROOT=/srv/ailab/runtime
+export LOG_PATH=/srv/ailab/runtime/logs
 export LAB_LIBREOFFICE_EXECUTABLE=/usr/lib/libreoffice/program/oosplash
 exec /usr/lib/jvm/java-8/bin/java -jar /opt/ailab/ruoyi-admin.jar
 ```

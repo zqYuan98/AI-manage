@@ -194,7 +194,12 @@ public class LabLedgerServiceImpl implements LabLedgerService {
     }
 
     @Override
-    public List<LabIpr> listIprs(LabIpr query,Long actorId){accessService.context(actorId);return ledgerMapper.selectIprList(query==null?new LabIpr():query);}
+    public List<LabIpr> listIprs(LabIpr query,Long actorId){
+        Page<?> requestedPage=detachPage();
+        accessService.context(actorId);
+        restorePage(requestedPage);
+        return ledgerMapper.selectIprList(query==null?new LabIpr():query);
+    }
 
     @Override
     public LabIpr getIpr(Long id,Long actorId){accessService.context(actorId);return requireIpr(ledgerMapper.selectIprById(id));}

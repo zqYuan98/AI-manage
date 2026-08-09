@@ -83,23 +83,25 @@ mvn -pl ruoyi-admin -am -Dspring.profiles.active=lab-it -Dtest=LabMapperMySqlIT 
 
 - [ ] 轮换上游默认 admin 密码、`TOKEN_SECRET`、MySQL/Redis/Druid 凭据
 - [ ] 演示用户先设置独立密码再启用；未启用账号不能登录
-- [ ] 完成数据库与报告归档目录的一致性备份/恢复演练
-- [ ] Linux 内核/架构/seccomp 满足 pidfd；不允许 raw PID kill fallback
-- [ ] 报告输出、临时目录仅服务账号可读写；Web 服务器不直接暴露目录
-- [ ] 最终 `git status --short` 为空，独立 code/spec review 无 Critical/Important
+- [x] 完成数据库与报告归档目录的一致性备份/恢复演练
+- [x] Linux 内核/架构/seccomp 满足 pidfd；不允许 raw PID kill fallback
+- [x] 报告输出、临时目录仅服务账号可读写；Web 服务器不直接暴露目录
+- [x] 最终 `git status --short` 为空，独立 code/spec review 无 Critical/Important
 
 ## H. 本地验收记录（2026-08-09，Asia/Shanghai）
 
-Task17 基线提交：`223cd8dabc9e606e44789c78bf80483d96ef42eb`；本轮真实环境验收在 `e709d26` 基础上完成，修复与证据随本验收提交保存。
+Task17 基线提交：`223cd8dabc9e606e44789c78bf80483d96ef42eb`；本轮真实环境验收在 `93eb202420c5f857b162323133830ac93f00bdf4` 基础上完成，修复与证据随本验收提交保存。
 
 | 项目 | 命令/端口 | 结果 |
 | --- | --- | --- |
-| 自动化总门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-project.ps1` | PASS：8/8 阶段；clean backend 500 tests / 0F / 0E / 2 个条件式 LibreOffice skip；SQL 20/59/48/5/6；10 个 Mapper XML；clean admin package；前端定向 lint 与生产 build；四制品检查。门禁显式 `clean`，不会执行已删除测试遗留的 class |
+| 自动化总门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-project.ps1` | PASS：8/8 阶段；clean backend，随后从 34 个 Surefire suite 汇总 504 tests / 0F / 0E / 2 个条件式 LibreOffice skip；SQL 20/59/48/5/6；10 个 Mapper XML；clean admin package；前端定向 lint 与生产 build；四制品检查。门禁显式 `clean`，不会执行已删除测试遗留的 class |
 | MySQL | WSL Ubuntu，`127.0.0.1:3306` | PASS：MySQL 8.0.46；演示库按 `ry_20240629.sql` → `quartz.sql` → `ailab.sql` 初始化；另用隔离库/用户执行 Mapper IT |
 | Redis | WSL Ubuntu，`127.0.0.1:6379` | PASS：Redis 7.0.15，后端真实连接成功 |
 | 后端/前端 | `127.0.0.1:8080` / `127.0.0.1:1024` | PASS：真实 MySQL/Redis 上启动并完成浏览器验收；验收结束后已停止两个进程，端口释放 |
 | 真实 Mapper IT | `mvn -pl ruoyi-admin -am -Dspring.profiles.active=lab-it -Dtest=LabMapperMySqlIT -Dsurefire.failIfNoSpecifiedTests=false test` | PASS：隔离 MySQL 8 数据库，20 tests / 0 failures / 0 errors / 0 skipped，14.33 秒；覆盖真实 Mapper、迁移重放、`report_no`/家族唯一约束和生命周期路径 |
-| LibreOffice/PDF | WSL `/usr/bin/libreoffice`；Poppler 120dpi 渲染 | PASS：tracked PDF 为真实 LibreOffice 输出，单页 Letter，中文/表格/图表完整且无裁切；Windows PATH 无 LibreOffice，因此 Windows 单测有 2 个 capability skip |
-| 浏览器业务路径 | 真实 manager 登录；Dashboard/任务/成员/报告/模板 | PASS：Dashboard 指标与钻取、5 条任务、6 名成员、2026-07 已定稿报告及四制品、模板 6 个 typed section 均由真实 API 加载；桌面/窄屏无控制台错误；报告历史响应含 `private, no-store`、`no-cache`、`nosniff`；验收账号已恢复停用 |
+| LibreOffice/PDF | WSL `/usr/lib/libreoffice/program/oosplash`；Poppler 144dpi 渲染 | PASS：浏览器生成的验收报告 JSON/Markdown/DOCX/PDF 均成功；PDF 为真实 LibreOffice 输出，单页 Letter，中文、表格和图表均在内容区内且无裁切；交付副本位于本地忽略目录 `output/acceptance-report/`。Windows PATH 无 LibreOffice，因此 Windows 单测有 2 个 capability skip |
+| 浏览器业务路径 | 真实 manager/lead/member；Dashboard/任务/成员/技能/一对一/资产/IPR/绩效/模板/报告 | PASS：三角色范围隔离、KPI 钻取、任务证据审核、成员停用/恢复、技能批量保存、一对一更新、IPR 阶段推进、绩效关期/重开/红线撤销均由真实 API 与 MySQL 验证；模板另存为家族后发布 r2 并测试生成四制品；报告覆盖 worker 中断恢复、PDF 定向重试复用 Word、Markdown 导入新修订、定稿和敏感权限实时撤销。报告下载响应含 `private, no-store`、`no-cache`、`nosniff` |
+| 一致性备份/恢复 | `mysqldump --single-transaction --routines --triggers` + 报告目录 tar；恢复到独立库/目录 | PASS：备份前活动 job=0；恢复后 20 张 `lab_*` 表逐表精确计数无差异；16 个归档文件的 SHA-256 清单完全一致；恢复目录保持 mode 700 |
+| pidfd 与目录隔离 | WSL x86_64 / Linux 6.6.87；直接 syscall 与 HTTP 负例 | PASS：`pidfd_open` 返回稳定 fd，`pidfd_send_signal(...,0)` 返回 0；报告与临时目录 mode 700；后端归档直链返回业务 401，前端静态服务器返回 404 |
 
-浏览器截图保存在本地忽略目录 `output/playwright/`：`dashboard-desktop.png`、`dashboard-narrow.png`、`template-desktop.png`、`template-narrow.png`。验收过程中发现并修复了成员列表与报告历史在权限查询前被 PageHelper 提前消费的问题；修复均有回归测试。数据库/Redis 服务保留供后续复验，应用进程与临时浏览器会话均已关闭。
+浏览器截图保存在本地忽略目录 `output/playwright/`：`dashboard-desktop.png`、`dashboard-narrow.png`、`template-desktop.png`、`template-narrow.png`。验收过程中发现并修复了成员、技能和 IPR 列表在权限查询前被 PageHelper 提前消费的问题、报告错误响应被误存为 PDF 的问题、动态菜单组件路径与外部日志目录问题；每项修复均有回归测试。MySQL/Redis 服务保留供后续复验，应用进程与临时浏览器会话均已关闭。

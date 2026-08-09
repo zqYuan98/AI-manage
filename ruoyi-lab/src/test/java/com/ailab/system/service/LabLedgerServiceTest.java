@@ -2,6 +2,7 @@ package com.ailab.system.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -263,6 +264,36 @@ class LabLedgerServiceTest {
         service.listAssets(new LabAsset(), 3L);
         service.listIprs(new LabIpr(), 3L);
         verify(ledgerMapper, never()).selectOne2OneByMember(any());
+    }
+
+    @Test
+    void iprAccessLookupCannotConsumeTheRequestedPage() {
+        PageHelper.startPage(2, 20, "id desc");
+        try {
+            when(accessService.context(1L)).thenAnswer(invocation -> {
+                assertNull(PageHelper.getLocalPage(), "access lookup must execute outside the requested IPR page");
+                return context(1L, 10L, LabAccessServiceImpl.MANAGER, "manage");
+            });
+            when(ledgerMapper.selectIprList(any(LabIpr.class))).thenAnswer(invocation -> {
+                Page<?> requested = PageHelper.getLocalPage();
+                assertNotNull(requested, "the IPR mapper must receive the restored page request");
+                assertEquals(2, requested.getPageNum());
+                assertEquals(20, requested.getPageSize());
+                assertEquals("id desc", requested.getOrderBy());
+                PageHelper.clearPage();
+                Page<LabIpr> rows = new Page<LabIpr>(2, 20);
+                rows.setTotal(21L);
+                rows.add(ipr(1L, 20L, "DRAFT", 0));
+                return rows;
+            });
+
+            List<LabIpr> rows = service.listIprs(new LabIpr(), 1L);
+
+            assertTrue(rows instanceof Page);
+            assertEquals(21L, ((Page<?>) rows).getTotal());
+        } finally {
+            PageHelper.clearPage();
+        }
     }
 
     @Test

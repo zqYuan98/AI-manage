@@ -309,6 +309,36 @@ class LabMemberServiceTest {
     }
 
     @Test
+    void skillDirectoryAccessLookupCannotConsumeTheRequestedPage() {
+        PageHelper.startPage(1, 500, "id asc");
+        try {
+            when(accessService.context(1L)).thenAnswer(invocation -> {
+                assertNull(PageHelper.getLocalPage(), "access lookup must execute outside the requested skill page");
+                return context(1L, 10L, LabAccessServiceImpl.MANAGER, "manage");
+            });
+            when(memberMapper.selectSkillList(any(LabSkill.class))).thenAnswer(invocation -> {
+                Page<?> requested = PageHelper.getLocalPage();
+                assertNotNull(requested, "the skill mapper must receive the restored page request");
+                assertEquals(1, requested.getPageNum());
+                assertEquals(500, requested.getPageSize());
+                assertEquals("id asc", requested.getOrderBy());
+                PageHelper.clearPage();
+                Page<LabSkill> rows = new Page<LabSkill>(1, 500);
+                rows.setTotal(6L);
+                rows.add(skill(51L, "MLOps", "ACTIVE", 0));
+                return rows;
+            });
+
+            List<LabSkill> rows = service.listSkills(new LabSkill(), 1L);
+
+            assertTrue(rows instanceof Page);
+            assertEquals(6L, ((Page<?>) rows).getTotal());
+        } finally {
+            PageHelper.clearPage();
+        }
+    }
+
+    @Test
     void inactiveSkillNameConflictDirectsManagerToReactivateOrRename() {
         manager(1L);
         LabSkill requested = skill(null, "Dormant Skill", "ACTIVE", null);

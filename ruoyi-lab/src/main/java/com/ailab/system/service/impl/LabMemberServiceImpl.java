@@ -148,7 +148,9 @@ public class LabMemberServiceImpl implements LabMemberService {
 
     @Override
     public List<LabSkill> listSkills(LabSkill query, Long actorId) {
+        Page<?> requestedPage = detachPage();
         LabAccessContext actor = accessService.context(actorId);
+        restorePage(requestedPage);
         LabSkill safe = query == null ? new LabSkill() : query;
         if (!isManager(actor)) safe.setStatus("ACTIVE");
         return memberMapper.selectSkillList(safe);
