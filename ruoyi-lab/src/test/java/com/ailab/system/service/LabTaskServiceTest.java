@@ -925,6 +925,8 @@ class LabTaskServiceTest {
         @Override public int insertGoal(LabGoal goal) { return 1; }
         @Override public int updateGoal(LabGoal goal) { return 1; }
         @Override public int deleteGoal(Long id, Integer version, String actor) { return 1; }
+        @Override public int terminateGoal(Long id, Integer version, String expectedStatus, String reason,
+                Long terminatedBy, String actor) { return 1; }
     }
 
     static final class MemoryEvidenceMapper implements LabTaskEvidenceMapper {

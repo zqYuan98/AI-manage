@@ -27,7 +27,7 @@
           <div><span>版本</span><strong>v{{ goal.version }}</strong></div>
         </section>
 
-        <section class="goal-detail__readiness">
+        <section v-if="goal.status === 'DRAFT'" class="goal-detail__readiness">
           <div class="goal-detail__section-title">
             <div><span class="lab-eyebrow">激活条件</span><h3>{{ readinessLabel }}</h3></div>
             <strong :class="{ 'is-ready': readiness.ready }">{{ number(readiness.total) }} / 100</strong>
@@ -40,6 +40,12 @@
           />
           <p>{{ readiness.ready ? '权重合同已就绪，可进入激活。' : readiness.hint }}</p>
         </section>
+        <section v-else-if="goal.status === 'TERMINATED'" class="goal-detail__archive">
+          <span class="lab-eyebrow">归档记录</span>
+          <h3>此目标已终止，历史事实仍完整保留</h3>
+          <p>{{ goal.terminationReason || '未记录终止原因' }}</p>
+          <small>{{ formatTime(goal.terminatedTime) }}</small>
+        </section>
 
         <el-tabs v-model="activeTab" class="goal-detail__tabs">
           <el-tab-pane label="目标定义" name="definition">
@@ -49,6 +55,10 @@
               <dt>进度模式</dt><dd>{{ goal.progressMode || '任务聚合' }}</dd>
               <dt>进展说明</dt><dd>{{ goal.progressDesc || '暂无补充说明' }}</dd>
               <dt>负责人</dt><dd>{{ ownerName(goal.ownerId) }}</dd>
+              <template v-if="goal.status === 'TERMINATED'">
+                <dt>终止原因</dt><dd>{{ goal.terminationReason || '未记录' }}</dd>
+                <dt>终止时间</dt><dd>{{ formatTime(goal.terminatedTime) }}</dd>
+              </template>
             </dl>
           </el-tab-pane>
           <el-tab-pane :label="`关联任务 ${relatedTasks.length}`" name="tasks">
@@ -78,18 +88,22 @@
       </template>
 
       <footer class="goal-detail__footer">
-        <el-button v-if="canEdit" v-hasPermi="['lab:goal:edit']" :disabled="goal.status !== 'DRAFT'" @click="$emit('edit', goal)">编辑</el-button>
-        <el-button v-if="goal.goalLevel === 'YEAR' && canAddChild" v-hasPermi="['lab:goal:add']" :disabled="goal.status !== 'DRAFT'" @click="$emit('add-child', goal)">新增季度</el-button>
-        <el-button
-          v-if="canActivate"
-          v-hasPermi="['lab:goal:activate']"
-          type="primary"
-          :disabled="goal.status !== 'DRAFT' || !readiness.ready"
-          @click="$emit('activate', goal)"
-        >
-          激活
-        </el-button>
-        <el-button v-if="canDelete" v-hasPermi="['lab:goal:remove']" type="danger" plain :disabled="goal.status !== 'DRAFT'" @click="$emit('delete', goal)">删除</el-button>
+        <p>{{ lifecycleHint }}</p>
+        <div>
+          <el-button v-if="goal.status === 'DRAFT' && canEdit" v-hasPermi="['lab:goal:edit']" @click="$emit('edit', goal)">编辑</el-button>
+          <el-button v-if="goal.status === 'DRAFT' && goal.goalLevel === 'YEAR' && canAddChild" v-hasPermi="['lab:goal:add']" @click="$emit('add-child', goal)">新增季度</el-button>
+          <el-button
+            v-if="goal.status === 'DRAFT' && canActivate"
+            v-hasPermi="['lab:goal:activate']"
+            type="primary"
+            :disabled="!readiness.ready"
+            @click="$emit('activate', goal)"
+          >
+            激活
+          </el-button>
+          <el-button v-if="goal.status === 'DRAFT' && canDelete" v-hasPermi="['lab:goal:remove']" type="danger" plain @click="$emit('delete', goal)">删除草稿</el-button>
+          <el-button v-if="goal.status === 'ACTIVE' && canTerminate" v-hasPermi="['lab:goal:terminate']" type="danger" plain @click="$emit('terminate', goal)">终止并归档</el-button>
+        </div>
       </footer>
     </div>
   </el-drawer>
@@ -115,7 +129,8 @@ export default {
     canEdit: { type: Boolean, default: false },
     canAddChild: { type: Boolean, default: false },
     canActivate: { type: Boolean, default: false },
-    canDelete: { type: Boolean, default: false }
+    canDelete: { type: Boolean, default: false },
+    canTerminate: { type: Boolean, default: false }
   },
   data() {
     return { activeTab: 'definition', viewportWidth: window.innerWidth }
@@ -125,7 +140,7 @@ export default {
       return this.viewportWidth < 760 ? '100%' : '560px'
     },
     statusClass() {
-      return this.goal && this.goal.status === 'ACTIVE' ? 'is-active' : 'is-draft'
+      return this.goal ? `is-${String(this.goal.status || 'draft').toLowerCase()}` : 'is-draft'
     },
     progressValue() {
       if (this.progress && typeof this.progress === 'object') {
@@ -145,6 +160,16 @@ export default {
     },
     readinessLabel() {
       return this.goal && this.goal.goalLevel === 'YEAR' ? '季度里程碑权重' : '月度重点任务目标权重'
+    },
+    lifecycleHint() {
+      if (!this.goal) return ''
+      if (this.goal.status === 'DRAFT') return '草稿且没有下级目标或关联任务时才能删除。'
+      if (this.goal.status === 'ACTIVE') {
+        return this.canTerminate
+          ? '进行中目标不能删除；请先收口关联任务，再终止归档。'
+          : '进行中目标属于正式业务事实，只有部门负责人可以终止归档。'
+      }
+      return this.goal.status === 'COMPLETED' ? '已完成目标作为正式历史保留。' : '已终止目标已归档，任务与报告历史均保留。'
     },
     taskHierarchy() {
       const months = this.relatedTasks.filter(task => task.taskLevel === 'month').map(task => Object.assign({}, task, { children: [] }))
@@ -168,13 +193,17 @@ export default {
   methods: {
     taskStatusLabel(value) { return statusLabel('TASK_WORKFLOW', value) },
     resultStatusLabel(value) { return statusLabel('RESULT', value) },
-    goalStatusLabel(value) { return ({ ACTIVE: '进行中', COMPLETED: '已完成', TERMINATED: '已终止' })[value] || '未定义状态' },
+    goalStatusLabel(value) { return ({ DRAFT: '草稿', ACTIVE: '进行中', COMPLETED: '已完成', TERMINATED: '已终止' })[value] || '未定义状态' },
     updateWidth() {
       this.viewportWidth = window.innerWidth
     },
     number(value) {
       const number = Number(value)
       return Number.isFinite(number) ? Number(number.toFixed(2)) : 0
+    },
+    formatTime(value) {
+      if (!value) return '时间未记录'
+      return String(value).replace('T', ' ').replace(/\.\d{3}Z?$/, '').slice(0, 19)
     },
     ownerName(ownerId) {
       const owner = this.owners.find(item => String(item.id) === String(ownerId))
@@ -197,6 +226,8 @@ export default {
 .goal-detail__badges { display: flex; gap: 8px; }
 .goal-detail__badges span { padding: 4px 7px; border: 1px solid rgba(255,255,255,.22); color: #d9e0ef; font-size: 9px; }
 .goal-detail__badges .is-active { border-color: #72cec5; color: #bff5ee; }
+.goal-detail__badges .is-completed { border-color: #8ec5ff; color: #d7eaff; }
+.goal-detail__badges .is-terminated { border-color: #f6b6b0; color: #ffe0dd; }
 .goal-detail__metrics { display: grid; grid-template-columns: repeat(4, 1fr); margin: 18px 20px 0; border: 1px solid var(--lab-line); background: #fff; }
 .goal-detail__metrics div { padding: 15px 16px; border-right: 1px solid var(--lab-line); }
 .goal-detail__metrics div:last-child { border-right: 0; }
@@ -208,6 +239,10 @@ export default {
 .goal-detail__metrics strong.is-red { color: #b42318; }
 .goal-detail__metrics strong.is-unknown { color: #55627a; font-size: 14px; }
 .goal-detail__readiness, .goal-detail__tabs { margin: 14px 20px 0; padding: 18px; border: 1px solid var(--lab-line); background: #fff; }
+.goal-detail__archive { margin: 14px 20px 0; padding: 18px; border-left: 3px solid #b42318; background: #fff7f6; }
+.goal-detail__archive h3 { margin: 6px 0 8px; font-size: 14px; }
+.goal-detail__archive p { margin: 0; color: #475569; font-size: 11px; line-height: 19px; }
+.goal-detail__archive small { display: block; margin-top: 8px; color: #64748b; }
 .goal-detail__section-title { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 12px; }
 .goal-detail__section-title h3 { margin: 4px 0 0; font-size: 15px; }
 .goal-detail__section-title > strong { color: var(--lab-warning); font-size: 15px; }
@@ -229,7 +264,9 @@ export default {
 .goal-detail__tasks small { margin-top: 3px; color: #5f6b80; font-size: 9px; }
 .goal-detail__tasks b { color: var(--lab-teal); font-size: 11px; font-weight: 700; }
 .goal-detail__task-row > i { color: #7c879b; }
-.goal-detail__footer { position: absolute; right: 0; bottom: 0; left: 0; z-index: 2; display: flex; justify-content: flex-end; gap: 7px; padding: 14px 20px; border-top: 1px solid var(--lab-line); background: #fff; }
+.goal-detail__footer { position: absolute; right: 0; bottom: 0; left: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 20px; border-top: 1px solid var(--lab-line); background: #fff; }
+.goal-detail__footer p { max-width: 270px; margin: 0; color: #5f6b80; font-size: 9px; line-height: 15px; }
+.goal-detail__footer > div { display: flex; flex-shrink: 0; gap: 7px; }
 .goal-detail__loading { height: 360px; margin: 20px; }
 @media (max-width: 520px) {
   .goal-detail__metrics { grid-template-columns: repeat(2, 1fr); }

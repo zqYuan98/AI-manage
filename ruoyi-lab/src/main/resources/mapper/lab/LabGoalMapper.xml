@@ -17,6 +17,9 @@
         <result property="progressRate" column="progress_rate"/>
         <result property="progressDesc" column="progress_desc"/>
         <result property="status" column="status"/>
+        <result property="terminationReason" column="termination_reason"/>
+        <result property="terminatedBy" column="terminated_by"/>
+        <result property="terminatedTime" column="terminated_time"/>
         <result property="version" column="version"/>
         <result property="delFlag" column="del_flag"/>
         <result property="createBy" column="create_by"/>
@@ -26,7 +29,7 @@
         <result property="remark" column="remark"/>
     </resultMap>
 
-    <sql id="goalColumns">g.id,g.parent_id,g.goal_level,g.year,g.period,g.goal_no,g.title,g.target_value,g.accept_criteria,g.owner_id,g.weight,g.progress_mode,g.progress_rate,g.progress_desc,g.status,g.version,g.del_flag,g.create_by,g.create_time,g.update_by,g.update_time,g.remark</sql>
+    <sql id="goalColumns">g.id,g.parent_id,g.goal_level,g.year,g.period,g.goal_no,g.title,g.target_value,g.accept_criteria,g.owner_id,g.weight,g.progress_mode,g.progress_rate,g.progress_desc,g.status,g.termination_reason,g.terminated_by,g.terminated_time,g.version,g.del_flag,g.create_by,g.create_time,g.update_by,g.update_time,g.remark</sql>
 
     <select id="selectGoalList" parameterType="com.ailab.system.domain.LabGoal" resultMap="LabGoalResult">
         select <include refid="goalColumns"/>
@@ -85,5 +88,12 @@
     <update id="deleteGoal">
         update lab_goal set del_flag='2',update_by=#{updateBy},update_time=sysdate(),version=version+1
         where id=#{id} and version=#{version} and del_flag='0'
+    </update>
+
+    <update id="terminateGoal">
+        update lab_goal
+        set status='TERMINATED',termination_reason=#{reason},terminated_by=#{terminatedBy},terminated_time=sysdate(),
+            update_by=#{updateBy},update_time=sysdate(),version=version+1
+        where id=#{id} and version=#{version} and status=#{expectedStatus} and del_flag='0'
     </update>
 </mapper>

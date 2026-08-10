@@ -70,7 +70,9 @@ class DemoReportFixtureTest {
         if (Boolean.getBoolean("ailab.samples.generate")) writeCore(json, markdown, word);
 
         assertArrayEquals(json, Files.readAllBytes(SAMPLES.resolve(FILE + ".json")));
-        assertArrayEquals(markdown, Files.readAllBytes(SAMPLES.resolve(FILE + ".md")));
+        assertEquals(normalizeLineEndings(new String(markdown, StandardCharsets.UTF_8)),
+                normalizeLineEndings(new String(Files.readAllBytes(SAMPLES.resolve(FILE + ".md")), StandardCharsets.UTF_8)),
+                "Git line-ending conversion must not change the canonical Markdown fixture");
         assertDocxPackageEquals(word, Files.readAllBytes(SAMPLES.resolve(FILE + ".docx")));
         assertTrue(json.length > 100 && json[0] == '{');
         String text = new String(markdown, StandardCharsets.UTF_8);
@@ -86,6 +88,10 @@ class DemoReportFixtureTest {
             assertEquals(1, document.getTables().size());
             assertEquals(1, document.getAllPictures().size());
         }
+    }
+
+    private static String normalizeLineEndings(String value) {
+        return value.replace("\r\n", "\n").replace('\r', '\n');
     }
 
     @Test

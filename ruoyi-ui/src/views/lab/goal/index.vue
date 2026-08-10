@@ -10,9 +10,12 @@
         <el-select v-model="query.year" aria-label="目标年度" @change="loadTree">
           <el-option v-for="year in years" :key="year" :label="`${year} 年`" :value="year" />
         </el-select>
-        <el-select v-model="query.status" clearable placeholder="全部状态" aria-label="目标状态" @change="loadTree">
+        <el-select v-model="query.status" aria-label="目标状态" @change="loadTree">
+          <el-option label="当前进行中" value="ACTIVE" />
           <el-option label="草稿" value="DRAFT" />
-          <el-option label="已激活" value="ACTIVE" />
+          <el-option label="已完成" value="COMPLETED" />
+          <el-option label="已终止（归档）" value="TERMINATED" />
+          <el-option label="全部状态" value="ALL" />
         </el-select>
         <el-button icon="el-icon-refresh" :loading="treeLoading" @click="loadTree">刷新</el-button>
         <el-button v-if="isManager" v-hasPermi="['lab:goal:add']" type="primary" icon="el-icon-plus" @click="openCreate('YEAR')">新增年度目标</el-button>
@@ -63,11 +66,13 @@
       :can-add-child="canAddChild(selectedGoal)"
       :can-activate="canWriteGoal(selectedGoal)"
       :can-delete="canWriteGoal(selectedGoal)"
+      :can-terminate="isManager"
       @close="detailVisible = false"
       @edit="openEdit"
       @add-child="openCreate('QUARTER', $event)"
       @activate="handleActivate"
       @delete="handleDelete"
+      @terminate="handleTerminate"
     />
 
     <el-dialog :title="goalForm.id ? '编辑目标' : '新增目标'" :visible.sync="formVisible" width="650px" append-to-body>
@@ -123,7 +128,7 @@
 
 <script>
 import { getDashboardOverview } from '@/api/lab/dashboard'
-import { activateGoal, addGoal, deleteGoal, getGoal, getGoalProgress, getGoalTree, updateGoal } from '@/api/lab/goal'
+import { activateGoal, addGoal, deleteGoal, getGoal, getGoalProgress, getGoalTree, terminateGoal, updateGoal } from '@/api/lab/goal'
 import { listTaskOwners, listTasks } from '@/api/lab/task'
 import GoalTree from './components/GoalTree'
 import GoalDetailDrawer from './components/GoalDetailDrawer'
@@ -150,8 +155,10 @@ export default {
   components: { GoalTree, GoalDetailDrawer },
   data() {
     const currentYear = new Date().getFullYear()
+    const routeStatus = String(this.$route.query.status || '').toUpperCase()
+    const initialStatus = ['ACTIVE', 'DRAFT', 'COMPLETED', 'TERMINATED', 'ALL'].indexOf(routeStatus) >= 0 ? routeStatus : 'ACTIVE'
     return {
-      query: { year: Number(this.$route.query.year) || currentYear, status: this.$route.query.status || '' },
+      query: { year: Number(this.$route.query.year) || currentYear, status: initialStatus },
       years: [currentYear - 1, currentYear, currentYear + 1, currentYear + 2],
       goals: [],
       goalHealth: [],
@@ -241,7 +248,7 @@ export default {
     loadTree() {
       this.treeLoading = true
       const params = { year: this.query.year }
-      if (this.query.status) params.status = this.query.status
+      if (this.query.status !== 'ALL') params.status = this.query.status
       const goalIds = this.routeList(this.$route.query.goalIds)
       if (String(this.$route.query.goalIdsFilter).toLowerCase() === 'true') {
         params.goalIdsFilter = true
@@ -259,8 +266,7 @@ export default {
             selectionCleared = true
           }
           const query = Object.assign({}, this.$route.query, { year: String(this.query.year) })
-          if (this.query.status) query.status = this.query.status
-          else delete query.status
+          query.status = this.query.status
           if (selectionCleared) delete query.goalId
           const route = this.$router.replace({ query })
           if (route && route.catch) route.catch(() => {})
@@ -378,6 +384,27 @@ export default {
           this.detailVisible = false
           this.selectedGoal = null
           return this.afterMutation('目标已删除')
+        })
+        .catch(error => { if (this.isConflict(error)) this.loadTree() })
+    },
+    handleTerminate(goal) {
+      if (!this.isManager || goal.status !== 'ACTIVE') return
+      this.$prompt('进行中目标不会被删除。终止后，目标和里程碑进入归档，任务、绩效及报告历史全部保留。请填写终止原因：', '终止并归档目标', {
+        confirmButtonText: '确认终止',
+        cancelButtonText: '取消',
+        inputType: 'textarea',
+        inputPlaceholder: '例如：部门方向调整，现有任务已收口',
+        inputPattern: /^[\s\S]{5,500}$/,
+        inputErrorMessage: '请输入 5 至 500 个字符的终止原因',
+        type: 'warning'
+      }).then(({ value }) => terminateGoal(goal.id, goal.version, value.trim()))
+        .then(() => {
+          const staysVisible = this.query.status === 'ALL' || this.query.status === 'TERMINATED'
+          if (!staysVisible) {
+            this.detailVisible = false
+            this.selectedGoal = null
+          }
+          return this.afterMutation('目标已终止并归档', staysVisible ? goal.id : null)
         })
         .catch(error => { if (this.isConflict(error)) this.loadTree() })
     },

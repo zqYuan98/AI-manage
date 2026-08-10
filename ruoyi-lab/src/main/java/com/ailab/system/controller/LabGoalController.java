@@ -1,6 +1,7 @@
 package com.ailab.system.controller;
 
 import com.ailab.system.domain.LabGoal;
+import com.ailab.system.dto.GoalTerminationRequest;
 import com.ailab.system.service.LabGoalService;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
@@ -83,6 +84,15 @@ public class LabGoalController extends BaseController {
     @PutMapping("/{id}/activate")
     public AjaxResult activate(@PathVariable Long id, @RequestParam Integer version) {
         goalService.activateGoal(id, version, SecurityUtils.getUserId());
+        return success();
+    }
+
+    @PreAuthorize("@ss.hasPermi('lab:goal:terminate')")
+    @Log(title = "AI lab goal termination", businessType = BusinessType.UPDATE)
+    @PutMapping("/{id}/terminate")
+    public AjaxResult terminate(@PathVariable Long id, @RequestBody GoalTerminationRequest request) {
+        if (request == null) throw new com.ruoyi.common.exception.ServiceException("终止请求不能为空");
+        goalService.terminateGoal(id, request.getVersion(), request.getReason(), SecurityUtils.getUserId());
         return success();
     }
 

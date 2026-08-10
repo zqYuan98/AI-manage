@@ -28,6 +28,10 @@ export function activateGoal(id, version) {
   return request({ url: `/lab/goal/${id}/activate`, method: 'put', params: { version }})
 }
 
+export function terminateGoal(id, version, reason) {
+  return request({ url: `/lab/goal/${id}/terminate`, method: 'put', data: { version, reason }})
+}
+
 export function deleteGoal(id, version) {
   return request({ url: `/lab/goal/${id}`, method: 'delete', params: { version }})
 }

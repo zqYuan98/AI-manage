@@ -10,6 +10,7 @@ import com.ailab.system.constant.LabConstants;
 import com.ailab.system.controller.LabGoalController;
 import com.ailab.system.domain.LabGoal;
 import com.ailab.system.domain.LabTask;
+import com.ailab.system.dto.GoalTerminationRequest;
 import com.ailab.system.dto.LabAccessContext;
 import com.ailab.system.dto.ProgressComparison;
 import com.ailab.system.mapper.LabAccessMapper;
@@ -129,6 +130,112 @@ class LabGoalServiceTest {
                 .getAnnotation(PreAuthorize.class);
 
         assertEquals("@ss.hasPermi('lab:goal:activate')", permission.value());
+    }
+
+    @Test
+    void goalTerminationControllerUsesItsOwnManagerPermission() throws Exception {
+        java.lang.reflect.Method method = LabGoalController.class
+                .getMethod("terminate", Long.class, GoalTerminationRequest.class);
+        PreAuthorize permission = method.getAnnotation(PreAuthorize.class);
+
+        assertEquals("@ss.hasPermi('lab:goal:terminate')", permission.value());
+        assertEquals("/{id}/terminate",
+                method.getAnnotation(org.springframework.web.bind.annotation.PutMapping.class).value()[0]);
+    }
+
+    @Test
+    void activeQuarterCanBeTerminatedOnlyByManagerWithReasonAndSettledTasks() {
+        LabGoal quarter = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100");
+        quarter.setStatus("ACTIVE"); goals.put(quarter);
+        LabTask unresolved = month(11L, 2L, "2026-08", "100", "100",
+                LabConstants.WORKFLOW_ACTIVE, LabConstants.RESULT_DOING);
+        tasks.lockedGoalTaskOverrides.put(2L, java.util.Arrays.asList(unresolved));
+
+        ServiceException unresolvedError = assertThrows(ServiceException.class,
+                () -> service.terminateGoal(2L, 0, "方向调整归档", 99L));
+        assertTrue(unresolvedError.getMessage().contains("1"));
+        assertEquals("ACTIVE", goals.find(2L).getStatus());
+
+        unresolved.setWorkflowStatus(LabConstants.WORKFLOW_CONFIRMED);
+        ServiceException roleError = assertThrows(ServiceException.class,
+                () -> service.terminateGoal(2L, 0, "方向调整归档", 2L));
+        assertEquals("Manager role is required", roleError.getMessage());
+        assertThrows(ServiceException.class, () -> service.terminateGoal(2L, 0, " ", 99L));
+
+        service.terminateGoal(2L, 0, "方向调整归档", 99L);
+
+        LabGoal terminated = goals.find(2L);
+        assertEquals("TERMINATED", terminated.getStatus());
+        assertEquals("方向调整归档", terminated.getTerminationReason());
+        assertEquals(Long.valueOf(99L), terminated.getTerminatedBy());
+        assertTrue(terminated.getTerminatedTime() != null);
+        assertEquals(Integer.valueOf(1), terminated.getVersion());
+    }
+
+    @Test
+    void annualTerminationCascadesOnlyGoalStatusesAfterEveryLinkedTaskIsSettled() {
+        LabGoal annual = goal(1L, 0L, "YEAR", 2026, null, 99L, "100");
+        annual.setStatus("ACTIVE"); goals.put(annual);
+        LabGoal activeQuarter = goal(2L, 1L, "QUARTER", 2026, "2026Q1", 10L, "50");
+        activeQuarter.setStatus("ACTIVE"); goals.put(activeQuarter);
+        LabGoal completedQuarter = goal(3L, 1L, "QUARTER", 2026, "2026Q2", 11L, "50");
+        completedQuarter.setStatus("COMPLETED"); goals.put(completedQuarter);
+        LabGoal draftQuarter = goal(4L, 1L, "QUARTER", 2026, "2026Q3", 12L, "0");
+        draftQuarter.setStatus("DRAFT"); goals.put(draftQuarter);
+        LabTask month = month(11L, 2L, "2026-01", "100", "100",
+                LabConstants.WORKFLOW_CONFIRMED, LabConstants.RESULT_ONTIME);
+        LabTask week = month(12L, 2L, "2026-01", "0", "0",
+                LabConstants.WORKFLOW_ACTIVE, LabConstants.RESULT_ONTIME);
+        week.setTaskLevel(LabConstants.TASK_LEVEL_WEEK);
+        week.setExecutionStatus(LabConstants.EXECUTION_SELF_DONE);
+        tasks.lockedGoalTaskOverrides.put(1L, java.util.Arrays.asList(month, week));
+
+        service.terminateGoal(1L, 0, "年度方向终止归档", 99L);
+
+        assertEquals("TERMINATED", goals.find(1L).getStatus());
+        assertEquals("TERMINATED", goals.find(2L).getStatus());
+        assertEquals("COMPLETED", goals.find(3L).getStatus());
+        assertEquals("TERMINATED", goals.find(4L).getStatus());
+        assertEquals("随年度目标终止：年度方向终止归档", goals.find(2L).getTerminationReason());
+        assertEquals("0", month.getDelFlag());
+        assertEquals("0", week.getDelFlag());
+    }
+
+    @Test
+    void weeklyCommitmentMustReachAnExecutionTerminalStateBeforeGoalTermination() {
+        LabGoal quarter = goal(2L, 1L, "QUARTER", 2026, "2026Q3", 10L, "100");
+        quarter.setStatus("ACTIVE"); goals.put(quarter);
+        LabTask week = month(12L, 2L, "2026-W32", "0", "0",
+                LabConstants.WORKFLOW_ACTIVE, LabConstants.RESULT_DOING);
+        week.setTaskLevel(LabConstants.TASK_LEVEL_WEEK);
+        week.setExecutionStatus(LabConstants.EXECUTION_ACTIVE);
+        tasks.lockedGoalTaskOverrides.put(2L, java.util.Arrays.asList(week));
+
+        assertThrows(ServiceException.class,
+                () -> service.terminateGoal(2L, 0, "周承诺尚未收口", 99L));
+
+        for (String terminal : java.util.Arrays.asList(LabConstants.EXECUTION_SELF_DONE,
+                LabConstants.EXECUTION_SELF_UNDONE, LabConstants.EXECUTION_CANCELLED)) {
+            quarter.setStatus("ACTIVE");
+            quarter.setVersion(0);
+            week.setExecutionStatus(terminal);
+            service.terminateGoal(2L, 0, "周承诺已完成收口", 99L);
+            assertEquals("TERMINATED", quarter.getStatus());
+        }
+    }
+
+    @Test
+    void terminationRejectsNonActiveAndStaleGoals() {
+        LabGoal draft = goal(1L, 0L, "YEAR", 2026, null, 99L, "100");
+        goals.put(draft);
+        assertThrows(ServiceException.class,
+                () -> service.terminateGoal(1L, 0, "尚未激活不应归档", 99L));
+
+        draft.setStatus("ACTIVE");
+        draft.setVersion(3);
+        assertThrows(ServiceException.class,
+                () -> service.terminateGoal(1L, 2, "并发版本已经过期", 99L));
+        assertEquals("ACTIVE", goals.find(1L).getStatus());
     }
 
     @Test
@@ -532,6 +639,12 @@ class LabGoalServiceTest {
         @Override public int deleteGoal(Long id, Integer version, String updateBy) {
             LabGoal stored = data.get(id); if (stored == null || !stored.getVersion().equals(version)) return 0;
             stored.setDelFlag("2"); stored.setVersion(version + 1); return 1;
+        }
+        @Override public int terminateGoal(Long id, Integer version, String expectedStatus, String reason, Long terminatedBy, String updateBy) {
+            LabGoal stored = data.get(id);
+            if (stored == null || !stored.getVersion().equals(version) || !expectedStatus.equals(stored.getStatus())) return 0;
+            stored.setStatus("TERMINATED"); stored.setTerminationReason(reason); stored.setTerminatedBy(terminatedBy);
+            stored.setTerminatedTime(new java.util.Date()); stored.setVersion(version + 1); return 1;
         }
     }
 

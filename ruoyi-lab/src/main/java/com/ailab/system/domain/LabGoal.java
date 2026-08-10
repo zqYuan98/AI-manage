@@ -3,6 +3,7 @@ package com.ailab.system.domain;
 import com.ruoyi.common.core.domain.BaseEntity;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 /** Annual goal or direct quarterly milestone persisted in {@code lab_goal}. */
@@ -24,6 +25,9 @@ public class LabGoal extends BaseEntity {
     private BigDecimal progressRate;
     private String progressDesc;
     private String status;
+    private String terminationReason;
+    private Long terminatedBy;
+    private Date terminatedTime;
     private Integer version;
     private String delFlag;
     /** Query-only exact id set used by dashboard health drill-downs. */
@@ -62,6 +66,12 @@ public class LabGoal extends BaseEntity {
     public void setProgressDesc(String progressDesc) { this.progressDesc = progressDesc; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getTerminationReason() { return terminationReason; }
+    public void setTerminationReason(String terminationReason) { this.terminationReason = terminationReason; }
+    public Long getTerminatedBy() { return terminatedBy; }
+    public void setTerminatedBy(Long terminatedBy) { this.terminatedBy = terminatedBy; }
+    public Date getTerminatedTime() { return terminatedTime; }
+    public void setTerminatedTime(Date terminatedTime) { this.terminatedTime = terminatedTime; }
     public Integer getVersion() { return version; }
     public void setVersion(Integer version) { this.version = version; }
     public String getDelFlag() { return delFlag; }

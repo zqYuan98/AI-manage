@@ -176,6 +176,69 @@ public class LabGoalServiceImpl implements LabGoalService {
     }
 
     @Override
+    @Transactional
+    public void terminateGoal(Long id, Integer version, String reason, Long actorId) {
+        accessService.requireManager(actorId);
+        String canonicalReason = terminationReason(reason);
+        LabGoal snapshot = loadGoal(id);
+        lockGoalParents(snapshot.getParentId());
+        LabGoal goal = goalMapper.selectGoalForUpdate(id);
+        if (goal == null || !same(goal.getVersion(), version)) throw optimisticConflict();
+        if (!"ACTIVE".equals(goal.getStatus())) {
+            throw new ServiceException("只有进行中的目标可以终止归档");
+        }
+
+        List<LabGoal> children = "YEAR".equals(goal.getGoalLevel())
+                ? goalMapper.selectChildrenByParentIdForUpdate(id) : Collections.<LabGoal>emptyList();
+        List<LabTask> linkedTasks = taskMapper.selectTasksByGoalOrMilestoneForUpdate(id);
+        int unresolved = 0;
+        for (LabTask task : linkedTasks) if (!isSettledForGoalTermination(task)) unresolved++;
+        if (unresolved > 0) {
+            throw new ServiceException("仍有 " + unresolved + " 条关联任务未结束；请先完成、确认或取消这些任务，再终止目标");
+        }
+
+        for (LabGoal child : children) {
+            if ("COMPLETED".equals(child.getStatus()) || "TERMINATED".equals(child.getStatus())) continue;
+            if (!"DRAFT".equals(child.getStatus()) && !"ACTIVE".equals(child.getStatus())) {
+                throw new ServiceException("季度里程碑存在未知状态，无法安全终止年度目标");
+            }
+            terminateLockedGoal(child, childTerminationReason(canonicalReason), actorId);
+        }
+        terminateLockedGoal(goal, canonicalReason, actorId);
+    }
+
+    private void terminateLockedGoal(LabGoal goal, String reason, Long actorId) {
+        if (goalMapper.terminateGoal(goal.getId(), goal.getVersion(), goal.getStatus(), reason,
+                actorId, actor(actorId)) != 1) {
+            throw optimisticConflict();
+        }
+    }
+
+    private boolean isSettledForGoalTermination(LabTask task) {
+        if (task == null) return false;
+        if (LabConstants.TASK_LEVEL_WEEK.equals(task.getTaskLevel())) {
+            return LabConstants.EXECUTION_SELF_DONE.equals(task.getExecutionStatus())
+                    || LabConstants.EXECUTION_SELF_UNDONE.equals(task.getExecutionStatus())
+                    || LabConstants.EXECUTION_CANCELLED.equals(task.getExecutionStatus());
+        }
+        return LabConstants.TASK_LEVEL_MONTH.equals(task.getTaskLevel())
+                && LabConstants.WORKFLOW_CONFIRMED.equals(task.getWorkflowStatus());
+    }
+
+    private String terminationReason(String reason) {
+        String canonical = reason == null ? "" : reason.trim();
+        if (canonical.length() < 5 || canonical.length() > 500) {
+            throw new ServiceException("终止原因须填写 5 至 500 个字符");
+        }
+        return canonical;
+    }
+
+    private String childTerminationReason(String reason) {
+        String value = "随年度目标终止：" + reason;
+        return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    @Override
     public BigDecimal calculateMilestoneProgress(Long milestoneId, Long actorId) {
         accessService.requireGoalRead(actorId);
         LabGoal milestone = loadGoal(milestoneId);

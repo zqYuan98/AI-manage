@@ -14,6 +14,7 @@ public interface LabGoalService {
     int updateGoal(LabGoal goal, Long actorId);
     int deleteGoal(Long id, Integer version, Long actorId);
     void activateGoal(Long id, Integer version, Long actorId);
+    void terminateGoal(Long id, Integer version, String reason, Long actorId);
     BigDecimal calculateMilestoneProgress(Long milestoneId, Long actorId);
     BigDecimal calculateAnnualProgress(Long annualGoalId, Long actorId);
     ProgressComparison compareMilestoneProgress(Long milestoneId, Date asOf, Long actorId);

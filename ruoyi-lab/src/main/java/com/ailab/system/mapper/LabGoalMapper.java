@@ -13,4 +13,7 @@ public interface LabGoalMapper {
     int insertGoal(LabGoal goal);
     int updateGoal(LabGoal goal);
     int deleteGoal(@Param("id") Long id, @Param("version") Integer version, @Param("updateBy") String updateBy);
+    int terminateGoal(@Param("id") Long id, @Param("version") Integer version,
+            @Param("expectedStatus") String expectedStatus, @Param("reason") String reason,
+            @Param("terminatedBy") Long terminatedBy, @Param("updateBy") String updateBy);
 }
